@@ -9,6 +9,7 @@
 #define luaconf_h
 
 #include <limits.h>
+#include <float.h>
 #include <stddef.h>
 
 
@@ -293,6 +294,11 @@
 ** ===================================================================
 */
 
+/* __has_attribute is supported on gcc >=5, clang >=2.9, and icc >=17 */
+#if !defined(__has_attribute)
+  #define __has_attribute(x) 0
+#endif
+
 /*
 @@ LUA_API is a mark for all core API functions.
 @@ LUALIB_API is a mark for all auxiliary library functions.
@@ -410,6 +416,7 @@
 #if LUA_FLOAT_TYPE == LUA_FLOAT_FLOAT		/* { single float */
 
 #define LUA_NUMBER	float
+#define LUA_NUMBER_EPS FLT_EPSILON
 
 #define l_floatatt(n)		(FLT_##n)
 
@@ -427,6 +434,7 @@
 #elif LUA_FLOAT_TYPE == LUA_FLOAT_LONGDOUBLE	/* }{ long double */
 
 #define LUA_NUMBER	long double
+#define LUA_NUMBER_EPS LDBL_EPSILON
 
 #define l_floatatt(n)		(LDBL_##n)
 
@@ -443,6 +451,7 @@
 #elif LUA_FLOAT_TYPE == LUA_FLOAT_DOUBLE	/* }{ double */
 
 #define LUA_NUMBER	double
+#define LUA_NUMBER_EPS DBL_EPSILON
 
 #define l_floatatt(n)		(DBL_##n)
 
@@ -568,6 +577,8 @@
 */
 #if !defined(LUA_USE_C89)
 #define l_sprintf(s,sz,f,i)	snprintf(s,sz,f,i)
+#elif defined(LUA_USE_WINDOWS) && defined(__STDC_WANT_SECURE_LIB__)
+#define l_sprintf(s,sz,f,i)	sprintf_s(s,sz,f,i)
 #else
 #define l_sprintf(s,sz,f,i)	((void)(sz), sprintf(s,f,i))
 #endif
@@ -731,10 +742,10 @@
 */
 #if defined(LLONG_MAX)
 /* use ISO C99 stuff */
-#define LUAI_MAXALIGN long double u; void *s; long long l
+#define LUAI_MAXALIGN long double u; lua_Float4 v; void *s; long long l
 #else
 /* use only C89 stuff */
-#define LUAI_MAXALIGN  lua_Number n; double u; void *s; lua_Integer i; long l
+#define LUAI_MAXALIGN  lua_Number n; lua_Float4 v; double u; void *s; lua_Integer i; long l
 #endif
 
 /* }================================================================== */
@@ -750,7 +761,164 @@
 ** without modifying the main part of the file.
 */
 
+#if defined(_MSC_VER)
+  #define LUA_INLINE __forceinline
+#elif __has_attribute(__always_inline__)
+  #define LUA_INLINE inline __attribute__((__always_inline__))
+#else
+  #define LUA_INLINE inline
+#endif
 
+#if defined(__cplusplus) && __cplusplus >= 201703
+  #define LUA_FALLTHROUGH [[fallthrough]]
+#elif __has_attribute(__fallthrough__)
+  #define LUA_FALLTHROUGH __attribute__((__fallthrough__))
+#else
+  #define LUA_FALLTHROUGH /* FALLTHROUGH */
+#endif
+
+#if defined(_MSC_VER)
+  #define LUA_ALIGNED_(x) __declspec(align(x))
+#elif __has_attribute(aligned)
+  #define LUA_ALIGNED_(x) __attribute__((aligned(x)))
+#else
+  #define LUA_ALIGNED_(x)
+#endif
+
+#if defined(_MSC_VER) && _MSC_VER >= 1400
+  #define LUA_RESTRICT __restrict
+#elif defined(__GNUC__) && ((__GNUC__ > 3) || (__GNUC__ == 3 && __GNUC_MINOR__ >= 1))
+  #define LUA_RESTRICT __restrict
+#else
+  #define LUA_RESTRICT
+#endif
+
+/* Compiler-specific multi-line macro definitions */
+#if defined(_MSC_VER)
+  #define LUA_MLM_BEGIN do {
+  #define LUA_MLM_END                 \
+    __pragma(warning(push))           \
+    __pragma(warning(disable : 4127)) \
+    }                                 \
+    while (0)                         \
+    __pragma(warning(pop))
+#else
+  #define LUA_MLM_BEGIN do {
+  #define LUA_MLM_END } while (0)
+#endif
+
+/*
+** {==================================================================
+** @DEPRECATED gritLua vector API
+**
+** Libraries linked against this runtime that use any GLM/vector feature will
+** require knowledge of changes to:
+**
+**    1. LUA_GLM_NUMBER_TYPE
+**    2. GLM_FORCE_SIZE_T_LENGTH
+**    3. GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
+**
+** In addition GLM_FORCE_QUAT_DATA_XYZW (formerly GLM_FORCE_QUAT_DATA_WXYZ)
+** needs to be considered for quaternions when operating within the C boundary.
+** ===================================================================
+*/
+
+#define LUA_GRIT_API
+
+/* @NOTE: GRIT_LONG_FLOAT has been deprecated and replaced by LUA_GLM_NUMBER_TYPE */
+#if defined(GRIT_LONG_FLOAT) && !defined(LUA_GLM_NUMBER_TYPE)
+  #define LUA_GLM_NUMBER_TYPE
+#endif
+
+#if defined(LUA_GLM_NUMBER_TYPE) && LUA_FLOAT_TYPE != LUA_FLOAT_LONGDOUBLE
+  #define LUA_VEC_TYPE LUA_FLOAT_TYPE
+  #define LUA_VEC_NUMBER LUA_NUMBER
+#else
+  #define LUA_VEC_TYPE LUA_FLOAT_FLOAT
+  #define LUA_VEC_NUMBER float
+#endif
+
+/*
+** @EXPERIMENT Alignment macro for improved compiler intrinsics. This macro is
+** temporary and will likely change in future commits.
+**
+** @TODO: Technically should follow GLM and only allow alignment when:
+**    1. GLM_CONFIG_XYZW_ONLY is not enabled; and
+**    2. GLM_CONFIG_ANONYMOUS_STRUCT == GLM_ENABLE
+*/
+#if !defined(RC_INVOKED) /* ignore MSVC resource compiler issues */
+#if defined(GLM_FORCE_DEFAULT_ALIGNED_GENTYPES)
+  #if LUA_VEC_TYPE == LUA_FLOAT_DOUBLE
+    #error "__m256 advanced vector extnesions are not supported!"
+  #else
+    #define LUA_GLM_ALIGN LUA_ALIGNED_(16)
+  #endif
+#endif
+#endif
+
+/* Helper macro for defining aligned types; see GLM_ALIGNED_TYPEDEF */
+#if defined(LUA_GLM_ALIGN)
+  #define LUA_GLM_ALIGNED_TYPE(type, name) type LUA_GLM_ALIGN name
+  #define LUA_GLM_ALIGNED_TYPEDEF(type, name) typedef LUA_GLM_ALIGN type name
+#else
+  #define LUA_GLM_ALIGNED_TYPE(type, name) type name
+  #define LUA_GLM_ALIGNED_TYPEDEF(type, name) typedef type name
+#endif
+
+/*
+** GLM_FORCE_SIZE_T_LENGTH forces length_t to be size_t. Otherwise it is
+** defined as an int (as GLSL declares it). This type requires synchronization
+** across the C and CPP boundaries.
+*/
+#if defined(GLM_FORCE_SIZE_T_LENGTH)
+  typedef size_t grit_length_t;
+#else
+  typedef int grit_length_t;
+#endif
+
+/* vector/matrix floating point type */
+typedef LUA_VEC_NUMBER lua_VecF;
+typedef struct lua_CFloat4 { lua_VecF x, y, z, w; } lua_CFloat4;
+typedef struct lua_CFloat3 { lua_VecF x, y, z; } lua_CFloat3;
+typedef struct lua_CFloat2 { lua_VecF x, y; } lua_CFloat2;
+
+/*
+** gritLua vector and quat extension. This structure is intended to be a
+** byte-wise equivalent/alias to glmVector in lglm.hpp and operates within the C
+** boundaries of the Lua runtime.
+*/
+LUA_GLM_ALIGNED_TYPEDEF(struct, lua_CFloat4) lua_Float4;
+
+/*
+** gritLua column-oriented matrix extension. This structure is intended to be a
+** byte-wise equivalent to glmMatrix in lglm.hpp and operates within the C
+** boundaries of the Lua runtime.
+**
+** @NOTE: When GLM_FORCE_DEFAULT_ALIGNED_GENTYPES is enabled (attempt to) mirror
+** the alignment specified in glm/detail/qualifier.hpp. Note GLM uses unions to
+** implicitly load and store values instead of explicit _mm_loadu_ps and
+** _mm_storeu_ps calls.
+**
+** The current lua_Mat4 definition minimizes the number of changes required to
+** make alignment consistent across different compilers (and minimizes the
+** number of changes when this inevitably gets reverted). Avoiding issues of
+** aligned loads, unaligned loads, auto-aligning, etc.
+*
+** These safeguards will not be required if LuaGLM ever becomes a strictly C++
+** compiled runtime. As the "C" parts of this runtime can use the structs
+** defined in lglm.hpp
+*/
+LUA_GLM_ALIGNED_TYPEDEF(struct, lua_Mat4) {
+  union Columns {
+    LUA_GLM_ALIGNED_TYPE(lua_CFloat2, m2[4]);  /* Aligned 2-by-X matrix */
+    LUA_GLM_ALIGNED_TYPE(lua_CFloat3, m3[4]);  /* Aligned 3-by-X matrix */
+    LUA_GLM_ALIGNED_TYPE(lua_CFloat4, m4[4]);  /* Aligned 4-by-X matrix */
+  } m;
+  grit_length_t size;  /* Number of columns */
+  grit_length_t secondary;  /* Size of each column vector */
+} lua_Mat4;
+
+/* }================================================================== */
 
 #endif
 

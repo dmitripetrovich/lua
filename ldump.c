@@ -23,6 +23,17 @@
 #include "lundump.h"
 
 
+#if defined(LUA_NO_DUMP)
+int luaU_dump(lua_State *L, const Proto *f, lua_Writer w, void *data, int strip) {
+  UNUSED(L);
+  UNUSED(f);
+  UNUSED(w);
+  UNUSED(data);
+  UNUSED(strip);
+  return 0;
+}
+#else
+
 typedef struct {
   lua_State *L;
   lua_Writer writer;
@@ -131,6 +142,35 @@ static void dumpInteger (DumpState *D, lua_Integer x) {
 }
 
 
+static void dumpVectorType(DumpState *D, const glmVector &v, int t) {
+  switch (t) {
+    case LUA_VVECTOR2:
+      dumpVar(D, v.v2.x);
+      dumpVar(D, v.v2.y);
+      break;
+    case LUA_VVECTOR3:
+      dumpVar(D, v.v3.x);
+      dumpVar(D, v.v3.y);
+      dumpVar(D, v.v3.z);
+      break;
+    case LUA_VVECTOR4:
+      dumpVar(D, v.v4.x);
+      dumpVar(D, v.v4.y);
+      dumpVar(D, v.v4.z);
+      dumpVar(D, v.v4.w);
+      break;
+    case LUA_VQUAT:
+      dumpVar(D, v.q.x);
+      dumpVar(D, v.q.y);
+      dumpVar(D, v.q.z);
+      dumpVar(D, v.q.w);
+      break;
+    default:
+      break;
+  }
+}
+
+
 /*
 ** Dump a String. First dump its "size":
 ** size==0 is followed by an index and means "reuse saved string with
@@ -185,7 +225,11 @@ static void dumpConstants (DumpState *D, const Proto *f) {
   for (i = 0; i < n; i++) {
     const TValue *o = &f->k[i];
     int tt = ttypetag(o);
+#if defined(GRIT_POWER_BLOB)  /* Blobs are dumped as long strings */
+    dumpByte(D, tt == LUA_VBLOBSTR ? LUA_VLNGSTR : tt);
+#else
     dumpByte(D, tt);
+#endif
     switch (tt) {
       case LUA_VNUMFLT:
         dumpNumber(D, fltvalue(o));
@@ -193,7 +237,16 @@ static void dumpConstants (DumpState *D, const Proto *f) {
       case LUA_VNUMINT:
         dumpInteger(D, ivalue(o));
         break;
+      case LUA_VVECTOR2:
+      case LUA_VVECTOR3:
+      case LUA_VVECTOR4:
+      case LUA_VQUAT:
+        dumpVectorType(D, vvalue(o), tt);
+        break;
       case LUA_VSHRSTR:
+#if defined(GRIT_POWER_BLOB)
+      case LUA_VBLOBSTR:
+#endif
       case LUA_VLNGSTR:
         dumpString(D, tsvalue(o));
         break;
@@ -305,3 +358,4 @@ int luaU_dump (lua_State *L, const Proto *f, lua_Writer w, void *data,
   return D.status;
 }
 
+#endif

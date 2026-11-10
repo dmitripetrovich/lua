@@ -163,6 +163,135 @@ static int str_rep (lua_State *L) {
 }
 
 
+#if defined(GRIT_POWER_WOW)
+static int str_trim (lua_State *L) {
+  size_t len = 0;
+  const char *str = luaL_checklstring(L, 1, &len);
+  const char *delimiter = luaL_optstring(L, 2, "\t\n\v\f\r "); /* isspace */
+
+  const char *back = str + len - 1;
+  while (str <= back && strchr(delimiter, *str))
+    str++;
+  while (back > str && strchr(delimiter, *back))
+    back--;
+
+  lua_pushlstring(L, str, back - str + 1);
+  return 1;
+}
+
+static int str_split (lua_State *L) {
+  const char *delimiter = luaL_checkstring(L, 1);
+  const char *str = luaL_checkstring(L, 2);
+  int limit = (int)luaL_optinteger(L, 3, 0);
+  int count = 0;
+
+  lua_settop(L, 0); /* clear new slots */
+  if (limit == 0 || limit > 1) {
+    const char *end;
+    for (end = str; *end; ++end) {
+      const char *s;
+      int split = 0;
+      for (s = delimiter; *s; ++s) {
+        if (*s == *end) {
+          split = 1;
+          break;
+        }
+      }
+
+      if (split) {
+        luaL_checkstack(L, count + 1, "too many results");
+        lua_pushlstring(L, str, (end - str));
+
+        ++count;
+        str = end + 1;
+        if (count == (limit - 1)) {
+          break;
+        }
+      }
+    }
+  }
+
+  /* Trailing characters */
+  luaL_checkstack(L, count + 1, "too many results");
+  lua_pushstring(L, str);
+  return count + 1;
+}
+
+static int str_join (lua_State *L) {
+  size_t delimiter_length = 0;
+  const char *delimiter = luaL_checklstring(L, 1, &delimiter_length);
+  const int top = lua_gettop(L);
+
+  if (top == 1) /* No arguments to join */
+    lua_pushstring(L, "");
+  else if (top == 2) /* A single argument, tostring it */
+    lua_tostring(L, 2);
+  else if (delimiter_length == 0) /* invalid delimiter, just concatenate */
+    lua_concat(L, top - 1);
+  else {
+    int i;
+
+    luaL_Buffer b;
+    luaL_buffinit(L, &b);
+    for (i = 2; i <= top; ++i) {
+      if (!lua_isstring(L, i)) {
+        return luaL_error(L, "invalid value (%s) at argument %d for 'join'", luaL_typename(L, i), i);
+      }
+
+      lua_pushvalue(L, i);
+      luaL_addvalue(&b);
+      if (i < top)
+        luaL_addlstring(&b, delimiter, delimiter_length);
+    }
+    luaL_pushresult(&b);
+  }
+  return 1;
+}
+
+static int str_concat (lua_State *L) {
+  lua_concat(L, lua_gettop(L));
+  return 1;
+}
+
+static int str_tostringall (lua_State *L) {
+  int i;
+  const int top = lua_gettop(L);
+  for (i = 1; i <= top; i++) {
+    luaL_tolstring(L, i, NULL);
+    lua_replace(L, i);
+  }
+  return top;
+}
+#endif
+
+
+#if defined(GRIT_POWER_BLOB)
+static int str_blob (lua_State *L) {
+  const int type = lua_type(L, 1);
+  if (type == LUA_TNUMBER) {  /* Create a string blob */
+    const lua_Integer n = luaL_checkinteger(L, 1);
+    if (n <= 0)
+      return luaL_error(L, "blob length is negative");
+    else if ((size_t)n > MAX_SIZE)
+      return luaL_error(L, "resulting string too large");
+    lua_pushblob(L, (size_t)n);
+    return 1;
+  }
+  else if (type == LUA_TSTRING) {  /* Convert the string into a externalizable blob */
+    lua_settop(L, 1);
+    lua_tostringblob(L, 1, NULL);
+    return 1;
+  }
+  return luaL_typeerror(L, 1, "number or string");
+}
+
+static int str_isblob (lua_State *L) {
+  lua_pushboolean(L, lua_isstringblob(L, 1));
+  return 1;
+}
+#endif
+
+
 static int str_byte (lua_State *L) {
   size_t l;
   const char *s = luaL_checklstring(L, 1, &l);
@@ -1341,6 +1470,10 @@ static int str_format (lua_State *L) {
           break;
         }
         case 'p': {
+#if defined(LUA_SANDBOX)
+          lua_Integer id = lua_opaqueid(L, arg);
+          nb = l_sprintf(buff, maxitem, LUA_OPAQUEID_FMT, (LUAI_UACINT)id);
+#else
           const void *p = lua_topointer(L, arg);
           checkformat(L, form, L_FMTFLAGSC, 0);
           if (p == NULL) {  /* avoid calling 'printf' with argument NULL */
@@ -1348,6 +1481,7 @@ static int str_format (lua_State *L) {
             form[strlen(form) - 1] = 's';  /* format it as a string */
           }
           nb = l_sprintf(buff, maxitem, form, p);
+#endif
           break;
         }
         case 'q': {
@@ -1614,15 +1748,11 @@ static void copywithendian (char *dest, const char *src,
 }
 
 
-static int str_pack (lua_State *L) {
-  luaL_Buffer b;
+static void shared_pack (lua_State *L, luaL_Buffer *b, const char *fmt,
+                                        int arg) {
   Header h;
-  const char *fmt = luaL_checkstring(L, 1);  /* format string */
-  int arg = 1;  /* current argument to pack */
   size_t totalsize = 0;  /* accumulate total size of result */
   initheader(L, &h);
-  lua_pushnil(L);  /* mark to separate arguments from string buffer */
-  luaL_buffinit(L, &b);
   while (*fmt != '\0') {
     unsigned ntoalign;
     size_t size;
@@ -1631,7 +1761,7 @@ static int str_pack (lua_State *L) {
                      "result too long");
     totalsize += ntoalign + size;
     while (ntoalign-- > 0)
-     luaL_addchar(&b, LUAL_PACKPADBYTE);  /* fill alignment */
+     luaL_addchar(b, LUAL_PACKPADBYTE);  /* fill alignment */
     arg++;
     switch (opt) {
       case Kint: {  /* signed integers */
@@ -1640,7 +1770,7 @@ static int str_pack (lua_State *L) {
           lua_Integer lim = (lua_Integer)1 << ((size * NB) - 1);
           luaL_argcheck(L, -lim <= n && n < lim, arg, "integer overflow");
         }
-        packint(&b, (lua_Unsigned)n, h.islittle, cast_uint(size), (n < 0));
+        packint(b, (lua_Unsigned)n, h.islittle, cast_uint(size), (n < 0));
         break;
       }
       case Kuint: {  /* unsigned integers */
@@ -1648,43 +1778,43 @@ static int str_pack (lua_State *L) {
         if (size < SZINT)  /* need overflow check? */
           luaL_argcheck(L, (lua_Unsigned)n < ((lua_Unsigned)1 << (size * NB)),
                            arg, "unsigned overflow");
-        packint(&b, (lua_Unsigned)n, h.islittle, cast_uint(size), 0);
+        packint(b, (lua_Unsigned)n, h.islittle, cast_uint(size), 0);
         break;
       }
       case Kfloat: {  /* C float */
         float f = (float)luaL_checknumber(L, arg);  /* get argument */
-        char *buff = luaL_prepbuffsize(&b, sizeof(f));
+        char *buff = luaL_prepbuffsize(b, sizeof(f));
         /* move 'f' to final result, correcting endianness if needed */
         copywithendian(buff, (char *)&f, sizeof(f), h.islittle);
-        luaL_addsize(&b, size);
+        luaL_addsize(b, size);
         break;
       }
       case Knumber: {  /* Lua float */
         lua_Number f = luaL_checknumber(L, arg);  /* get argument */
-        char *buff = luaL_prepbuffsize(&b, sizeof(f));
+        char *buff = luaL_prepbuffsize(b, sizeof(f));
         /* move 'f' to final result, correcting endianness if needed */
         copywithendian(buff, (char *)&f, sizeof(f), h.islittle);
-        luaL_addsize(&b, size);
+        luaL_addsize(b, size);
         break;
       }
       case Kdouble: {  /* C double */
         double f = (double)luaL_checknumber(L, arg);  /* get argument */
-        char *buff = luaL_prepbuffsize(&b, sizeof(f));
+        char *buff = luaL_prepbuffsize(b, sizeof(f));
         /* move 'f' to final result, correcting endianness if needed */
         copywithendian(buff, (char *)&f, sizeof(f), h.islittle);
-        luaL_addsize(&b, size);
+        luaL_addsize(b, size);
         break;
       }
       case Kchar: {  /* fixed-size string */
         size_t len;
         const char *s = luaL_checklstring(L, arg, &len);
         luaL_argcheck(L, len <= size, arg, "string longer than given size");
-        luaL_addlstring(&b, s, len);  /* add string */
+        luaL_addlstring(b, s, len);  /* add string */
         if (len < size) {  /* does it need padding? */
           size_t psize = size - len;  /* pad size */
-          char *buff = luaL_prepbuffsize(&b, psize);
+          char *buff = luaL_prepbuffsize(b, psize);
           memset(buff, LUAL_PACKPADBYTE, psize);
-          luaL_addsize(&b, psize);
+          luaL_addsize(b, psize);
         }
         break;
       }
@@ -1695,8 +1825,8 @@ static int str_pack (lua_State *L) {
                          len < ((lua_Unsigned)1 << (size * NB)),
                          arg, "string length does not fit in given size");
         /* pack length */
-        packint(&b, (lua_Unsigned)len, h.islittle, cast_uint(size), 0);
-        luaL_addlstring(&b, s, len);
+        packint(b, (lua_Unsigned)len, h.islittle, cast_uint(size), 0);
+        luaL_addlstring(b, s, len);
         totalsize += len;
         break;
       }
@@ -1704,17 +1834,26 @@ static int str_pack (lua_State *L) {
         size_t len;
         const char *s = luaL_checklstring(L, arg, &len);
         luaL_argcheck(L, strlen(s) == len, arg, "string contains zeros");
-        luaL_addlstring(&b, s, len);
-        luaL_addchar(&b, '\0');  /* add zero at the end */
+        luaL_addlstring(b, s, len);
+        luaL_addchar(b, '\0');  /* add zero at the end */
         totalsize += len + 1;
         break;
       }
-      case Kpadding: luaL_addchar(&b, LUAL_PACKPADBYTE);  /* FALLTHROUGH */
+      case Kpadding: luaL_addchar(b, LUAL_PACKPADBYTE);  /* FALLTHROUGH */
       case Kpaddalign: case Knop:
         arg--;  /* undo increment */
         break;
     }
   }
+}
+
+
+static int str_pack (lua_State *L) {
+  luaL_Buffer b;
+  const char *fmt = luaL_checkstring(L, 1);  /* format string */
+  lua_pushnil(L);  /* mark to separate arguments from string buffer */
+  luaL_buffinit(L, &b);
+  shared_pack(L, &b, fmt, 1);
   luaL_pushresult(&b);
   return 1;
 }
@@ -1775,14 +1914,10 @@ static lua_Integer unpackint (lua_State *L, const char *str,
 }
 
 
-static int str_unpack (lua_State *L) {
+static int shared_unpack (lua_State *L, const char *fmt, const char *data,
+                                         size_t ld, size_t pos) {
   Header h;
-  const char *fmt = luaL_checkstring(L, 1);
-  size_t ld;
-  const char *data = luaL_checklstring(L, 2, &ld);
-  size_t pos = posrelatI(luaL_optinteger(L, 3, 1), ld) - 1;
   int n = 0;  /* number of results */
-  luaL_argcheck(L, pos <= ld, 3, "initial position out of string");
   initheader(L, &h);
   while (*fmt != '\0') {
     unsigned ntoalign;
@@ -1850,6 +1985,89 @@ static int str_unpack (lua_State *L) {
   return n + 1;
 }
 
+
+static int str_unpack (lua_State *L) {
+  const char *fmt = luaL_checkstring(L, 1);
+  size_t ld;
+  const char *data = luaL_checklstring(L, 2, &ld);
+  size_t pos = posrelatI(luaL_optinteger(L, 3, 1), ld) - 1;
+  luaL_argcheck(L, pos <= ld, 3, "initial position out of string");
+  return shared_unpack(L, fmt, data, ld, pos);
+}
+
+
+#if defined(GRIT_POWER_BLOB)
+/* blob_pack(blob, pos (optional), fmt, v1, v2, ···) */
+static int str_blobpack (lua_State *L) {
+  luaL_Buffer b;
+
+  char *blob;
+  const char *format;  /* string.pack format string */
+  size_t blob_len = 0;  /* length of current blob */
+  size_t offset = 0;  /* offset into blob */
+  int format_idx = 2;  /* stack index of format string */
+  if (!lua_isstringblob(L, 1))
+    return luaL_typeerror(L, 1, "blob");
+
+  blob = lua_tostringblob(L, 1, &blob_len);
+  if (lua_type(L, format_idx) == LUA_TNUMBER) {
+    format_idx = 3;  /* second argument is the format string */
+    offset = posrelatI(luaL_checkinteger(L, 2), blob_len) - 1;
+    luaL_argcheck(L, offset <= blob_len, 2, "initial position out of string");
+  }
+
+  format = luaL_checkstring(L, format_idx);
+
+  /*
+  ** Create a temporary buffer that contains the result to string.pack for the
+  ** given function parameters; ensuring the original blob is unaltered in case
+  ** of error.
+  **
+  ** On success: if the resulting pack cannot be safely copied into the
+  ** current blob instance, a new blob object must be made.
+  */
+  lua_pushnil(L);  /* [..., mark]; mark to separate arguments from string buffer */
+  luaL_buffinit(L, &b); /* [..., mark, buff_placeholder]*/
+  shared_pack(L, &b, format, format_idx);
+  if ((blob_len - offset) < b.n) {  /* Create a new blob of increased size */
+    char *new_blob = lua_pushblob(L, offset + b.n);
+    if (offset > 0)
+      memcpy(new_blob, blob, offset);
+    memcpy(new_blob + offset, b.b, b.n);
+  }
+  else {
+    memcpy(blob + offset, b.b, b.n);
+    lua_pushvalue(L, 1); /* [..., mark, buff_placeholder, result] */
+  }
+
+  if (b.b != b.init.b) /* @HACK: buffonstack */
+    lua_closeslot(L, -2);  /* close the box */
+
+  lua_rotate(L, -3, -2); /* remove box/placeholder and 'mark' */
+  lua_pop(L, 2);
+  return 1;
+}
+
+/* blob_unpack(blob, fmt [, pos]) */
+static int str_blobunpack (lua_State *L) {
+  size_t blob_len = 0;  /* length of current blob */
+  size_t offset = 0;  /* offset into blob */
+  const char *blob = luaL_checklstring(L, 1, &blob_len);
+  const char *fmt;
+
+  int format_idx = 2;  /* stack index of format string */
+  if (lua_type(L, 2) == LUA_TNUMBER) {
+    format_idx = 3;  /* second argument is the format string */
+    offset = posrelatI(luaL_checkinteger(L, 2), blob_len) - 1;
+    luaL_argcheck(L, offset <= blob_len, 2, "initial position out of string");
+  }
+
+  fmt = luaL_checkstring(L, format_idx);
+  luaL_argcheck(L, offset <= blob_len, 3, "initial position out of string");
+  return shared_unpack(L, fmt, blob, blob_len, offset);
+}
+#endif
+
 /* }====================================================== */
 
 
@@ -1865,12 +2083,25 @@ static const luaL_Reg strlib[] = {
   {"lower", str_lower},
   {"match", str_match},
   {"rep", str_rep},
+#if defined(GRIT_POWER_WOW)
+  {"strtrim", str_trim},
+  {"strsplit", str_split},
+  {"strjoin", str_join},
+  {"strconcat", str_concat},
+  {"tostringall", str_tostringall},
+#endif
   {"reverse", str_reverse},
   {"sub", str_sub},
   {"upper", str_upper},
   {"pack", str_pack},
   {"packsize", str_packsize},
   {"unpack", str_unpack},
+#if defined(GRIT_POWER_BLOB)
+  {"blob", str_blob},
+  {"isblob", str_isblob},
+  {"blob_pack", str_blobpack},
+  {"blob_unpack", str_blobunpack},
+#endif
   {NULL, NULL}
 };
 

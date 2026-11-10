@@ -7,7 +7,7 @@ global <const> *
 global _soft, _port, _nomsg
 global T
 
-local version = "Lua 5.5"
+local version = "LuaGLM 5.5"
 if _VERSION ~= version then
   io.stderr:write("This test suite is for ", version,
                   ", not for ", _VERSION, "\nExiting tests")

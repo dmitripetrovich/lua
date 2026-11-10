@@ -22,6 +22,7 @@
 #include "llex.h"
 #include "lmem.h"
 #include "lobject.h"
+#include "lglm_core.h"
 #include "lopcodes.h"
 #include "lparser.h"
 #include "lstate.h"
@@ -166,6 +167,14 @@ static void codestring (expdesc *e, TString *s) {
 static void codename (LexState *ls, expdesc *e) {
   codestring(e, str_checkname(ls));
 }
+
+
+#if defined(GRIT_POWER_JOAAT)
+static void codehash (expdesc *e, TString *s) {
+  init_exp(e, VKINT, 0);
+  e->u.ival = luaO_HashString(getstr(s), tsslen(s), 0);
+}
+#endif
 
 
 /*
@@ -789,11 +798,23 @@ static Proto *addprototype (LexState *ls) {
 ** are in use at that time.
 
 */
+#if defined(GRIT_POWER_DEFER)
+static void codeclosure (LexState *ls, expdesc *v, int deferred) {
+  FuncState *fs = ls->fs->prev;
+  int pc = deferred ? luaK_codeABC(fs, OP_DEFER, 0, 0, 0) : -1;
+  init_exp(v, VRELOC, luaK_codeABx(fs, OP_CLOSURE, 0, fs->np - 1));
+  luaK_exp2nextreg(fs, v);  /* fix it at the last register */
+  if (deferred) {
+    SETARG_A(fs->f->code[pc], v->u.info);
+  }
+}
+#else
 static void codeclosure (LexState *ls, expdesc *v) {
   FuncState *fs = ls->fs->prev;
   init_exp(v, VRELOC, luaK_codeABx(fs, OP_CLOSURE, 0, fs->np - 1));
   luaK_exp2nextreg(fs, v);  /* fix it at the last register */
 }
+#endif
 
 
 static void open_func (LexState *ls, FuncState *fs, BlockCnt *bl) {
@@ -942,13 +963,31 @@ static void recfield (LexState *ls, ConsControl *cc) {
   expdesc tab, key, val;
   if (ls->t.token == TK_NAME)
     codename(ls, &key);
+#if defined(GRIT_POWER_TABINIT)
+  else if (ls->t.token == '.') {
+    luaX_next(ls);
+    codename(ls, &key);
+  }
+#endif
   else  /* ls->t.token == '[' */
     yindex(ls, &key);
   cc->nh++;
-  checknext(ls, '=');
   tab = *cc->t;
+#if defined(GRIT_POWER_TABINIT)
+  if (ls->t.token == '=') {
+    luaX_next(ls);
+    luaK_indexed(fs, &tab, &key);
+    expr(ls, &val);
+  }
+  else {
+    luaK_indexed(fs, &tab, &key);
+    init_exp(&val, VTRUE, 0);
+  }
+#else
+  checknext(ls, '=');
   luaK_indexed(fs, &tab, &key);
   expr(ls, &val);
+#endif
   luaK_storevar(fs, &tab, &val);
   fs->freereg = reg;  /* free registers */
 }
@@ -999,6 +1038,9 @@ static void field (LexState *ls, ConsControl *cc) {
         recfield(ls, cc);
       break;
     }
+#if defined(GRIT_POWER_TABINIT)
+    case '.':
+#endif
     case '[': {
       recfield(ls, cc);
       break;
@@ -1064,13 +1106,22 @@ static void setvararg (FuncState *fs) {
 }
 
 
+#if defined(GRIT_POWER_LAMBDA)
+#define parlist(ls) parlist_ext((ls), ')')
+static void parlist_ext (LexState *ls, int endtoken) {
+#else
 static void parlist (LexState *ls) {
+#endif
   /* parlist -> [ {NAME ','} (NAME | '...') ] */
   FuncState *fs = ls->fs;
   Proto *f = fs->f;
   int nparams = 0;
   int varargk = 0;
+#if defined(GRIT_POWER_LAMBDA)
+  if (ls->t.token != endtoken) {
+#else
   if (ls->t.token != ')') {  /* is 'parlist' not empty? */
+#endif
     do {
       switch (ls->t.token) {
         case TK_NAME: {
@@ -1119,9 +1170,62 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
   statlist(ls);
   new_fs.f->lastlinedefined = ls->linenumber;
   check_match(ls, TK_END, TK_FUNCTION, line);
+#if defined(GRIT_POWER_DEFER)
+  codeclosure(ls, e, 0);
+#else
   codeclosure(ls, e);
+#endif
   close_func(ls);
 }
+
+
+#if defined(GRIT_POWER_LAMBDA)
+static void simplebody (LexState *ls, expdesc *e, int line) {
+  FuncState new_fs;
+  BlockCnt bl;
+  expdesc v;
+  new_fs.f = addprototype(ls);
+  new_fs.f->linedefined = line;
+  open_func(ls, &new_fs, &bl);
+  parlist_ext(ls, '|');
+  checknext(ls, '|');
+  expr(ls, &v);
+  if (hasmultret(v.k)) {
+    luaK_setmultret(&new_fs, &v);
+    if (v.k == VCALL && !new_fs.bl->insidetbc) {
+      SET_OPCODE(getinstruction(&new_fs, &v), OP_TAILCALL);
+      lua_assert(GETARG_A(getinstruction(&new_fs, &v)) == luaY_nvarstack(&new_fs));
+    }
+    luaK_ret(&new_fs, luaY_nvarstack(&new_fs), LUA_MULTRET);
+  }
+  else
+    luaK_ret(&new_fs, luaK_exp2anyreg(&new_fs, &v), 1);
+  new_fs.f->lastlinedefined = ls->lastline;
+#if defined(GRIT_POWER_DEFER)
+  codeclosure(ls, e, 0);
+#else
+  codeclosure(ls, e);
+#endif
+  close_func(ls);
+}
+#endif
+
+
+#if defined(GRIT_POWER_DEFER)
+static void body_noparms (LexState *ls, expdesc *e, int line, int deferred) {
+  /* body -> chunk END */
+  FuncState new_fs;
+  BlockCnt bl;
+  new_fs.f = addprototype(ls);
+  new_fs.f->linedefined = line;
+  open_func(ls, &new_fs, &bl);
+  statlist(ls);
+  new_fs.f->lastlinedefined = ls->linenumber;
+  check_match(ls, TK_END, TK_FUNCTION, line);
+  codeclosure(ls, e, deferred);
+  close_func(ls);
+}
+#endif
 
 
 static int explist (LexState *ls, expdesc *v) {
@@ -1164,6 +1268,13 @@ static void funcargs (LexState *ls, expdesc *f) {
       luaX_next(ls);  /* must use 'seminfo' before 'next' */
       break;
     }
+#if defined(GRIT_POWER_JOAAT)
+    case TK_HASH: {
+      codehash(&args, ls->t.seminfo.ts);
+      luaX_next(ls);  /* must use 'seminfo' before 'next' */
+      break;
+    }
+#endif
     default: {
       luaX_syntaxerror(ls, "function arguments expected");
       return;  /* to avoid warnings */
@@ -1217,12 +1328,25 @@ static void primaryexp (LexState *ls, expdesc *v) {
 }
 
 
-static void suffixedexp (LexState *ls, expdesc *v) {
+static int suffixedcondexp (LexState *ls, expdesc *v) {
   /* suffixedexp ->
        primaryexp { '.' NAME | '[' exp ']' | ':' NAME funcargs | funcargs } */
   FuncState *fs = ls->fs;
+#if defined(GRIT_POWER_SAFENAV)
+  int exits = NO_JUMP, exited = 0;
+#endif
   primaryexp(ls, v);
   for (;;) {
+#if defined(GRIT_POWER_SAFENAV)
+    if (testnext(ls, '?')) {
+      luaK_codeABCk(fs, OP_TESTSET, NO_REG, luaK_exp2anyreg(fs, v), 0, 0);
+      luaK_concat(fs, &exits, luaK_jump(fs));
+      exited = 1;
+    }
+    else {
+      exited = 0;
+    }
+#endif
     switch (ls->t.token) {
       case '.': {  /* fieldsel */
         fieldsel(ls, v);
@@ -1243,15 +1367,66 @@ static void suffixedexp (LexState *ls, expdesc *v) {
         funcargs(ls, v);
         break;
       }
+#if defined(GRIT_POWER_JOAAT)
+      case TK_HASH:
+#endif
       case '(': case TK_STRING: case '{' /*}*/: {  /* funcargs */
         luaK_exp2nextreg(fs, v);
         funcargs(ls, v);
         break;
       }
-      default: return;
+      default: {
+#if defined(GRIT_POWER_SAFENAV)
+        if (exited)
+          luaX_syntaxerror(ls, "expected suffixed expression after '?'");
+        return exits;
+#else
+        return NO_JUMP;
+#endif
+      }
     }
   }
 }
+
+
+static void suffixedexp (LexState *ls, expdesc *v) {
+  int exits = suffixedcondexp(ls, v);
+  if (exits != NO_JUMP) {
+    /* fixup the list of TESTSET instructions used */
+    FuncState *fs = ls->fs;
+    luaK_concat(fs, &v->f, exits);
+    luaK_exp2anyreg(fs, v);
+  }
+}
+
+
+#if defined(GRIT_POWER_IFEXPR)
+static int cond (LexState *ls);
+static void ifexpr (LexState *ls, expdesc *v) {
+  FuncState *fs = ls->fs;
+  int r = -1;
+  int escapelist = NO_JUMP;
+  do {
+    int condexit;
+    luaX_next(ls);
+    condexit = cond(ls);
+    checknext(ls, TK_THEN);
+    expr(ls, v);
+    if (r < 0) {
+      luaK_exp2nextreg(fs, v);
+      r = v->u.info;
+    }
+    else
+      luaK_exp2reg(fs, v, r);
+    luaK_concat(fs, &escapelist, luaK_jump(fs));
+    luaK_patchtohere(fs, condexit);
+  } while (ls->t.token == TK_ELSEIF);
+  checknext(ls, TK_ELSE);
+  expr(ls, v);
+  luaK_exp2reg(fs, v, r);
+  luaK_patchtohere(fs, escapelist);
+}
+#endif
 
 
 static void simpleexp (LexState *ls, expdesc *v) {
@@ -1300,6 +1475,19 @@ static void simpleexp (LexState *ls, expdesc *v) {
       body(ls, v, 0, ls->linenumber);
       return;
     }
+#if defined(GRIT_POWER_LAMBDA)
+    case '|': {
+      luaX_next(ls);
+      simplebody(ls, v, ls->linenumber);
+      return;
+    }
+#endif
+#if defined(GRIT_POWER_JOAAT)
+    case TK_HASH: {
+      codehash(v, ls->t.seminfo.ts);
+      break;
+    }
+#endif
     default: {
       suffixedexp(ls, v);
       return;
@@ -1385,6 +1573,9 @@ static BinOpr subexpr (LexState *ls, expdesc *v, int limit) {
     subexpr(ls, v, UNARY_PRIORITY);
     luaK_prefix(ls->fs, uop, v, line);
   }
+#if defined(GRIT_POWER_IFEXPR)
+  else if (ls->t.token == TK_IF) ifexpr(ls, v);
+#endif
   else simpleexp(ls, v);
   /* expand while operators have priorities higher than 'limit' */
   op = getbinopr(ls->t.token);
@@ -1483,6 +1674,112 @@ static void check_conflict (LexState *ls, struct LHS_assign *lh, expdesc *v) {
 }
 
 
+#if defined(GRIT_POWER_INTABLE) || defined(GRIT_POWER_COMPOUND)
+static void getindexnofree (FuncState *fs, expdesc *v) {
+  /* get the value from a table without freeing the table/key registers */
+  switch (v->k) {
+    case VINDEXED: {
+      v->u.info = luaK_codeABC(fs, OP_GETTABLE, 0, v->u.ind.t, v->u.ind.idx);
+      v->k = VRELOC;
+      break;
+    }
+    case VINDEXUP: {
+      v->u.info = luaK_codeABC(fs, OP_GETTABUP, 0, v->u.ind.t, v->u.ind.idx);
+      v->k = VRELOC;
+      break;
+    }
+    case VINDEXI: {
+      v->u.info = luaK_codeABC(fs, OP_GETI, 0, v->u.ind.t, v->u.ind.idx);
+      v->k = VRELOC;
+      break;
+    }
+    case VINDEXSTR: {
+      v->u.info = luaK_codeABC(fs, OP_GETFIELD, 0, v->u.ind.t, v->u.ind.idx);
+      v->k = VRELOC;
+      break;
+    }
+    default:
+      lua_assert(0);
+      break;
+  }
+}
+#endif
+
+
+#if defined(GRIT_POWER_INTABLE)
+/* Set the dst reg for a VRELOC op */
+static void setrelocreg (FuncState *fs, expdesc *e, int outreg) {
+  Instruction *pc = &getinstruction(fs, e);
+  lua_assert(e->k == VRELOC);
+  SETARG_A(*pc, outreg);  /* instruction will put result in 'reg' */
+  e->k = VVOID;
+}
+
+
+/* Get the name/index of an expression */
+static void getassignkey (LexState *ls, FuncState *fs, expdesc *v,
+                                                     expdesc *key) {
+  switch (v->k) {
+    case VLOCAL: case VVARGVAR:
+      codestring(key, getlocalvardesc(fs, v->u.var.vidx)->vd.name);
+      break;
+    case VUPVAL:
+      codestring(key, fs->f->upvalues[v->u.info].name);
+      break;
+    case VINDEXSTR:
+    case VINDEXUP:
+      codestring(key, tsvalue(&fs->f->k[v->u.ind.idx]));
+      break;
+    case VINDEXED:
+      if (v->u.ind.keystr >= 0) {
+        codestring(key, tsvalue(&fs->f->k[v->u.ind.keystr]));
+        break;
+      }
+      luaX_syntaxerror(ls, "unexpected assignment key");
+      break;
+    case VINDEXI:
+      init_exp(key, VKINT, 0);
+      key->u.ival = v->u.ind.idx;
+      break;
+    default:
+      luaX_syntaxerror(ls, "unexpected assignment key");
+  }
+}
+
+
+static void intableunpack (LexState *ls, FuncState *fs, struct LHS_assign *lh,
+                           int outreg, expdesc *t, expdesc *e) {
+  expdesc key;
+  if (lh->prev) {
+    intableunpack(ls, fs, lh->prev, outreg - 1, t, e);
+    getindexnofree(fs, e);
+    setrelocreg(fs, e, outreg);
+  }
+  getassignkey(ls, fs, &lh->v, &key);
+  *e = *t;
+  luaK_indexed(fs, e, &key);
+}
+
+
+/*
+** Parse an expression, and then index it using the names of the variables being assigned.
+** The results are all pushed onto the stack, apart from the last, which is stored in `e'.
+*/
+static void intable (LexState *ls, struct LHS_assign *lh, int nvars,
+                                                         expdesc *e) {
+  FuncState *fs = ls->fs;
+  expdesc t;
+  int outreg;
+  luaX_next(ls);  /* skip 'in' */
+  luaK_reserveregs(fs, nvars - 1);
+  outreg = fs->freereg - 1;
+  suffixedexp(ls, &t);
+  luaK_exp2anyregup(fs, &t);
+  intableunpack(ls, fs, lh, outreg, &t, e);
+}
+#endif
+
+
 /* Create code to store the "top" register in 'var' */
 static void storevartop (FuncState *fs, expdesc *var) {
   expdesc e;
@@ -1512,6 +1809,13 @@ static void restassign (LexState *ls, struct LHS_assign *lh, int nvars) {
     restassign(ls, &nv, nvars+1);
     leavelevel(ls);
   }
+#if defined(GRIT_POWER_INTABLE)
+  else if (ls->t.token == TK_IN) {
+    intable(ls, lh, nvars, &e);
+    luaK_storevar(ls->fs, &lh->v, &e);
+    return;  /* avoid default */
+  }
+#endif
   else {  /* restassign -> '=' explist */
     int nexps;
     checknext(ls, '=');
@@ -1781,12 +2085,32 @@ static void ifstat (LexState *ls, int line) {
 }
 
 
+#if defined(GRIT_POWER_DEFER)
+static void localfunc (LexState *ls, int deferred) {
+#else
 static void localfunc (LexState *ls) {
+#endif
   expdesc b;
   FuncState *fs = ls->fs;
   int fvar = fs->nactvar;  /* function's variable index */
+#if defined(GRIT_POWER_DEFER)
+  if (deferred) {
+    static const char funcname[] = "(deferred function)";
+    new_localvar(ls, luaX_newstring(ls, funcname, sizeof(funcname) - 1));
+    marktobeclosed(fs);  /* in the scope of a defer closure variable */
+  }
+  else {
+    new_localvar(ls, str_checkname(ls));  /* new local variable */
+  }
+#else
   new_localvar(ls, str_checkname(ls));  /* new local variable */
+#endif
   adjustlocalvars(ls, 1);  /* enter its scope */
+#if defined(GRIT_POWER_DEFER)
+  if (deferred)
+    body_noparms(ls, &b, ls->linenumber, deferred);
+  else
+#endif
   body(ls, &b, 0, ls->linenumber);  /* function created in next register */
   /* debug information will only see the variable after this point! */
   localdebuginfo(fs, fvar)->startpc = fs->pc;
@@ -1819,7 +2143,7 @@ static void checktoclose (FuncState *fs, int level) {
 
 
 static void localstat (LexState *ls) {
-  /* stat -> LOCAL NAME attrib { ',' NAME attrib } ['=' explist] */
+  /* stat -> LOCAL NAME ATTRIB {',' NAME ATTRIB} [IN primaryexp | '=' explist] */
   FuncState *fs = ls->fs;
   int toclose = -1;  /* index of to-be-closed variable (if any) */
   Vardesc *var;  /* last variable */
@@ -1840,6 +2164,34 @@ static void localstat (LexState *ls) {
     }
     nvars++;
   } while (testnext(ls, ','));
+#if defined(GRIT_POWER_INTABLE)
+  if (testnext(ls, TK_IN)) {
+    int regs = fs->freereg;
+    int vars = fs->nactvar;
+    int fromvar;
+    luaK_reserveregs(fs, nvars);
+    suffixedexp(ls, &e);
+    adjustlocalvars(ls, nvars);
+    new_localvarliteral(ls, "(in)");
+    luaK_exp2nextreg(fs, &e);
+    fromvar = fs->nactvar;
+    adjustlocalvars(ls, 1);
+    luaK_setoneret(fs, &e);  /* close last expression */
+    for (nexps = 0; nexps < nvars; nexps++) {
+      expdesc v, key;
+      TString *key_str = getlocalvardesc(fs, vars + nexps)->vd.name;
+      init_exp(&e, VNONRELOC, fs->freereg - 1);
+      codestring(&key, key_str);
+      luaK_indexed(fs, &e, &key);
+      init_var(fs, &v, vars + nexps);
+      lua_assert(v.u.var.ridx == regs + nexps);
+      luaK_storevar(fs, &v, &e);
+    }
+    removevars(fs, fromvar);
+    checktoclose(fs, toclose);
+    return;
+  }
+#endif
   if (testnext(ls, '='))  /* initialization? */
     nexps = explist(ls, &e);
   else {
@@ -1999,21 +2351,70 @@ static void funcstat (LexState *ls, int line) {
 }
 
 
+#if defined(GRIT_POWER_COMPOUND)
+static BinOpr getcompoundopr (int op) {
+  switch (op) {
+    case TK_PLUSEQ: return OPR_ADD;
+    case TK_MINUSEQ: return OPR_SUB;
+    case TK_MULTEQ: return OPR_MUL;
+    case TK_DIVEQ: return OPR_DIV;
+    case TK_SHLEQ: return OPR_SHL;
+    case TK_SHREQ: return OPR_SHR;
+    case TK_BANDEQ: return OPR_BAND;
+    case TK_BOREQ: return OPR_BOR;
+    case TK_BXOREQ: return OPR_BXOR;
+    default: return OPR_NOBINOPR;
+  }
+}
+
+
+static void compound_assignment (LexState *ls, expdesc *v) {
+  /* restassign -> opeq expr */
+  BinOpr op = getcompoundopr(ls->t.token);
+  FuncState *fs = ls->fs;
+  int line = ls->linenumber;
+  expdesc lhs, rhs;
+  luaX_next(ls);
+  check_condition(ls, vkisvar(v->k), "syntax error");
+  check_readonly(ls, v);
+  lhs = *v;
+  if (vkisindexed(lhs.k)) {
+    getindexnofree(fs, &lhs);
+  }
+  luaK_infix(fs, op, &lhs);
+  expr(ls, &rhs);
+  luaK_posfix(fs, op, &lhs, &rhs, line);
+  luaK_storevar(fs, v, &lhs);
+}
+#endif
+
+
 static void exprstat (LexState *ls) {
   /* stat -> func | assignment */
   FuncState *fs = ls->fs;
   struct LHS_assign v;
-  suffixedexp(ls, &v.v);
-  if (ls->t.token == '=' || ls->t.token == ',') { /* stat -> assignment ? */
+  int exits = suffixedcondexp(ls, &v.v);
+  if (ls->t.token == '=' || ls->t.token == ','
+#if defined(GRIT_POWER_INTABLE)
+      || ls->t.token == TK_IN
+#endif
+     ) { /* stat -> assignment ? */
     v.prev = NULL;
     restassign(ls, &v, 1);
   }
+#if defined(GRIT_POWER_COMPOUND)
+  else if (opeqexpr(ls->t.token)) {
+    compound_assignment(ls, &v.v);
+  }
+#endif
   else {  /* stat -> func */
     Instruction *inst;
     check_condition(ls, v.v.k == VCALL, "syntax error");
     inst = &getinstruction(fs, &v.v);
     SETARG_C(*inst, 1);  /* call statement uses no results */
   }
+  if (exits != NO_JUMP)
+    luaK_patchtohere(fs, exits);
 }
 
 
@@ -2086,11 +2487,22 @@ static void statement (LexState *ls) {
     case TK_LOCAL: {  /* stat -> localstat */
       luaX_next(ls);  /* skip LOCAL */
       if (testnext(ls, TK_FUNCTION))  /* local function? */
+#if defined(GRIT_POWER_DEFER)
+        localfunc(ls, 0);
+#else
         localfunc(ls);
+#endif
       else
         localstat(ls);
       break;
     }
+#if defined(GRIT_POWER_DEFER)
+    case TK_DEFER: {  /* stat -> deferstat */
+      luaX_next(ls);  /* skip DEFER */
+      localfunc(ls, 1);
+      break;
+    }
+#endif
     case TK_GLOBAL: {  /* stat -> globalstatfunc */
       globalstatfunc(ls, line);
       break;
@@ -2146,6 +2558,21 @@ static void statement (LexState *ls) {
 /* }====================================================================== */
 
 
+#if defined(LUA_NO_PARSER)
+LClosure *luaY_parser (lua_State *L, ZIO *z, Table *anchor, Mbuffer *buff,
+                       Dyndata *dyd, const char *name, int firstchar) {
+  UNUSED(z);
+  UNUSED(anchor);
+  UNUSED(buff);
+  UNUSED(dyd);
+  UNUSED(name);
+  UNUSED(firstchar);
+  lua_pushliteral(L, "parsing module not loaded; compiled code only");
+  lua_error(L);
+  return NULL;
+}
+#else
+
 /*
 ** compiles the main function, which is a regular vararg function with an
 ** upvalue named LUA_ENV
@@ -2191,3 +2618,4 @@ LClosure *luaY_parser (lua_State *L, ZIO *z, Table *anchor, Mbuffer *buff,
   return cl;
 }
 
+#endif

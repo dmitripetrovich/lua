@@ -23,6 +23,7 @@
 #include "lgc.h"
 #include "lmem.h"
 #include "lobject.h"
+#include "lglm_core.h"
 #include "lstate.h"
 #include "lstring.h"
 #include "ltable.h"
@@ -437,7 +438,15 @@ LUA_API const char *lua_tolstring (lua_State *L, int idx, size_t *len) {
 LUA_API lua_Unsigned lua_rawlen (lua_State *L, int idx) {
   const TValue *o = index2value(L, idx);
   switch (ttypetag(o)) {
+    case LUA_VVECTOR2: return 2;
+    case LUA_VVECTOR3: return 3;
+    case LUA_VVECTOR4: return 4;
+    case LUA_VQUAT: return 4;
+    case LUA_VMATRIX: return cast(lua_Unsigned, mvalue(o).size);
     case LUA_VSHRSTR: return cast(lua_Unsigned, tsvalue(o)->shrlen);
+#if defined(GRIT_POWER_BLOB)
+    case LUA_VBLOBSTR:
+#endif
     case LUA_VLNGSTR: return cast(lua_Unsigned, tsvalue(o)->u.lnglen);
     case LUA_VUSERDATA: return cast(lua_Unsigned, uvalue(o)->len);
     case LUA_VTABLE: {
@@ -584,6 +593,45 @@ LUA_API const char *lua_pushstring (lua_State *L, const char *s) {
 }
 
 
+#if defined(GRIT_POWER_BLOB)
+LUA_API int lua_isstringblob (lua_State *L, int idx) {
+  const TValue *o = index2value(L, idx);
+  return ttisblobstring(o);
+}
+
+LUA_API char *lua_pushblob (lua_State *L, size_t len) {
+  TString *ts;
+  lua_lock(L);
+  ts = luaS_newblob(L, NULL, len);
+  setsvalue2s(L, L->top.p, ts);
+  api_incr_top(L);
+  luaC_checkGC(L);
+  lua_unlock(L);
+  return getstr(ts);
+}
+
+LUA_API char *lua_tostringblob (lua_State *L, int idx, size_t *len) {
+  TValue *o;
+  lua_lock(L);
+  o = index2value(L, idx);
+  if (!ttisstring(o)) {
+    if (len != NULL) *len = 0;
+    lua_unlock(L);
+    return NULL;
+  }
+  if (!ttisblobstring(o)) {
+    setsvalue(L, o, luaS_newblob(L, getstr(tsvalue(o)), tsslen(tsvalue(o))));
+    luaC_checkGC(L);
+    o = index2value(L, idx); /* previous call may reallocate the stack */
+  }
+  if (len != NULL)
+    *len = tsslen(tsvalue(o));
+  lua_unlock(L);
+  return getstr(tsvalue(o));
+}
+#endif
+
+
 LUA_API const char *lua_pushvfstring (lua_State *L, const char *fmt,
                                       va_list argp) {
   const char *ret;
@@ -676,7 +724,16 @@ static int auxgetstr (lua_State *L, const TValue *t, const char *k) {
   else {
     setsvalue2s(L, L->top.p, str);
     api_incr_top(L);
-    tag = luaV_finishget(L, t, s2v(L->top.p - 1), L->top.p - 1, tag);
+    if (ttisvector(t)) {  /* assume glmVec_rawget has already been called/failed */
+      glmVec_get(L, t, s2v(L->top.p - 1), L->top.p - 1);
+      tag = ttypetag(s2v(L->top.p - 1));
+    }
+    else if (ttismatrix(t)) {
+      glmMat_get(L, t, s2v(L->top.p - 1), L->top.p - 1);
+      tag = ttypetag(s2v(L->top.p - 1));
+    }
+    else
+      tag = luaV_finishget(L, t, s2v(L->top.p - 1), L->top.p - 1, tag);
   }
   lua_unlock(L);
   return novariant(tag);
@@ -711,16 +768,34 @@ LUA_API int lua_gettable (lua_State *L, int idx) {
   api_checkpop(L, 1);
   t = index2value(L, idx);
   luaV_fastget(t, s2v(L->top.p - 1), s2v(L->top.p - 1), luaH_get, tag);
-  if (tagisempty(tag))
-    tag = luaV_finishget(L, t, s2v(L->top.p - 1), L->top.p - 1, tag);
+  if (tagisempty(tag)) {
+    if (ttisvector(t)) {
+      glmVec_get(L, t, s2v(L->top.p - 1), L->top.p - 1);
+      tag = ttypetag(s2v(L->top.p - 1));
+    }
+    else if (ttismatrix(t)) {
+      glmMat_get(L, t, s2v(L->top.p - 1), L->top.p - 1);
+      tag = ttypetag(s2v(L->top.p - 1));
+    }
+    else
+      tag = luaV_finishget(L, t, s2v(L->top.p - 1), L->top.p - 1, tag);
+  }
   lua_unlock(L);
   return novariant(tag);
 }
 
 
 LUA_API int lua_getfield (lua_State *L, int idx, const char *k) {
+  TValue *v;
   lua_lock(L);
-  return auxgetstr(L, index2value(L, idx), k);
+  v = index2value(L, idx);
+  if (ttisvector(v)) {  /* hot-path single character field access */
+    int result = glmVec_get1(L, v, k);
+    if (result != LUA_TNONE) {
+      return result;
+    }
+  }
+  return auxgetstr(L, v, k);
 }
 
 
@@ -731,9 +806,19 @@ LUA_API int lua_geti (lua_State *L, int idx, lua_Integer n) {
   t = index2value(L, idx);
   luaV_fastgeti(t, n, s2v(L->top.p), tag);
   if (tagisempty(tag)) {
-    TValue key;
-    setivalue(&key, n);
-    tag = luaV_finishget(L, t, &key, L->top.p, tag);
+    if (ttisvector(t)) {
+      glmVec_geti(L, t, n, L->top.p);
+      tag = ttypetag(s2v(L->top.p));
+    }
+    else if (ttismatrix(t)) {
+      glmMat_geti(L, t, n, L->top.p);
+      tag = ttypetag(s2v(L->top.p));
+    }
+    else {
+      TValue key;
+      setivalue(&key, n);
+      tag = luaV_finishget(L, t, &key, L->top.p, tag);
+    }
   }
   api_incr_top(L);
   lua_unlock(L);
@@ -750,19 +835,29 @@ static int finishrawget (lua_State *L, lu_byte tag) {
 }
 
 
-l_sinline Table *gettable (lua_State *L, int idx) {
-  TValue *t = index2value(L, idx);
+l_sinline Table *ensuretable (lua_State *L, const TValue *t) {
   api_check(L, ttistable(t), "table expected");
   return hvalue(t);
 }
 
 
+l_sinline Table *gettable (lua_State *L, int idx) {
+  return ensuretable(L, index2value(L, idx));
+}
+
+
 LUA_API int lua_rawget (lua_State *L, int idx) {
+  const TValue *o;
   Table *t;
   lu_byte tag;
   lua_lock(L);
   api_checkpop(L, 1);
-  t = gettable(L, idx);
+  o = index2value(L, idx);
+  if (ttisvector(o))
+    return glmVec_rawget(L, o);
+  else if (ttismatrix(o))
+    return glmMat_rawget(L, o);
+  t = ensuretable(L, o);
   tag = luaH_get(t, s2v(L->top.p - 1), s2v(L->top.p - 1));
   L->top.p--;  /* pop key */
   return finishrawget(L, tag);
@@ -770,10 +865,16 @@ LUA_API int lua_rawget (lua_State *L, int idx) {
 
 
 LUA_API int lua_rawgeti (lua_State *L, int idx, lua_Integer n) {
+  const TValue *o;
   Table *t;
   lu_byte tag;
   lua_lock(L);
-  t = gettable(L, idx);
+  o = index2value(L, idx);
+  if (ttisvector(o))
+    return glmVec_rawgeti(L, o, n);
+  else if (ttismatrix(o))
+    return glmMat_rawgeti(L, o, n);
+  t = ensuretable(L, o);
   luaH_fastgeti(t, n, s2v(L->top.p), tag);
   return finishrawget(L, tag);
 }
@@ -800,6 +901,35 @@ LUA_API void lua_createtable (lua_State *L, int narray, int nrec) {
   luaC_checkGC(L);
   lua_unlock(L);
 }
+
+
+#if defined(GRIT_POWER_WOW)
+LUA_API int lua_tabletype (lua_State *L, int idx) {
+  const TValue *o = index2value(L, idx);
+  api_check(L, ttistable(o), "table expected");
+  return luaH_type(hvalue(o));
+}
+
+LUA_API void lua_wipetable (lua_State *L, int idx) {
+  const TValue *o;
+  lua_lock(L);
+  o = index2value(L, idx);
+  api_check(L, ttistable(o), "table expected");
+  luaH_wipetable(hvalue(o));
+  lua_unlock(L);
+}
+
+LUA_API void lua_clonetable (lua_State *L, int fromidx, int toidx) {
+  const TValue *from, *to;
+  lua_lock(L);
+  from = index2value(L, fromidx);
+  to = index2value(L, toidx);
+  api_check(L, ttistable(from), "table expected");
+  api_check(L, ttistable(to), "table expected");
+  luaH_clonetable(L, hvalue(from), hvalue(to));
+  lua_unlock(L);
+}
+#endif
 
 
 LUA_API int lua_getmetatable (lua_State *L, int objindex) {
@@ -868,7 +998,10 @@ static void auxsetstr (lua_State *L, const TValue *t, const char *k) {
   else {
     setsvalue2s(L, L->top.p, str);  /* push 'str' (to make it a TValue) */
     api_incr_top(L);
-    luaV_finishset(L, t, s2v(L->top.p - 1), s2v(L->top.p - 2), hres);
+    if (ttismatrix(t))
+      glmMat_set(L, t, s2v(L->top.p - 1), s2v(L->top.p - 2));
+    else
+      luaV_finishset(L, t, s2v(L->top.p - 1), s2v(L->top.p - 2), hres);
     L->top.p -= 2;  /* pop value and key */
   }
   lua_unlock(L);  /* lock done by caller */
@@ -889,11 +1022,15 @@ LUA_API void lua_settable (lua_State *L, int idx) {
   lua_lock(L);
   api_checkpop(L, 2);
   t = index2value(L, idx);
-  luaV_fastset(t, s2v(L->top.p - 2), s2v(L->top.p - 1), hres, luaH_pset);
-  if (hres == HOK)
-    luaV_finishfastset(L, t, s2v(L->top.p - 1));
-  else
-    luaV_finishset(L, t, s2v(L->top.p - 2), s2v(L->top.p - 1), hres);
+  if (ttismatrix(t))
+    glmMat_set(L, t, s2v(L->top.p - 2), s2v(L->top.p - 1));
+  else {
+    luaV_fastset(t, s2v(L->top.p - 2), s2v(L->top.p - 1), hres, luaH_pset);
+    if (hres == HOK)
+      luaV_finishfastset(L, t, s2v(L->top.p - 1));
+    else
+      luaV_finishset(L, t, s2v(L->top.p - 2), s2v(L->top.p - 1), hres);
+  }
   L->top.p -= 2;  /* pop index and value */
   lua_unlock(L);
 }
@@ -911,13 +1048,20 @@ LUA_API void lua_seti (lua_State *L, int idx, lua_Integer n) {
   lua_lock(L);
   api_checkpop(L, 1);
   t = index2value(L, idx);
-  luaV_fastseti(t, n, s2v(L->top.p - 1), hres);
-  if (hres == HOK)
-    luaV_finishfastset(L, t, s2v(L->top.p - 1));
+  if (ttismatrix(t)) {
+    TValue aux;
+    setivalue(&aux, n);
+    glmMat_set(L, t, &aux, s2v(L->top.p - 1));
+  }
   else {
-    TValue temp;
-    setivalue(&temp, n);
-    luaV_finishset(L, t, &temp, s2v(L->top.p - 1), hres);
+    luaV_fastseti(t, n, s2v(L->top.p - 1), hres);
+    if (hres == HOK)
+      luaV_finishfastset(L, t, s2v(L->top.p - 1));
+    else {
+      TValue temp;
+      setivalue(&temp, n);
+      luaV_finishset(L, t, &temp, s2v(L->top.p - 1), hres);
+    }
   }
   L->top.p--;  /* pop value */
   lua_unlock(L);
@@ -925,13 +1069,18 @@ LUA_API void lua_seti (lua_State *L, int idx, lua_Integer n) {
 
 
 static void aux_rawset (lua_State *L, int idx, TValue *key, int n) {
-  Table *t;
+  TValue *v;
   lua_lock(L);
   api_checkpop(L, n);
-  t = gettable(L, idx);
-  luaH_set(L, t, key, s2v(L->top.p - 1));
-  invalidateTMcache(t);
-  luaC_barrierback(L, obj2gco(t), s2v(L->top.p - 1));
+  v = index2value(L, idx);
+  if (ttismatrix(v))
+    glmMat_rawset(L, v, key, s2v(L->top.p - 1));
+  else {
+    Table *t = ensuretable(L, v);
+    luaH_set(L, t, key, s2v(L->top.p - 1));
+    invalidateTMcache(t);
+    luaC_barrierback(L, obj2gco(t), s2v(L->top.p - 1));
+  }
   L->top.p -= n;
   lua_unlock(L);
 }
@@ -950,12 +1099,20 @@ LUA_API void lua_rawsetp (lua_State *L, int idx, const void *p) {
 
 
 LUA_API void lua_rawseti (lua_State *L, int idx, lua_Integer n) {
-  Table *t;
+  TValue *v;
   lua_lock(L);
   api_checkpop(L, 1);
-  t = gettable(L, idx);
-  luaH_setint(L, t, n, s2v(L->top.p - 1));
-  luaC_barrierback(L, obj2gco(t), s2v(L->top.p - 1));
+  v = index2value(L, idx);
+  if (ttismatrix(v)) {
+    TValue key;
+    setivalue(&key, n);
+    glmMat_rawset(L, v, &key, s2v(L->top.p - 1));
+  }
+  else {
+    Table *t = ensuretable(L, v);
+    luaH_setint(L, t, n, s2v(L->top.p - 1));
+    luaC_barrierback(L, obj2gco(t), s2v(L->top.p - 1));
+  }
   L->top.p--;
   lua_unlock(L);
 }
@@ -1271,12 +1428,17 @@ LUA_API int lua_error (lua_State *L) {
 
 
 LUA_API int lua_next (lua_State *L, int idx) {
-  Table *t;
+  const TValue *o;
   int more;
   lua_lock(L);
   api_checkpop(L, 1);
-  t = gettable(L, idx);
-  more = luaH_next(L, t, L->top.p - 1);
+  o = index2value(L, idx);
+  if (ttisvector(o))
+    more = glmVec_next(o, L->top.p - 1);
+  else if (ttismatrix(o))
+    more = glmMat_next(o, L->top.p - 1);
+  else
+    more = luaH_next(L, ensuretable(L, o), L->top.p - 1);
   if (more)
     api_incr_top(L);
   else  /* no more elements */
@@ -1291,7 +1453,11 @@ LUA_API void lua_toclose (lua_State *L, int idx) {
   lua_lock(L);
   o = index2stack(L, idx);
   api_check(L, L->tbclist.p < o, "given index below or equal a marked one");
+#if defined(GRIT_POWER_DEFER)
+  luaF_newtbcupval(L, o, 0);  /* create new to-be-closed upvalue */
+#else
   luaF_newtbcupval(L, o);  /* create new to-be-closed upvalue */
+#endif
   L->ci->callstatus |= CIST_TBC;  /* mark that function has TBC slots */
   lua_unlock(L);
 }
@@ -1477,3 +1643,83 @@ LUA_API void lua_upvaluejoin (lua_State *L, int fidx1, int n1,
 }
 
 
+/*
+** GameLua: scriptHandler
+*/
+
+/* get function functions, recursively */
+static int lua_toprotos_recursive (lua_State* L, Proto* p) {
+  int i, np = 1;
+  LClosure* ncl = NULL;
+
+  luaL_checkstack(L, 1 + p->sizep, "toprotos_recursive");
+  ncl = luaF_newLclosure(L, 0);
+  lua_lock(L);
+  setclLvalue2s(L, L->top.p, ncl);  /* anchor it */
+  api_incr_top(L);
+  lua_unlock(L);
+
+  ncl->p = p;
+  for (i = 0; i < p->sizep; i++)
+    np += lua_toprotos_recursive(L, p->p[i]);
+
+  return np;
+}
+
+LUA_API int lua_toprotos (lua_State* L, int idx) {
+  const TValue *o = index2value(L, idx);
+  if (ttisLclosure(o)) {
+    Proto* p = clLvalue(o)->p;
+    return lua_toprotos_recursive(L, p);
+  }
+  return 0;
+}
+
+LUA_API const TValue *lua_getvalue (lua_State* L, int idx) {
+  return index2value(L, idx);
+}
+
+
+static lua_Integer g_opaqueIdCounter = 0;
+
+/* get or create a unique identifier for the value at the given index */
+LUA_API lua_Integer lua_opaqueid(lua_State *L, int idx) {
+  int tt;
+  lua_Integer id;
+  idx = lua_absindex(L, idx);
+
+  if (lua_topointer(L, idx) == NULL) {
+    return 0;
+  }
+
+  lua_rawgetp(L, LUA_REGISTRYINDEX, &g_opaqueIdCounter);
+
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    lua_newtable(L);
+
+    lua_newtable(L);  // metatable
+    lua_pushliteral(L, "k");
+    lua_setfield(L, -2, "__mode");  // weak keys
+    lua_setmetatable(L, -2);
+
+    lua_pushvalue(L, -1);
+    lua_rawsetp(L, LUA_REGISTRYINDEX, &g_opaqueIdCounter);
+  }
+
+  lua_pushvalue(L, idx);  // push the object
+  tt = lua_rawget(L, -2);  // idTable[object]
+
+  if (tt == LUA_TNUMBER) {
+    id = lua_tointeger(L, -1);
+  }
+  else {
+    id = (++g_opaqueIdCounter * 0x4F1BBCDCBFA53E09) & 0x7FFFFFFFFFFFFFFF;
+    lua_pushvalue(L, idx);  // push the object
+    lua_pushinteger(L, id);
+    lua_rawset(L, -4);
+  }
+
+  lua_pop(L, 2);  // pop id + idTable
+  return id;
+}

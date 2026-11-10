@@ -448,6 +448,27 @@ static int handle_luainit (lua_State *L) {
 #endif				/* } */
 
 
+#if defined(GRIT_POWER_READLINE_HISTORY)
+  /*
+  ** LUA_HISTORY is the name of the environment variable that Lua checks
+  ** to load its command-line history.
+  ** CHANGE it if you want a different name.
+  */
+  #if !defined(LUA_HISTORY)
+    #define LUA_HISTORY     "LUA_HISTORY"
+  #endif
+
+  /*
+  ** LUA_HISTORY_DEFAULT is the default path that Lua uses to look for
+  ** the command-line history.
+  */
+  #if defined(_WIN32)
+    #define LUA_HISTORY_DEFAULT "lua_history.txt"
+  #else
+    #define LUA_HISTORY_DEFAULT ".lua_history"
+  #endif
+#endif
+
 /*
 ** * lua_initreadline initializes the readline system.
 ** * lua_readline defines how to show a prompt and then read a line from
@@ -470,6 +491,10 @@ static int handle_luainit (lua_State *L) {
 #define lua_readline(buff,prompt)	((void)buff, readline(prompt))
 #define lua_saveline(line)	add_history(line)
 #define lua_freeline(line)	free(line)
+#if defined(GRIT_POWER_READLINE_HISTORY)
+  #define lua_readlinehistory(L,f) ((void)L, (void)read_history(f))
+  #define lua_writelinehistory(L,f) ((void)L, (void)write_history(f))
+#endif
 
 #else		/* }{ */
 /* use dynamically loaded readline (or nothing) */
@@ -692,6 +717,12 @@ static void l_print (lua_State *L) {
 }
 
 
+#if defined(GRIT_POWER_READLINE_HISTORY) && !defined(lua_readlinehistory)
+#define lua_readlinehistory(L,f) { (void)L; (void)f; }
+#define lua_writelinehistory(L,f) { (void)L; (void)f; }
+#endif
+
+
 /*
 ** Do the REPL: repeatedly read (load) a line, evaluate (call) it, and
 ** print any results.
@@ -699,6 +730,12 @@ static void l_print (lua_State *L) {
 static void doREPL (lua_State *L) {
   int status;
   const char *oldprogname = progname;
+#if defined(GRIT_POWER_READLINE_HISTORY)
+  const char *history_path = getenv(LUA_HISTORY);
+  if (history_path == NULL)  /* no environment variable? */
+    history_path = LUA_HISTORY_DEFAULT;  /* use default */
+  lua_readlinehistory(L, history_path);
+#endif
   progname = NULL;  /* no 'progname' on errors in interactive mode */
   lua_initreadline(L);
   while ((status = loadline(L)) != -1) {
@@ -709,6 +746,9 @@ static void doREPL (lua_State *L) {
   }
   lua_settop(L, 0);  /* clear stack */
   lua_writeline();
+#if defined(GRIT_POWER_READLINE_HISTORY)
+  lua_writelinehistory(L, history_path);
+#endif
   progname = oldprogname;
 }
 

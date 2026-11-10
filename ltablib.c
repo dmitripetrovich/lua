@@ -19,6 +19,7 @@
 #include "lauxlib.h"
 #include "lualib.h"
 #include "llimits.h"
+#include "lgrit_lib.h"
 
 
 /*
@@ -206,9 +207,15 @@ static int tpack (lua_State *L) {
 
 static int tunpack (lua_State *L) {
   lua_Unsigned n;
-  lua_Integer len = aux_getn(L, 1, TAB_R);
-  lua_Integer i = luaL_optinteger(L, 2, 1);
-  lua_Integer e = luaL_opt(L, luaL_checkinteger, 3, len);
+  lua_Integer len, i, e;
+  if (lua_isvector_t(L, 1))
+    return glm_unpack_vector(L, 1);
+  else if (lua_ismatrix_t(L, 1))
+    return glm_unpack_matrix(L, 1);
+
+  len = aux_getn(L, 1, TAB_R);
+  i = luaL_optinteger(L, 2, 1);
+  e = luaL_opt(L, luaL_checkinteger, 3, len);
   if (i > e) return 0;  /* empty range */
   n = l_castS2U(e) - l_castS2U(i);  /* number of elements minus 1 */
   if (l_unlikely(n >= (unsigned int)INT_MAX  ||
@@ -406,6 +413,45 @@ static int sort (lua_State *L) {
   return 0;
 }
 
+#if defined(GRIT_POWER_WOW)
+static int type (lua_State *L) {
+  if (lua_type(L, 1) == LUA_TTABLE) {
+    switch (lua_tabletype(L, 1)) {
+      case LUA_TTEMPTY: lua_pushstring(L, "empty"); break;
+      case LUA_TTARRAY: lua_pushstring(L, "array"); break;
+      case LUA_TTHASH: lua_pushstring(L, "hash"); break;
+      case LUA_TTMIXED: lua_pushstring(L, "mixed"); break;
+      default: luaL_pushfail(L); break;
+    }
+  }
+  else {
+    luaL_checkany(L, 1);
+    luaL_pushfail(L);
+  }
+  return 1;
+}
+
+static int treset (lua_State *L) {
+  luaL_checktype(L, 1, LUA_TTABLE);
+  lua_wipetable(L, 1);
+
+  lua_pushvalue(L, 1);
+  return 1;
+}
+
+static int tclone (lua_State *L) {
+  luaL_checktype(L, 1, LUA_TTABLE);
+  if (lua_gettop(L) >= 2)  /* supplied sink */
+    luaL_checktype(L, 2, LUA_TTABLE);
+  else
+    lua_newtable(L);
+
+  lua_clonetable(L, 1, 2);
+  lua_pushvalue(L, 2);
+  return 1;
+}
+#endif
+
 /* }====================================================== */
 
 
@@ -418,6 +464,12 @@ static const luaL_Reg tab_funcs[] = {
   {"remove", tremove},
   {"move", tmove},
   {"sort", sort},
+#if defined(GRIT_POWER_WOW)
+  {"type", type},
+  {"new", tcreate},
+  {"wipe", treset}, {"clear", treset},
+  {"clone", tclone},
+#endif
   {NULL, NULL}
 };
 

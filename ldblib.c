@@ -21,12 +21,13 @@
 #include "llimits.h"
 
 
+#if !defined(LUA_SANDBOX)
 /*
 ** The hook table at registry[HOOKKEY] maps threads to their current
 ** hook function.
 */
 static const char *const HOOKKEY = "_HOOKKEY";
-
+#endif
 
 /*
 ** If L1 != L, L1 can be in any state, and therefore there are no
@@ -39,30 +40,44 @@ static void checkstack (lua_State *L, lua_State *L1, int n) {
 }
 
 
-static int db_getregistry (lua_State *L) {
+#if !defined(LUA_SANDBOX)
+static int db_getregistry(lua_State *L) {
   lua_pushvalue(L, LUA_REGISTRYINDEX);
   return 1;
 }
+#endif
 
 
 static int db_getmetatable (lua_State *L) {
   luaL_checkany(L, 1);
   if (!lua_getmetatable(L, 1)) {
-    lua_pushnil(L);  /* no metatable */
+    lua_pushnil(L);
+    return 1;  /* no metatable */
   }
-  return 1;
+#if defined(LUA_SANDBOX)
+  luaL_getmetafield(L, 1, "__metatable");
+#endif
+  return 1;  /* returns either __metatable field (if present) or metatable */
 }
 
 
 static int db_setmetatable (lua_State *L) {
   int t = lua_type(L, 2);
   luaL_argexpected(L, t == LUA_TNIL || t == LUA_TTABLE, 2, "nil or table");
+#if defined(LUA_SANDBOX)
+  /* block setting the mt of a userdata value, or the global mt for lightuserdata */
+  t = lua_type(L, 1);
+  luaL_argexpected(L, t != LUA_TUSERDATA && t != LUA_TLIGHTUSERDATA, 1, "non-userdata");
+  if (l_unlikely(luaL_getmetafield(L, 1, "__metatable") != LUA_TNIL))
+    return luaL_error(L, "cannot change a protected metatable");
+#endif
   lua_settop(L, 2);
   lua_setmetatable(L, 1);
   return 1;  /* return 1st argument */
 }
 
 
+#if !defined(LUA_SANDBOX)
 static int db_getuservalue (lua_State *L) {
   int n = (int)luaL_optinteger(L, 2, 1);
   if (lua_type(L, 1) != LUA_TUSERDATA)
@@ -73,8 +88,10 @@ static int db_getuservalue (lua_State *L) {
   }
   return 1;
 }
+#endif
 
 
+#if !defined(LUA_SANDBOX)
 static int db_setuservalue (lua_State *L) {
   int n = (int)luaL_optinteger(L, 3, 1);
   luaL_checktype(L, 1, LUA_TUSERDATA);
@@ -84,6 +101,7 @@ static int db_setuservalue (lua_State *L) {
     luaL_pushfail(L);
   return 1;
 }
+#endif
 
 
 /*
@@ -203,6 +221,7 @@ static int db_getinfo (lua_State *L) {
 }
 
 
+#if !defined(LUA_SANDBOX)
 static int db_getlocal (lua_State *L) {
   int arg;
   lua_State *L1 = getthread(L, &arg);
@@ -253,6 +272,7 @@ static int db_setlocal (lua_State *L) {
   lua_pushstring(L, name);
   return 1;
 }
+#endif
 
 
 /*
@@ -261,7 +281,11 @@ static int db_setlocal (lua_State *L) {
 static int auxupvalue (lua_State *L, int get) {
   const char *name;
   int n = (int)luaL_checkinteger(L, 2);  /* upvalue index */
+#if defined(LUA_SANDBOX)
+  luaL_argcheck(L, lua_isfunction(L, 1) && !lua_iscfunction(L, 1), 1, "Lua function expected");
+#else
   luaL_checktype(L, 1, LUA_TFUNCTION);  /* closure */
+#endif
   name = get ? lua_getupvalue(L, 1, n) : lua_setupvalue(L, 1, n);
   if (name == NULL) return 0;
   lua_pushstring(L, name);
@@ -275,11 +299,11 @@ static int db_getupvalue (lua_State *L) {
 }
 
 
+#if !defined(LUA_SANDBOX)
 static int db_setupvalue (lua_State *L) {
   luaL_checkany(L, 3);
   return auxupvalue(L, 0);
 }
-
 
 /*
 ** Check whether a given upvalue from a given closure exists and
@@ -419,7 +443,6 @@ static int db_gethook (lua_State *L) {
   return 3;
 }
 
-
 static int db_debug (lua_State *L) {
   for (;;) {
     char buffer[250];
@@ -433,6 +456,7 @@ static int db_debug (lua_State *L) {
     lua_settop(L, 0);  /* remove eventual returns */
   }
 }
+#endif
 
 
 static int db_traceback (lua_State *L) {
@@ -450,22 +474,24 @@ static int db_traceback (lua_State *L) {
 
 
 static const luaL_Reg dblib[] = {
+  {"getinfo", db_getinfo},
+  {"getmetatable", db_getmetatable},
+  {"setmetatable", db_setmetatable},
+  {"getupvalue", db_getupvalue},
+  {"traceback", db_traceback},
+#if !defined(LUA_SANDBOX)
   {"debug", db_debug},
   {"getuservalue", db_getuservalue},
   {"gethook", db_gethook},
-  {"getinfo", db_getinfo},
   {"getlocal", db_getlocal},
   {"getregistry", db_getregistry},
-  {"getmetatable", db_getmetatable},
-  {"getupvalue", db_getupvalue},
   {"upvaluejoin", db_upvaluejoin},
   {"upvalueid", db_upvalueid},
   {"setuservalue", db_setuservalue},
   {"sethook", db_sethook},
   {"setlocal", db_setlocal},
-  {"setmetatable", db_setmetatable},
   {"setupvalue", db_setupvalue},
-  {"traceback", db_traceback},
+#endif
   {NULL, NULL}
 };
 

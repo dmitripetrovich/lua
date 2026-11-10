@@ -21,6 +21,7 @@
 #include "lauxlib.h"
 #include "lualib.h"
 #include "llimits.h"
+#include "lgrit_lib.h"
 
 
 #undef PI
@@ -698,6 +699,132 @@ static int math_log10 (lua_State *L) {
   return 1;
 }
 
+#if defined(LUA_C99_MATHLIB)
+static int math_asinh (lua_State *L) {
+  lua_pushnumber(L, l_mathop(asinh)(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_acosh (lua_State *L) {
+  lua_pushnumber(L, l_mathop(acosh)(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_atanh (lua_State *L) {
+  lua_pushnumber(L, l_mathop(atanh)(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_cbrt (lua_State *L) {
+  lua_pushnumber(L, l_mathop(cbrt)(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_copysign (lua_State *L) {
+  lua_pushnumber(L, l_mathop(copysign)(luaL_checknumber(L, 1), luaL_checknumber(L, 2)));
+  return 1;
+}
+
+static int math_erf (lua_State *L) {
+  lua_pushnumber(L, l_mathop(erf)(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_erfc (lua_State *L) {
+  lua_pushnumber(L, l_mathop(erfc)(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_exp2 (lua_State *L) {
+  lua_pushnumber(L, l_mathop(exp2)(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_expm1 (lua_State *L) {
+  lua_pushnumber(L, l_mathop(expm1)(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_fdim (lua_State *L) {
+  lua_pushnumber(L, l_mathop(fdim)(luaL_checknumber(L, 1), luaL_checknumber(L, 2)));
+  return 1;
+}
+
+static int math_gamma (lua_State *L) {
+  lua_pushnumber(L, l_mathop(tgamma)(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_hypot (lua_State *L) {
+  lua_pushnumber(L, l_mathop(hypot)(luaL_checknumber(L, 1), luaL_checknumber(L, 2)));
+  return 1;
+}
+
+static int math_isfinite (lua_State *L) {
+  lua_pushboolean(L, isfinite(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_isinf (lua_State *L) {
+  lua_pushboolean(L, isinf(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_isnan (lua_State *L) {
+  lua_pushboolean(L, isnan(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_isnormal (lua_State *L) {
+  lua_pushboolean(L,isnormal(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_lgamma (lua_State *L) {
+  lua_pushnumber(L, l_mathop(lgamma)(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_log1p (lua_State *L) {
+  lua_pushnumber(L, l_mathop(log1p)(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_logb (lua_State *L) {
+  lua_pushnumber(L, l_mathop(logb)(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_nearbyint (lua_State *L) {
+  lua_pushnumber(L, l_mathop(nearbyint)(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_nextafter (lua_State *L) {
+  lua_pushnumber(L, l_mathop(nextafter)(luaL_checknumber(L, 1), luaL_checknumber(L, 2)));
+  return 1;
+}
+
+static int math_remainder (lua_State *L) {
+  lua_pushnumber(L, l_mathop(remainder)(luaL_checknumber(L, 1), luaL_checknumber(L, 2)));
+  return 1;
+}
+
+static int math_round (lua_State *L) {
+  lua_pushnumber(L, l_mathop(round)(luaL_checknumber(L, 1)));
+  return 1;
+}
+
+static int math_scalbn (lua_State *L) {
+  lua_pushnumber(L, l_mathop(scalbn)(luaL_checknumber(L, 1), (int)luaL_checkinteger(L, 2)));
+  return 1;
+}
+
+static int math_trunc (lua_State *L) {
+  lua_pushnumber(L, l_mathop(trunc)(luaL_checknumber(L, 1)));
+  return 1;
+}
+#endif  /* LUA_C99_MATHLIB */
 #endif
 /* }================================================================== */
 
@@ -734,7 +861,36 @@ static const luaL_Reg mathlib[] = {
   {"tanh", math_tanh},
   {"pow", math_pow},
   {"log10", math_log10},
+#if defined(LUA_C99_MATHLIB)
+  { "asinh", math_asinh },
+  { "acosh", math_acosh },
+  { "atanh", math_atanh },
+  { "cbrt", math_cbrt },
+  { "copysign", math_copysign },
+  { "erf", math_erf },
+  { "erfc", math_erfc },
+  { "exp2", math_exp2 },
+  { "expm1", math_expm1 },
+  { "fdim", math_fdim },
+  { "gamma", math_gamma },
+  { "hypot", math_hypot },
+  { "isfinite", math_isfinite },
+  { "isinf", math_isinf },
+  { "isnan", math_isnan },
+  { "isnormal", math_isnormal },
+  { "lgamma", math_lgamma },
+  { "log1p", math_log1p },
+  { "logb", math_logb },
+  { "nearbyint", math_nearbyint },
+  { "nextafter", math_nextafter },
+  { "remainder", math_remainder },
+  { "round", math_round },
+  { "scalbn", math_scalbn },
+  { "trunc", math_trunc },
 #endif
+#endif
+  /* grit-lua compatbility */
+  { "clamp", glmVec_clamp },
   /* placeholders */
   {"random", NULL},
   {"randomseed", NULL},
@@ -759,6 +915,10 @@ LUAMOD_API int luaopen_math (lua_State *L) {
   lua_setfield(L, -2, "maxinteger");
   lua_pushinteger(L, LUA_MININTEGER);
   lua_setfield(L, -2, "mininteger");
+#if defined(LUA_C99_MATHLIB)
+  lua_pushnumber(L, LUA_NUMBER_EPS); lua_setfield(L, -2, "eps");
+  lua_pushnumber(L, (lua_Number)FLT_EPSILON); lua_setfield(L, -2, "feps");
+#endif
   setrandfunc(L);
   return 1;
 }

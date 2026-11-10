@@ -34,6 +34,7 @@
 #include "lgc.h"
 #include "lmem.h"
 #include "lobject.h"
+#include "lglm_core.h"
 #include "lstate.h"
 #include "lstring.h"
 #include "ltable.h"
@@ -195,6 +196,11 @@ static Node *mainpositionTV (const Table *t, const TValue *key) {
       lua_Number n = fltvalue(key);
       return hashmod(t, l_hashfloat(n));
     }
+    case LUA_VVECTOR2:
+    case LUA_VVECTOR3:
+    case LUA_VVECTOR4:
+    case LUA_VQUAT:
+      return hashmod(t, glmVec_hash(key));
     case LUA_VSHRSTR: {
       TString *ts = tsvalue(key);
       return hashstr(t, ts);
@@ -215,6 +221,9 @@ static Node *mainpositionTV (const Table *t, const TValue *key) {
       lua_CFunction f = fvalue(key);
       return hashpointer(t, f);
     }
+#if defined(GRIT_POWER_BLOB)
+    case LUA_VBLOBSTR:  /* blobs stored by pointer */
+#endif
     default: {
       GCObject *o = gcvalue(key);
       return hashpointer(t, o);
@@ -276,6 +285,14 @@ static int equalkey (const TValue *k1, const Node *n2, int deadok) {
         return fvalue(k1) == fvalueraw(keyval(n2));
       case ctb(LUA_VLNGSTR):
         return luaS_eqstr(tsvalue(k1), keystrval(n2));
+      case LUA_VVECTOR2:
+      case LUA_VVECTOR3:
+      case LUA_VVECTOR4:
+      case LUA_VQUAT:
+        return glmVec_equalKey(k1, n2, keytt(n2));
+#if defined(GRIT_POWER_BLOB)
+      case ctb(LUA_VBLOBSTR):  /* blobs stored by pointer */
+#endif
       default:
         return gcvalue(k1) == gcvalueraw(keyval(n2));
     }
@@ -739,7 +756,11 @@ void luaH_resize (lua_State *L, Table *t, unsigned newasize,
   t->array = newarray;  /* set new array part */
   t->asize = newasize;
   if (newarray != NULL)
+#if defined(GRIT_COMPAT_GETN)
+    *lenhint(t) = newasize;
+#else
     *lenhint(t) = newasize / 2u;  /* set an initial hint */
+#endif
   clearNewSlice(t, oldasize, newasize);
   /* re-insert elements from old hash part into new parts */
   reinserthash(L, &newt, t);  /* 'newt' now has the old hash */
@@ -1168,6 +1189,10 @@ void luaH_finishset (lua_State *L, Table *t, const TValue *key,
       else if (l_unlikely(luai_numisnan(f)))
         luaG_runerror(L, "table index is NaN");
     }
+    else if (ttisvector(key)) {
+      if (l_unlikely(!glmVec_isfinite(key)))
+        luaG_runerror(L, "vector index has NaN component");
+    }
     else if (isextstr(key)) {  /* external string? */
       /* If string is short, must internalize it to be used as table key */
       TString *ts = luaS_normstr(L, tsvalue(key));
@@ -1342,6 +1367,71 @@ lua_Unsigned luaH_getn (lua_State *L, Table *t) {
     return hash_search(L, t, asize);
 }
 
+
+#if defined(GRIT_POWER_WOW)
+#include <string.h>
+
+int luaH_type (const Table *t) {
+  if (t->asize == 0)
+    return isdummy(t) ? LUA_TTEMPTY : LUA_TTHASH;
+  return isdummy(t) ? LUA_TTARRAY : LUA_TTMIXED;
+}
+
+void luaH_wipetable (Table *t) {
+  unsigned int asize = t->asize;
+  unsigned int i = 0;
+  for (; i < asize; i++)  /* array part */
+    *getArrTag(t, i) = LUA_VNIL;
+
+  if (!isdummy(t)) {  /* traverse hash part */
+    Node *n, *limit = gnode(t, cast_sizet(sizenode(t)));
+    for (n = gnode(t, 0); n < limit; n++)
+      setnilvalue(gval(n));
+  }
+
+  /* luaC_barrierback_ not required: all added values are nil/not-collectible */
+}
+
+void luaH_clonetable (lua_State *L, const Table *from, Table *to) {
+  Table newt;  /* to keep the new hash part */
+  unsigned int asize = from->asize;
+  Value *newarray = NULL;
+  if (from == to)
+    return;
+
+  newt.flags = 0;
+  setnodevector(L, &newt, 0);  /* ensure no elements to hash part */
+  if (!isdummy(from)) {
+    unsigned int size = cast_uint(sizenode(from));
+    setnodevector(L, &newt, size);
+    lua_assert(newt.lsizenode == from->lsizenode);
+    memcpy(newt.node, from->node, size * sizeof(Node));
+    if (haslastfree(from))
+      getlastfree(&newt) = newt.node + (getlastfree(from) - from->node);
+  }
+
+  if (asize > 0) {
+    size_t asizeb = concretesize(asize);
+    newarray = cast(Value *, luaM_reallocvector(L, NULL, 0, asizeb, lu_byte));
+    if (l_unlikely(newarray == NULL)) {  /* allocation failed? */
+      freehash(L, &newt);  /* release new hash part */
+      luaM_error(L);  /* raise error */
+    }
+    newarray += asize;  /* shift pointer to the end of value segment */
+    memcpy(newarray - asize, from->array - asize, asizeb);
+  }
+
+  resizearray(L, to, to->asize, 0);
+  freehash(L, to);  /* delete previous hash part */
+  to->array = newarray;
+  to->asize = asize;
+  to->node = newt.node;
+  to->lsizenode = newt.lsizenode;
+  to->flags = cast_byte((to->flags & NOTBITDUMMY) | (newt.flags & BITDUMMY));
+  if (isblack(obj2gco(to)))
+    luaC_barrierback_(L, obj2gco(to));
+}
+#endif
 
 
 #if defined(LUA_DEBUG)

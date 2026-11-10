@@ -9,6 +9,10 @@
 #ifndef lua_h
 #define lua_h
 
+#ifndef GAME_SD
+#define GAME_SD
+#endif
+
 #include <stdarg.h>
 #include <stddef.h>
 
@@ -55,6 +59,8 @@
 
 typedef struct lua_State lua_State;
 
+typedef int (*lua_UndumpHook) (const char* p, size_t n);
+
 
 /*
 ** basic types
@@ -65,13 +71,28 @@ typedef struct lua_State lua_State;
 #define LUA_TBOOLEAN		1
 #define LUA_TLIGHTUSERDATA	2
 #define LUA_TNUMBER		3
-#define LUA_TSTRING		4
-#define LUA_TTABLE		5
-#define LUA_TFUNCTION		6
-#define LUA_TUSERDATA		7
-#define LUA_TTHREAD		8
+#define LUA_TVECTOR		4
+#define LUA_TSTRING		5
+#define LUA_TTABLE		6
+#define LUA_TFUNCTION		7
+#define LUA_TUSERDATA		8
+#define LUA_TTHREAD		9
+#define LUA_TMATRIX		10
 
-#define LUA_NUMTYPES		9
+#define LUA_NUMTYPES		11
+
+/*
+** vector variants exposed in the library to simplify the internal/external
+** translation between vector-types. (gritLua compatibility)
+**
+** @NOTE: LUA_VVECTOR1 is an implicit vector type. Internally this value must
+** map to LUA_VNUMFLT.
+*/
+#define LUA_VVECTOR1 (LUA_TNUMBER | (1 << 4))
+#define LUA_VVECTOR2 (LUA_TVECTOR | (0 << 4))
+#define LUA_VVECTOR3 (LUA_TVECTOR | (1 << 4))
+#define LUA_VVECTOR4 (LUA_TVECTOR | (2 << 4))
+#define LUA_VQUAT    (LUA_TVECTOR | (3 << 4))
 
 
 
@@ -286,6 +307,33 @@ LUA_API void  (lua_rawsetp) (lua_State *L, int idx, const void *p);
 LUA_API int   (lua_setmetatable) (lua_State *L, int objindex);
 LUA_API int   (lua_setiuservalue) (lua_State *L, int idx, int n);
 
+/*
+** extended API
+*/
+#if defined(GRIT_POWER_WOW)
+#define LUA_TTEMPTY 0
+#define LUA_TTARRAY 1
+#define LUA_TTHASH  2
+#define LUA_TTMIXED 3
+
+LUA_API void  (lua_wipetable) (lua_State *L, int idx);
+LUA_API void  (lua_clonetable) (lua_State *L, int fromidx, int toidx);
+LUA_API int   (lua_tabletype) (lua_State *L, int idx);
+#endif
+
+/*
+** string blob API
+*/
+#if defined(GRIT_POWER_BLOB)
+/* Returns 1 if the value at the given index is a blob variant */
+LUA_API int (lua_isstringblob) (lua_State *L, int idx);
+
+/* Converts the string at the given index to a (C-)string blob. */
+LUA_API char *(lua_tostringblob) (lua_State *L, int idx, size_t *len);
+
+/* Pushes the string pointed to by s with size len onto the stack as a blob variant. */
+LUA_API char *(lua_pushblob) (lua_State *L, size_t len);
+#endif
 
 /*
 ** 'load' and 'call' functions (load and run Lua code)
@@ -403,6 +451,8 @@ LUA_API void (lua_closeslot) (lua_State *L, int idx);
 
 #define lua_isfunction(L,n)	(lua_type(L, (n)) == LUA_TFUNCTION)
 #define lua_istable(L,n)	(lua_type(L, (n)) == LUA_TTABLE)
+#define lua_ismatrix_t(L, n) (lua_type(L, (n)) == LUA_TMATRIX)
+#define lua_isvector_t(L, n) (lua_type(L, (n)) == LUA_TVECTOR)
 #define lua_islightuserdata(L,n)	(lua_type(L, (n)) == LUA_TLIGHTUSERDATA)
 #define lua_isnil(L,n)		(lua_type(L, (n)) == LUA_TNIL)
 #define lua_isboolean(L,n)	(lua_type(L, (n)) == LUA_TBOOLEAN)
@@ -456,6 +506,8 @@ LUA_API void (lua_closeslot) (lua_State *L, int idx);
 #define LUA_HOOKLINE	2
 #define LUA_HOOKCOUNT	3
 #define LUA_HOOKTAILCALL 4
+#define LUA_HOOKCOENTER 5
+#define LUA_HOOKCOEXIT 6
 
 
 /*
@@ -465,6 +517,8 @@ LUA_API void (lua_closeslot) (lua_State *L, int idx);
 #define LUA_MASKRET	(1 << LUA_HOOKRET)
 #define LUA_MASKLINE	(1 << LUA_HOOKLINE)
 #define LUA_MASKCOUNT	(1 << LUA_HOOKCOUNT)
+#define LUA_MASKCOENTER	(1 << LUA_HOOKCOENTER)
+#define LUA_MASKCOEXIT	(1 << LUA_HOOKCOEXIT)
 
 
 LUA_API int (lua_getstack) (lua_State *L, int level, lua_Debug *ar);
@@ -506,6 +560,17 @@ struct lua_Debug {
   struct CallInfo *i_ci;  /* active function */
 };
 
+/*
+** GameLua: internal dbg
+*/
+
+LUA_API int lua_toprotos (lua_State* L, int idx);
+
+#define LUA_OPAQUEID_FMT "%016" LUA_INTEGER_FRMLEN "x"
+
+/* get or create a unique identifier for the value at the given index */
+LUA_API lua_Integer lua_opaqueid(lua_State *L, int idx);
+
 /* }====================================================================== */
 
 
@@ -516,11 +581,18 @@ struct lua_Debug {
 #define LUA_VERSION_MINOR	LUAI_TOSTR(LUA_VERSION_MINOR_N)
 #define LUA_VERSION_RELEASE	LUAI_TOSTR(LUA_VERSION_RELEASE_N)
 
-#define LUA_VERSION	"Lua " LUA_VERSION_MAJOR "." LUA_VERSION_MINOR
+#define LUA_VERSION	"LuaGLM " LUA_VERSION_MAJOR "." LUA_VERSION_MINOR
 #define LUA_RELEASE	LUA_VERSION "." LUA_VERSION_RELEASE
 
 
 /******************************************************************************
+* LuaGLM
+* Copyright (C) 2020 - gottfriedleibniz
+\******************************************************************************
+* OpenGL Mathematics (GLM)
+* Copyright (C) 2005 - G-Truc Creation
+\******************************************************************************
+* Lua
 * Copyright (C) 1994-2026 Lua.org, PUC-Rio.
 *
 * Permission is hereby granted, free of charge, to any person obtaining

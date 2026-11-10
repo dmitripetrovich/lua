@@ -164,7 +164,7 @@ struct lua_longjmp;  /* defined in ldo.c */
 #define KGC_GENMAJOR	2	/* generational in major mode */
 
 
-typedef struct stringtable {
+typedef struct GAME_SD stringtable {
   TString **hash;  /* array of buckets (linked lists of strings) */
   int nuse;  /* number of elements */
   int size;  /* number of buckets */
@@ -184,7 +184,7 @@ typedef struct stringtable {
 ** - field 'nres' is used only while closing tbc variables when
 ** returning from a function;
 */
-struct CallInfo {
+typedef struct GAME_SD CallInfo {
   StkIdRel func;  /* function index in the stack */
   StkIdRel top;  /* top for this function */
   struct CallInfo *previous, *next;  /* dynamic call link */
@@ -206,7 +206,7 @@ struct CallInfo {
     int nres;  /* number of values returned */
   } u2;
   l_uint32 callstatus;
-};
+} CallInfo;
 
 
 /*
@@ -324,7 +324,7 @@ typedef struct LX {
 /*
 ** 'global state', shared by all threads of this state
 */
-typedef struct global_State {
+typedef struct GAME_SD global_State {
   lua_Alloc frealloc;  /* function to reallocate memory */
   void *ud;         /* auxiliary data to 'frealloc' */
   l_mem GCtotalbytes;  /* number of bytes currently allocated + debt */
@@ -400,6 +400,7 @@ union GCUnion {
   struct Proto p;
   struct lua_State th;  /* thread */
   struct UpVal upv;
+  struct GCMatrix mat;
 };
 
 
@@ -422,6 +423,7 @@ union GCUnion {
 #define gco2p(o)	gco2(LUA_VPROTO, Proto, o)
 #define gco2th(o)	gco2(LUA_VTHREAD, lua_State, o)
 #define gco2upv(o)	gco2(LUA_VUPVAL, UpVal, o)
+#define gco2mat(o)	gco2(LUA_VMATRIX, GCMatrix, o)
 
 
 /*

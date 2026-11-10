@@ -78,6 +78,9 @@ LUAI_FUNC void luaK_dischargevars (FuncState *fs, expdesc *e);
 LUAI_FUNC int luaK_exp2anyreg (FuncState *fs, expdesc *e);
 LUAI_FUNC void luaK_exp2anyregup (FuncState *fs, expdesc *e);
 LUAI_FUNC void luaK_exp2nextreg (FuncState *fs, expdesc *e);
+#if defined(GRIT_POWER_IFEXPR)
+LUAI_FUNC void luaK_exp2reg (FuncState *fs, expdesc *e, int reg);
+#endif
 LUAI_FUNC void luaK_exp2val (FuncState *fs, expdesc *e);
 LUAI_FUNC void luaK_self (FuncState *fs, expdesc *e, expdesc *key);
 LUAI_FUNC void luaK_indexed (FuncState *fs, expdesc *t, expdesc *k);

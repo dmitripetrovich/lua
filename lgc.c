@@ -145,9 +145,16 @@ static l_mem objsize (GCObject *o) {
       res = sizestrshr(cast_uint(ts->shrlen));
       break;
     }
+#if defined(GRIT_POWER_BLOB)
+    case LUA_VBLOBSTR:
+#endif
     case LUA_VLNGSTR: {
       TString *ts = gco2ts(o);
       res = luaS_sizelngstr(ts->u.lnglen, ts->shrlen);
+      break;
+    }
+    case LUA_VMATRIX: {
+      res = sizeof(GCMatrix);
       break;
     }
     case LUA_VUPVAL: {
@@ -222,7 +229,11 @@ static void clearkey (Node *n) {
 */
 static int iscleared (global_State *g, const GCObject *o) {
   if (o == NULL) return 0;  /* non-collectable value */
+#if defined(GRIT_POWER_BLOB)  /* blobs are to be removed from weak tables */
+  else if (novariant(o->tt) == LUA_TSTRING && withvariant(o->tt) != LUA_VBLOBSTR) {
+#else
   else if (novariant(o->tt) == LUA_TSTRING) {
+#endif
     markobject(g, o);  /* strings are 'values', so are never weak */
     return 0;
   }
@@ -339,7 +350,11 @@ GCObject *luaC_newobj (lua_State *L, lu_byte tt, size_t sz) {
 static void reallymarkobject (global_State *g, GCObject *o) {
   g->GCmarked += objsize(o);
   switch (o->tt) {
+    case LUA_VMATRIX:
     case LUA_VSHRSTR:
+#if defined(GRIT_POWER_BLOB)
+    case LUA_VBLOBSTR:
+#endif
     case LUA_VLNGSTR: {
       set2black(o);  /* nothing to visit */
       break;
@@ -855,6 +870,9 @@ static void freeobj (lua_State *L, GCObject *o) {
     case LUA_VTABLE:
       luaH_free(L, gco2t(o));
       break;
+    case LUA_VMATRIX:
+      luaM_free_(L, gco2mat(o), sizeof(GCMatrix));
+      break;
     case LUA_VTHREAD:
       luaE_freethread(L, gco2th(o));
       break;
@@ -869,6 +887,9 @@ static void freeobj (lua_State *L, GCObject *o) {
       luaM_freemem(L, ts, sizestrshr(cast_uint(ts->shrlen)));
       break;
     }
+#if defined(GRIT_POWER_BLOB)
+    case LUA_VBLOBSTR:
+#endif
     case LUA_VLNGSTR: {
       TString *ts = gco2ts(o);
       if (ts->shrlen == LSTRMEM)  /* must free external string? */

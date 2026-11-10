@@ -135,6 +135,24 @@ static void checkclosemth (lua_State *L, StkId level) {
 }
 
 
+#if defined(GRIT_POWER_DEFER)
+static void calldefermethod (lua_State *L, TValue *func, TValue *err) {
+  if (l_likely(ttisfunction(func))) {
+    StkId top = L->top.p;
+    setobj2s(L, top, func);  /* will call defer function */
+    if (err != NULL) {
+      setobj2s(L, top + 1, err);  /* and error msg. as 1st argument */
+    }
+    else {
+      setnilvalue(s2v(top + 1));
+    }
+    L->top.p = top + 2;  /* add function and arguments */
+    luaD_callnoyield(L, top, 0);
+  }
+}
+#endif
+
+
 /*
 ** Prepare and call a closing method.
 ** If status is CLOSEKTOP, the call to the closing method will be pushed
@@ -158,6 +176,11 @@ static void prepcallclosemth (lua_State *L, StkId level, TStatus status,
       luaD_seterrorobj(L, status, level + 1);  /* set error object */
       break;
   }
+#if defined(GRIT_POWER_DEFER)
+  if (level->tbclist.is_deferred)
+    calldefermethod(L, uv, errobj);
+  else
+#endif
   callclosemethod(L, uv, errobj, yy);
 }
 
@@ -169,6 +192,24 @@ static void prepcallclosemth (lua_State *L, StkId level, TStatus status,
 /*
 ** Insert a variable in the list of to-be-closed variables.
 */
+#if defined(GRIT_POWER_DEFER)
+void luaF_newtbcupval (lua_State *L, StkId level, int deferred) {
+  lua_assert(level > L->tbclist.p);
+  if (!deferred) {
+    if (l_isfalse(s2v(level)))
+      return;  /* false doesn't need to be closed */
+    checkclosemth(L, level);  /* value must have a close method */
+  }
+  while (cast_uint(level - L->tbclist.p) > MAXDELTA) {
+    L->tbclist.p += MAXDELTA;  /* create a dummy node at maximum delta */
+    L->tbclist.p->tbclist.delta = 0;
+    L->tbclist.p->tbclist.is_deferred = 0;
+  }
+  level->tbclist.delta = cast(unsigned short, level - L->tbclist.p);
+  level->tbclist.is_deferred = deferred ? 1 : 0;
+  L->tbclist.p = level;
+}
+#else
 void luaF_newtbcupval (lua_State *L, StkId level) {
   lua_assert(level > L->tbclist.p);
   if (l_isfalse(s2v(level)))
@@ -181,6 +222,7 @@ void luaF_newtbcupval (lua_State *L, StkId level) {
   level->tbclist.delta = cast(unsigned short, level - L->tbclist.p);
   L->tbclist.p = level;
 }
+#endif
 
 
 void luaF_unlinkupval (UpVal *uv) {

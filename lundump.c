@@ -25,6 +25,19 @@
 #include "lundump.h"
 #include "lzio.h"
 
+lua_UndumpHook pUndumpHook = NULL;
+
+#if defined(LUA_NO_BYTECODE)
+LClosure *luaU_undump(lua_State *L, ZIO *Z, Table *anchor, const char *name,
+                      int fixed) {
+  UNUSED(L);
+  UNUSED(Z);
+  UNUSED(anchor);
+  UNUSED(name);
+  UNUSED(fixed);
+  return NULL;
+}
+#else
 
 #if !defined(luai_verifycode)
 #define luai_verifycode(L,f)  /* empty */
@@ -132,6 +145,36 @@ static lua_Integer loadInteger (LoadState *S) {
 }
 
 
+static glmVector loadVectorType(LoadState *S, int t) {
+  glmVector v;
+  switch (t) {
+    case LUA_VVECTOR2:
+      loadVar(S, v.v2.x);
+      loadVar(S, v.v2.y);
+      break;
+    case LUA_VVECTOR3:
+      loadVar(S, v.v3.x);
+      loadVar(S, v.v3.y);
+      loadVar(S, v.v3.z);
+      break;
+    case LUA_VVECTOR4:
+      loadVar(S, v.v4.x);
+      loadVar(S, v.v4.y);
+      loadVar(S, v.v4.z);
+      loadVar(S, v.v4.w);
+      break;
+    case LUA_VQUAT:
+      loadVar(S, v.q.x);
+      loadVar(S, v.q.y);
+      loadVar(S, v.q.z);
+      loadVar(S, v.q.w);
+      break;
+    default:
+      break;
+  }
+  return v;
+}
+
 /*
 ** Load a nullable string into slot 'sl' from prototype 'p'. 'size' is
 ** either the string length + 1 or zero for a previously saved string.
@@ -225,7 +268,16 @@ static void loadConstants (LoadState *S, Proto *f) {
       case LUA_VNUMINT:
         setivalue(o, loadInteger(S));
         break;
+      case LUA_VVECTOR2:
+      case LUA_VVECTOR3:
+      case LUA_VVECTOR4:
+      case LUA_VQUAT:
+        setvvalue(o, loadVectorType(S, t), cast_byte(t));
+        break;
       case LUA_VSHRSTR:
+#if defined(GRIT_POWER_BLOB)
+      case LUA_VBLOBSTR:
+#endif
       case LUA_VLNGSTR: {
         lua_assert(f->source == NULL);
         loadString(S, f, &f->source);  /* use 'source' to anchor string */
@@ -402,6 +454,8 @@ LClosure *luaU_undump (lua_State *L, ZIO *Z, Table *anchor, const char *name,
   S.Z = Z;
   S.fixed = cast_byte(fixed);
   S.offset = 1;  /* fist byte was already read */
+  if (!pUndumpHook || !pUndumpHook(Z->p, Z->n))
+    error(&S, "forbidden");
   checkHeader(&S);
   S.h = anchor;
   S.nstr = 0;
@@ -415,4 +469,5 @@ LClosure *luaU_undump (lua_State *L, ZIO *Z, Table *anchor, const char *name,
   luai_verifycode(L, cl->p);
   return cl;
 }
+#endif
 

@@ -742,6 +742,9 @@ static void const2exp (TValue *v, expdesc *e) {
     case LUA_VNIL:
       e->k = VNIL;
       break;
+#if defined(GRIT_POWER_BLOB)
+    case LUA_VBLOBSTR:
+#endif
     case LUA_VSHRSTR:  case LUA_VLNGSTR:
       e->k = VKSTR; e->u.strval = tsvalue(v);
       break;
@@ -1002,6 +1005,15 @@ void luaK_exp2nextreg (FuncState *fs, expdesc *e) {
   luaK_reserveregs(fs, 1);
   exp2reg(fs, e, fs->freereg - 1);
 }
+
+
+#if defined(GRIT_POWER_IFEXPR)
+void luaK_exp2reg (FuncState *fs, expdesc *e, int reg) {
+  luaK_dischargevars(fs, e);
+  freeexp(fs, e);
+  exp2reg(fs, e, reg);
+}
+#endif
 
 
 /*

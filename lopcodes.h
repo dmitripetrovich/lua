@@ -335,6 +335,9 @@ OP_TFORLOOP,/*	A Bx	if R[A+2] ~= nil then { R[A]=R[A+2]; pc -= Bx }	*/
 OP_SETLIST,/*	A vB vC k	R[A][vC+i] := R[A+i], 1 <= i <= vB	*/
 
 OP_CLOSURE,/*	A Bx	R[A] := closure(KPROTO[Bx])			*/
+#if defined(GRIT_POWER_DEFER)
+OP_DEFER, /*	A Bx	R[A] := closure(KPROTO[Bx]); mark variable R[A] "is deferred" */
+#endif
 
 OP_VARARG,/*	A B C k	R[A], ..., R[A+C-2] = varargs  			*/
 

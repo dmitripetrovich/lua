@@ -59,9 +59,17 @@ static unsigned luaS_hash (const char *str, size_t l, unsigned seed) {
 
 
 unsigned luaS_hashlongstr (TString *ts) {
+#if defined(GRIT_POWER_BLOB)
+  lua_assert(islongstring(ts->tt));
+#else
   lua_assert(ts->tt == LUA_VLNGSTR);
+#endif
   if (ts->extra == 0) {  /* no hash? */
     size_t len = ts->u.lnglen;
+#if defined(GRIT_POWER_BLOB)
+    if (ts->tt == LUA_VBLOBSTR)
+      return luaS_hash(getlngstr(ts), len, ts->hash);
+#endif
     ts->hash = luaS_hash(getlngstr(ts), len, ts->hash);
     ts->extra = 1;  /* now it has its hash */
   }
@@ -259,6 +267,25 @@ TString *luaS_newlstr (lua_State *L, const char *str, size_t l) {
   }
 }
 
+#if defined(GRIT_POWER_BLOB)
+TString *luaS_newblob (lua_State *L, const char* str, size_t l) {
+  TString *ts;
+  if (l_unlikely(l * sizeof(char) >= (MAX_SIZE - sizeof(TString))))
+    luaM_toobig(L);
+  ts = createstrobj(L, luaS_sizelngstr(l, LSTRREG), LUA_VBLOBSTR, G(L)->seed);
+  ts->u.lnglen = l;
+  ts->shrlen = LSTRREG;  /* signals that it is a regular long string */
+  ts->contents = cast_charp(ts) + offsetof(TString, falloc);
+  if (str) {
+    memcpy(getlngstr(ts), str, l * sizeof(char));
+  }
+  else {
+    memset(getlngstr(ts), 0, l * sizeof(char));
+  }
+  ts->contents[l] = ' ';  /* ending 0 */
+  return ts;
+}
+#endif
 
 /*
 ** Create or reuse a zero-terminated string, first checking in the

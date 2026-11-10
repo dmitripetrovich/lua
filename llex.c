@@ -29,7 +29,7 @@
 
 
 
-#define next(ls)	(ls->current = zgetc(ls->z))
+#define ls_next(ls)	(ls->current = zgetc(ls->z))
 
 
 /* minimum size for string buffer */
@@ -45,15 +45,25 @@
 static const char *const luaX_tokens [] = {
     "and", "break", "do", "else", "elseif",
     "end", "false", "for", "function", "global", "goto", "if",
-    "in", "local", "nil", "not", "or", "repeat",
+    "in", "local",
+#if defined(GRIT_POWER_DEFER)
+    "defer",
+#endif
+    "nil", "not", "or", "repeat",
     "return", "then", "true", "until", "while",
     "//", "..", "...", "==", ">=", "<=", "~=",
     "<<", ">>", "::", "<eof>",
     "<number>", "<integer>", "<name>", "<string>"
+#if defined(GRIT_POWER_JOAAT)
+    , "<hash>"
+#endif
+#if defined(GRIT_POWER_COMPOUND)
+    , "+=", "-=", "*=", "/=", "<<=", ">>=", "&=", "|=", "^="
+#endif
 };
 
 
-#define save_and_next(ls) (save(ls, ls->current), next(ls))
+#define save_and_next(ls) (save(ls, ls->current), ls_next(ls))
 
 
 static l_noret lexerror (LexState *ls, const char *msg, int token);
@@ -73,6 +83,9 @@ static void save (LexState *ls, int c) {
 
 
 void luaX_init (lua_State *L) {
+#if defined(LUA_NO_PARSER)
+  UNUSED(L);
+#else
   int i;
   TString *e = luaS_newliteral(L, LUA_ENV);  /* create env name */
   luaC_fix(L, obj2gco(e));  /* never collect this name */
@@ -81,6 +94,7 @@ void luaX_init (lua_State *L) {
     luaC_fix(L, obj2gco(ts));  /* reserved words are never collected */
     ts->extra = cast_byte(i+1);  /* reserved word */
   }
+#endif
 }
 
 
@@ -103,6 +117,9 @@ const char *luaX_token2str (LexState *ls, int token) {
 
 static const char *txtToken (LexState *ls, int token) {
   switch (token) {
+#if defined(GRIT_POWER_JOAAT)
+    case TK_HASH:
+#endif
     case TK_NAME: case TK_STRING:
     case TK_FLT: case TK_INT:
       save(ls, '\0');
@@ -165,9 +182,9 @@ TString *luaX_newstring (LexState *ls, const char *str, size_t l) {
 static void inclinenumber (LexState *ls) {
   int old = ls->current;
   lua_assert(currIsNewline(ls));
-  next(ls);  /* skip '\n' or '\r' */
+  ls_next(ls);  /* skip '\n' or '\r' */
   if (currIsNewline(ls) && ls->current != old)
-    next(ls);  /* skip '\n\r' or '\r\n' */
+    ls_next(ls);  /* skip '\n\r' or '\r\n' */
   if (++ls->linenumber >= INT_MAX)
     lexerror(ls, "chunk has too many lines", 0);
 }
@@ -207,7 +224,7 @@ void luaX_setinput (lua_State *L, LexState *ls, ZIO *z, TString *source,
 
 static int check_next1 (LexState *ls, int c) {
   if (ls->current == c) {
-    next(ls);
+    ls_next(ls);
     return 1;
   }
   else return 0;
@@ -226,6 +243,37 @@ static int check_next2 (LexState *ls, const char *set) {
   }
   else return 0;
 }
+
+
+#if defined(GRIT_POWER_LITERAL)
+static int str2numlit (char *s, TValue *o) {
+  size_t l = strlen(s);
+  if (s[0] == '0' && (s[1] == 'b' || s[1] == 'B')) {
+    lua_Unsigned a = 0;
+    const char *p = s + 2;
+    for (; *p == '0' || *p == '1'; p++)
+      a = a * 2 + cast_uint(*p - '0');
+    if (p == s + 2 || *p != '\0')
+      return 0;
+    setivalue(o, l_castU2S(a));
+    return 1;
+  }
+  else if (l > 1 && (s[l - 1] == 'f' || s[l - 1] == 'F') &&
+           strpbrk(s, "xXnN") == NULL) {
+    char c = s[l - 1];
+    size_t ok;
+    s[l - 1] = '\0';
+    ok = luaO_str2num(s, o);
+    s[l - 1] = c;
+    if (ok == 0)
+      return 0;
+    if (ttisinteger(o))
+      setfltvalue(o, cast_num(ivalue(o)));
+    return 1;
+  }
+  return 0;
+}
+#endif
 
 
 /* LUA_NUMBER */
@@ -252,6 +300,10 @@ static int read_numeral (LexState *ls, SemInfo *seminfo) {
   for (;;) {
     if (check_next2(ls, expo))  /* exponent mark? */
       check_next2(ls, "-+");  /* optional exponent sign */
+#if defined(GRIT_POWER_LITERAL)
+    else if (ls->current == '_')
+      ls_next(ls);
+#endif
     else if (lisxdigit(ls->current) || ls->current == '.')  /* '%x|%.' */
       save_and_next(ls);
     else break;
@@ -259,7 +311,12 @@ static int read_numeral (LexState *ls, SemInfo *seminfo) {
   if (lislalpha(ls->current))  /* is numeral touching a letter? */
     save_and_next(ls);  /* force an error */
   save(ls, '\0');
+#if defined(GRIT_POWER_LITERAL)
+  if (luaO_str2num(luaZ_buffer(ls->buff), &obj) == 0 &&
+      !str2numlit(luaZ_buffer(ls->buff), &obj))
+#else
   if (luaO_str2num(luaZ_buffer(ls->buff), &obj) == 0)  /* format error? */
+#endif
     lexerror(ls, "malformed number", TK_FLT);
   if (ttisinteger(&obj)) {
     seminfo->i = ivalue(&obj);
@@ -323,7 +380,7 @@ static void read_long_string (LexState *ls, SemInfo *seminfo, size_t sep) {
       }
       default: {
         if (seminfo) save_and_next(ls);
-        else next(ls);
+        else ls_next(ls);
       }
     }
   } endloop:
@@ -374,7 +431,7 @@ static l_uint32 readutf8esc (LexState *ls) {
     r = (r << 4) + luaO_hexavalue(ls->current);
   }
   esccheck(ls, ls->current == '}', "missing '}'");
-  next(ls);  /* skip '}' */
+  ls_next(ls);  /* skip '}' */
   luaZ_buffremove(ls->buff, i);  /* remove saved chars from buffer */
   return r;
 }
@@ -432,10 +489,10 @@ static void read_string (LexState *ls, int del, SemInfo *seminfo) {
           case EOZ: goto no_save;  /* will raise an error next loop */
           case 'z': {  /* zap following span of spaces */
             luaZ_buffremove(ls->buff, 1);  /* remove '\\' */
-            next(ls);  /* skip the 'z' */
+            ls_next(ls);  /* skip the 'z' */
             while (lisspace(ls->current)) {
               if (currIsNewline(ls)) inclinenumber(ls);
-              else next(ls);
+              else ls_next(ls);
             }
             goto no_save;
           }
@@ -446,7 +503,7 @@ static void read_string (LexState *ls, int del, SemInfo *seminfo) {
           }
         }
        read_save:
-         next(ls);
+         ls_next(ls);
          /* go through */
        only_save:
          luaZ_buffremove(ls->buff, 1);  /* remove '\\' */
@@ -473,14 +530,17 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         break;
       }
       case ' ': case '\f': case '\t': case '\v': {  /* spaces */
-        next(ls);
+        ls_next(ls);
         break;
       }
       case '-': {  /* '-' or '--' (comment) */
-        next(ls);
+        ls_next(ls);
+#if defined(GRIT_POWER_COMPOUND)
+        if (check_next1(ls, '=')) return TK_MINUSEQ;
+#endif
         if (ls->current != '-') return '-';
         /* else is a comment */
-        next(ls);
+        ls_next(ls);
         if (ls->current == '[') {  /* long comment? */
           size_t sep = skip_sep(ls);
           luaZ_resetbuffer(ls->buff);  /* 'skip_sep' may dirty the buffer */
@@ -492,7 +552,7 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         }
         /* else short comment */
         while (!currIsNewline(ls) && ls->current != EOZ)
-          next(ls);  /* skip until end of line (or end of file) */
+          ls_next(ls);  /* skip until end of line (or end of file) */
         break;
       }
       case '[': {  /* long string or simply '[' */
@@ -506,41 +566,125 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         return '[';
       }
       case '=': {
-        next(ls);
+        ls_next(ls);
         if (check_next1(ls, '=')) return TK_EQ;  /* '==' */
         else return '=';
       }
       case '<': {
-        next(ls);
+        ls_next(ls);
         if (check_next1(ls, '=')) return TK_LE;  /* '<=' */
+#if defined(GRIT_POWER_COMPOUND)
+        else if (check_next1(ls, '<')) {
+          if (check_next1(ls, '='))
+            return TK_SHLEQ;
+          else
+            return TK_SHL;  /* '<<' */
+        }
+#else
         else if (check_next1(ls, '<')) return TK_SHL;  /* '<<' */
+#endif
         else return '<';
       }
       case '>': {
-        next(ls);
+        ls_next(ls);
         if (check_next1(ls, '=')) return TK_GE;  /* '>=' */
+#if defined(GRIT_POWER_COMPOUND)
+        else if (check_next1(ls, '>')) {
+          if (check_next1(ls, '='))
+            return TK_SHREQ;
+          else
+            return TK_SHR;  /* '>>' */
+        }
+#else
         else if (check_next1(ls, '>')) return TK_SHR;  /* '>>' */
+#endif
         else return '>';
       }
       case '/': {
-        next(ls);
+        ls_next(ls);
         if (check_next1(ls, '/')) return TK_IDIV;  /* '//' */
-        else return '/';
+#if defined(GRIT_POWER_COMPOUND)
+        else if (check_next1(ls, '=')) return TK_DIVEQ;
+#endif
+        else {
+#if defined(GRIT_POWER_CCOMMENT)
+          int last = 0;
+          if (ls->current == '*') { /* long comment */
+            int line = ls->linenumber;
+            ls_next(ls);
+            while (ls->current != EOZ) {
+              if (last == '*' && ls->current == '/')
+                break;
+              last = ls->current;
+              if (currIsNewline(ls))
+                inclinenumber(ls);
+              else
+                ls_next(ls); /* skip until closing marker (or end of file) */
+            }
+            if (ls->current == EOZ) {
+              const char *msg = luaO_pushfstring(ls->L, "unfinished long comment (starting at line %d)", line);
+              lexerror(ls, msg, TK_EOS);
+              break; /* to avoid warnings */
+            }
+            else
+              ls_next(ls);
+            break;
+          }
+#endif
+          return '/';
+        }
       }
+#if defined(GRIT_POWER_COMPOUND)
+      case '+': {
+        ls_next(ls);
+        if (check_next1(ls, '=')) return TK_PLUSEQ;
+        else return '+';
+      }
+      case '*': {
+        ls_next(ls);
+        if (check_next1(ls, '=')) return TK_MULTEQ;
+        else return '*';
+      }
+      case '&': {
+        ls_next(ls);
+        if (check_next1(ls, '=')) return TK_BANDEQ;
+        else return '&';
+      }
+      case '|': {
+        ls_next(ls);
+        if (check_next1(ls, '=')) return TK_BOREQ;
+        else return '|';
+      }
+      case '^': {
+        ls_next(ls);
+        if (check_next1(ls, '=')) return TK_BXOREQ;
+        else return '^';
+      }
+#endif
       case '~': {
-        next(ls);
+        ls_next(ls);
         if (check_next1(ls, '=')) return TK_NE;  /* '~=' */
         else return '~';
       }
       case ':': {
-        next(ls);
+        ls_next(ls);
+#if defined(GRIT_POWER_NAMESPACE_SEL)
+        if (check_next1(ls, ':')) return '.';
+#else
         if (check_next1(ls, ':')) return TK_DBCOLON;  /* '::' */
+#endif
         else return ':';
       }
       case '"': case '\'': {  /* short literal strings */
         read_string(ls, ls->current, seminfo);
         return TK_STRING;
       }
+#if defined(GRIT_POWER_JOAAT)
+      case '`': {  /* compiled hash */
+        read_string(ls, ls->current, seminfo);
+        return TK_HASH;
+      }
+#endif
       case '.': {  /* '.', '..', '...', or number */
         save_and_next(ls);
         if (check_next1(ls, '.')) {
@@ -576,7 +720,7 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         }
         else {  /* single-char tokens ('+', '*', '%', '{', '}', ...) */
           int c = ls->current;
-          next(ls);
+          ls_next(ls);
           return c;
         }
       }

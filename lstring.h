@@ -70,4 +70,8 @@ LUAI_FUNC TString *luaS_newextlstr (lua_State *L,
 LUAI_FUNC size_t luaS_sizelngstr (size_t len, int kind);
 LUAI_FUNC TString *luaS_normstr (lua_State *L, TString *ts);
 
+#if defined(GRIT_POWER_BLOB)
+LUAI_FUNC TString *luaS_newblob (lua_State *L, const char* str, size_t l);
+#endif
+
 #endif

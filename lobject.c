@@ -28,6 +28,7 @@
 #include "lstate.h"
 #include "lstring.h"
 #include "lvm.h"
+#include "lglm_core.h"
 
 
 /*
@@ -463,8 +464,9 @@ unsigned luaO_tostringbuff (const TValue *obj, char *buff) {
 ** Convert a number object to a Lua string, replacing the value at 'obj'
 */
 void luaO_tostring (lua_State *L, TValue *obj) {
-  char buff[LUA_N2SBUFFSZ];
-  unsigned len = luaO_tostringbuff(obj, buff);
+  char buff[11 + 4 * LUA_N2SBUFFSZ];
+  unsigned len = ttisvector(obj) ? cast_uint(glmVec_tostr(obj, buff, sizeof(buff)))
+                                 : luaO_tostringbuff(obj, buff);
   setsvalue(L, obj, luaS_newlstr(L, buff, len));
 }
 
@@ -631,10 +633,15 @@ const char *luaO_pushvfstring (lua_State *L, const char *fmt, va_list argp) {
         break;
       }
       case 'p': {  /* a pointer */
+#if defined(LUA_SANDBOX)
+        cast_void(va_arg(argp, void *));
+        addstr2buff(&buff, "<pointer>", 9);
+#else
         char bf[LUA_N2SBUFFSZ];  /* enough space for '%p' */
         void *p = va_arg(argp, void *);
         int len = lua_pointer2str(bf, LUA_N2SBUFFSZ, p);
         addstr2buff(&buff, bf, cast_uint(len));
+#endif
         break;
       }
       case 'U': {  /* an 'unsigned long' as a UTF-8 sequence */
@@ -716,4 +723,3 @@ void luaO_chunkid (char *out, const char *source, size_t srclen) {
     memcpy(out, POS, (LL(POS) + 1) * sizeof(char));
   }
 }
-

@@ -28,6 +28,15 @@
 
 #define LUAC_FORMAT	0	/* this is the official format */
 
+extern
+#if defined(IS_GAMESERVER)
+#if defined(_WIN32)
+__declspec(dllexport)
+#else
+__attribute__((visibility("default")))
+#endif
+#endif
+lua_UndumpHook pUndumpHook;
 
 /* load one chunk; from lundump.c */
 LUAI_FUNC LClosure* luaU_undump (lua_State* L, ZIO* Z, Table *anchor,

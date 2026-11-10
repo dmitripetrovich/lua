@@ -3,13 +3,18 @@
 *.so
 *.o
 *.a
+*.dll
 
 manual/manual.html
 
 testes/time.txt
 testes/time-debug.txt
+testes/.lua_history
 
 testes/libs/all
 
 temp
 lua
+luac
+lua.exe
+luac.exe

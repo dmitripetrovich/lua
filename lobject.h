@@ -14,6 +14,7 @@
 
 #include "llimits.h"
 #include "lua.h"
+#include "lglm.hpp"
 
 
 /*
@@ -46,9 +47,10 @@
 /*
 ** Union of all Lua values
 */
-typedef union Value {
+LUA_GLM_ALIGNED_TYPEDEF(union, Value) {
   struct GCObject *gc;    /* collectable objects */
   void *p;         /* light userdata */
+  glmVector f4;    /* vector and quaternion stub */
   lua_CFunction f; /* light C functions */
   lua_Integer i;   /* integer numbers */
   lua_Number n;    /* float numbers */
@@ -149,13 +151,16 @@ typedef union StackValue {
   TValue val;
   struct {
     TValuefields;
+#if defined(GRIT_POWER_DEFER)
+    lu_byte is_deferred; /* 1 if deferred function, regular TBC otherwise. */
+#endif
     unsigned short delta;
   } tbclist;
 } StackValue;
 
 
 /* index to stack elements */
-typedef StackValue *StkId;
+typedef StackValue *LUA_RESTRICT StkId;
 
 
 /*
@@ -373,10 +378,17 @@ typedef struct GCObject {
 /* Variant tags for strings */
 #define LUA_VSHRSTR	makevariant(LUA_TSTRING, 0)  /* short strings */
 #define LUA_VLNGSTR	makevariant(LUA_TSTRING, 1)  /* long strings */
+#if defined(GRIT_POWER_BLOB)
+  #define LUA_VBLOBSTR makevariant(LUA_TSTRING, 2)  /* long blobs */
+#endif
 
 #define ttisstring(o)		checktype((o), LUA_TSTRING)
 #define ttisshrstring(o)	checktag((o), ctb(LUA_VSHRSTR))
 #define ttislngstring(o)	checktag((o), ctb(LUA_VLNGSTR))
+#if defined(GRIT_POWER_BLOB)
+  #define ttisblobstring(o)	checktag((o), ctb(LUA_VBLOBSTR))
+  #define islongstring(tt) ((tt) == LUA_VLNGSTR || (tt) == LUA_VBLOBSTR)
+#endif
 
 #define tsvalueraw(v)	(gco2ts((v).gc))
 
@@ -817,6 +829,67 @@ typedef struct Table {
 
 /* }================================================================== */
 
+/*
+** {==================================================================
+** Vector Object API
+** ===================================================================
+*/
+
+/* Variant tags for vectors */
+#if LUA_VVECTOR2 != makevariant(LUA_TVECTOR, 0)
+  #error "Invalid vector2 variant"
+#elif LUA_VVECTOR3 != makevariant(LUA_TVECTOR, 1)
+  #error "Invalid vector3 variant"
+#elif LUA_VVECTOR4 != makevariant(LUA_TVECTOR, 2)
+  #error "Invalid vector4 variant"
+#elif LUA_VQUAT != makevariant(LUA_TVECTOR, 3)
+  #error "Invalid quaternion variant"
+#endif
+
+#define ttisvector(o) checktype((o), LUA_TVECTOR)
+#define ttisvector2(o) checktag((o), LUA_VVECTOR2)
+#define ttisvector3(o) checktag((o), LUA_VVECTOR3)
+#define ttisvector4(o) checktag((o), LUA_VVECTOR4)
+#define ttisquat(o) checktag((o), LUA_VQUAT)
+
+#define vvalue_raw(o) ((o).f4)
+#define vvalue_(o) vvalue_raw(val_((o)))
+#define vvalue_ref(o) check_exp((ttisvector(o) || ttisquat(o)), &vvalue_(o))
+
+#define vvalue(o) check_exp((ttisvector(o) || ttisquat(o)), vvalue_(o))
+#define vecvalue(o) check_exp(ttisvector(o), vvalue_(o))
+#define quatvalue(o) check_exp(ttisquat(o), vvalue_(o))
+#define setqvalue(obj, x) setvvalue(obj, x, LUA_VQUAT)
+#define setvvalue(obj, x, o) \
+  LUA_MLM_BEGIN              \
+  TValue *io = (obj);        \
+  val_(io).f4 = (x);         \
+  settt_(io, (o));           \
+  LUA_MLM_END
+
+/* }================================================================== */
+
+/*
+** {==================================================================
+** Matrix Object API
+** ===================================================================
+*/
+
+typedef struct GCMatrix {
+  CommonHeader;
+  glmMatrix mat4;
+} GCMatrix;
+
+#define LUA_VMATRIX makevariant(LUA_TMATRIX, 0)
+
+#define ttismatrix(o) checktag((o), ctb(LUA_VMATRIX))
+#define mvalue(o)	check_exp(ttismatrix(o), gco2mat(val_(o).gc)->mat4)
+#define mvalue_ref(o)	check_exp(ttismatrix(o), &gco2mat(val_(o).gc)->mat4)
+
+#define setmvalue2s(L, o, x) setmvalue(L, s2v(o), x)
+#define setmvalue(L, obj, x) glm_setmvalue(L, obj, x)
+
+/* }================================================================== */
 
 
 /*
@@ -860,6 +933,11 @@ LUAI_FUNC const char *luaO_pushvfstring (lua_State *L, const char *fmt,
 LUAI_FUNC const char *luaO_pushfstring (lua_State *L, const char *fmt, ...);
 LUAI_FUNC void luaO_chunkid (char *out, const char *source, size_t srclen);
 
+/*
+** GameLua: scriptHandler
+*/
+
+LUA_API const TValue *lua_getvalue (lua_State* L, int idx);
 
 #endif
 

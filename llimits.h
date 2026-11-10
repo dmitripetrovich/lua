@@ -193,7 +193,7 @@ typedef void (*voidf)(void);
 */
 #if !defined(l_noret)
 
-#if defined(__GNUC__)
+#if defined(__GNUC__) || __has_attribute(__noreturn__)
 #define l_noret		void __attribute__((noreturn))
 #elif defined(_MSC_VER) && _MSC_VER >= 1200
 #define l_noret		void __declspec(noreturn)
@@ -314,6 +314,8 @@ typedef unsigned long l_uint32;
 
 #if defined(__GNUC__) && ((__GNUC__*100 + __GNUC_MINOR__) >= 302) && \
     (defined(__ELF__) || defined(__MACH__))
+#define LUAI_FUNC	__attribute__((visibility("internal"))) extern
+#elif __has_attribute(visibility) && defined(__ELF__)
 #define LUAI_FUNC	__attribute__((visibility("internal"))) extern
 #else
 #define LUAI_FUNC	extern

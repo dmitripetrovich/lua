@@ -20,6 +20,7 @@
 #include "lauxlib.h"
 #include "lualib.h"
 #include "llimits.h"
+#include "lgrit_lib.h"
 
 
 static int luaB_print (lua_State *L) {
@@ -156,17 +157,20 @@ static int luaB_rawequal (lua_State *L) {
 }
 
 
+#define luaB_haslen(t) ((t) == LUA_TTABLE || (t) == LUA_TSTRING || (t) == LUA_TVECTOR || (t) == LUA_TMATRIX)
 static int luaB_rawlen (lua_State *L) {
   int t = lua_type(L, 1);
-  luaL_argexpected(L, t == LUA_TTABLE || t == LUA_TSTRING, 1,
-                      "table or string");
+  luaL_argexpected(L, luaB_haslen(t), 1, "table or string or vector");
   lua_pushinteger(L, l_castU2S(lua_rawlen(L, 1)));
   return 1;
 }
 
 
+#define luaB_hasget(t) ((t) == LUA_TTABLE || (t) == LUA_TVECTOR || (t) == LUA_TMATRIX)
 static int luaB_rawget (lua_State *L) {
-  luaL_checktype(L, 1, LUA_TTABLE);
+  const int type = lua_type(L, 1);
+  if (!luaB_hasget(type))
+    return luaL_typeerror(L, 1, lua_typename(L, LUA_TTABLE));
   luaL_checkany(L, 2);
   lua_settop(L, 2);
   lua_rawget(L, 1);
@@ -174,7 +178,9 @@ static int luaB_rawget (lua_State *L) {
 }
 
 static int luaB_rawset (lua_State *L) {
-  luaL_checktype(L, 1, LUA_TTABLE);
+  const int type = lua_type(L, 1);
+  if (type != LUA_TTABLE && type != LUA_TMATRIX)
+    luaL_typeerror(L, 1, lua_typename(L, LUA_TTABLE));
   luaL_checkany(L, 2);
   luaL_checkany(L, 3);
   lua_settop(L, 3);
@@ -257,16 +263,23 @@ static int luaB_collectgarbage (lua_State *L) {
 }
 
 
+#define luaB_glmtype(t) ((t) == LUA_TVECTOR || (t) == LUA_TMATRIX)
 static int luaB_type (lua_State *L) {
   int t = lua_type(L, 1);
   luaL_argcheck(L, t != LUA_TNONE, 1, "value expected");
-  lua_pushstring(L, lua_typename(L, t));
+  if (luaB_glmtype(t))
+    lua_pushstring(L, glm_typename(L, 1));
+  else
+    lua_pushstring(L, lua_typename(L, t));
   return 1;
 }
 
 
+#define luaB_hasnext(t) ((t) == LUA_TTABLE || (t) == LUA_TVECTOR || (t) == LUA_TMATRIX)
 static int luaB_next (lua_State *L) {
-  luaL_checktype(L, 1, LUA_TTABLE);
+  const int type = lua_type(L, 1);
+  if (!luaB_hasnext(type))
+    return luaL_typeerror(L, 1, lua_typename(L, LUA_TTABLE));
   lua_settop(L, 2);  /* create a 2nd argument if there isn't one */
   if (lua_next(L, 1))
     return 2;
@@ -298,6 +311,30 @@ static int luaB_pairs (lua_State *L) {
 }
 
 
+#if defined(GRIT_POWER_EACH)
+static int eachcont (lua_State *L, int status, lua_KContext k) {
+  (void)L; (void)status; (void)k;  /* unused */
+  return 4;
+}
+
+static int luaB_each (lua_State *L) {
+  luaL_checkany(L, 1);
+  if (luaL_getmetafield(L, 1, "__iter") == LUA_TNIL) {  /* no metamethod? */
+    if (luaL_getmetafield(L, 1, "__pairs") == LUA_TNIL) {  /* use __pairs as fallback */
+      lua_pushcfunction(L, luaB_next);  /* will return generator, */
+      lua_pushvalue(L, 1);  /* state, */
+      lua_pushnil(L);  /* and initial value */
+      return 3;
+    }
+  }
+
+  lua_pushvalue(L, 1);  /* argument 'self' to metamethod */
+  lua_callk(L, 1, 4, 0, eachcont);  /* get 4 values from metamethod */
+  return 4;
+}
+#endif
+
+
 /*
 ** Traversal function for 'ipairs'
 */
@@ -308,18 +345,60 @@ static int ipairsaux (lua_State *L) {
   return (lua_geti(L, 1, i) == LUA_TNIL) ? 1 : 2;
 }
 
+#if defined(GRIT_COMPAT_IPAIRS)
+/*
+** Traversal function for 'ipairs' for raw tables
+*/
+static int ipairsaux_raw (lua_State *L) {
+  const int type = lua_type(L, 1);
+  lua_Integer i = luaL_checkinteger(L, 2) + 1;
+  if (type != LUA_TTABLE && type != LUA_TMATRIX)
+    luaL_typeerror(L, 1, lua_typename(L, LUA_TTABLE));
+  lua_pushinteger(L, i);
+  return (lua_rawgeti(L, 1, i) == LUA_TNIL) ? 1 : 2;
+}
 
+
+/*
+** This function will use either 'ipairsaux' or 'ipairsaux_raw' to
+** traverse a table, depending on whether the table has metamethods
+** that can affect the traversal.
+*/
+static int luaB_ipairs (lua_State *L) {
+  lua_CFunction iter = (luaL_getmetafield(L, 1, "__index") != LUA_TNIL)
+                       ? ipairsaux : ipairsaux_raw;
+  luaL_checkany(L, 1);
+  if (luaL_getmetafield(L, 1, "__ipairs") == LUA_TNIL) {  /* no metamethod? */
+    lua_pushcfunction(L, iter);  /* iteration function */
+    lua_pushvalue(L, 1);  /* state */
+    lua_pushinteger(L, 0);  /* initial value */
+  }
+  else {
+    lua_pushvalue(L, 1);  /* argument 'self' to metamethod */
+    lua_call(L, 1, 3);  /* get 3 values from metamethod */
+  }
+  return 3;
+}
+#else
 /*
 ** 'ipairs' function. Returns 'ipairsaux', given "table", 0.
 ** (The given "table" may not be a table.)
 */
 static int luaB_ipairs (lua_State *L) {
   luaL_checkany(L, 1);
-  lua_pushcfunction(L, ipairsaux);  /* iteration function */
-  lua_pushvalue(L, 1);  /* state */
-  lua_pushinteger(L, 0);  /* initial value */
+  if (lua_isvector_t(L, 1) || lua_ismatrix_t(L, 1)) {
+    lua_pushcfunction(L, luaB_next);  /* will return generator, */
+    lua_pushvalue(L, 1);  /* state, */
+    lua_pushinteger(L, 0);
+  }
+  else {
+    lua_pushcfunction(L, ipairsaux);  /* iteration function */
+    lua_pushvalue(L, 1);  /* state */
+    lua_pushinteger(L, 0);  /* initial value */
+  }
   return 3;
 }
+#endif
 
 
 static int load_aux (lua_State *L, int status, int envidx) {
@@ -441,7 +520,7 @@ static int luaB_assert (lua_State *L) {
 static int luaB_select (lua_State *L) {
   int n = lua_gettop(L);
   if (lua_type(L, 1) == LUA_TSTRING && *lua_tostring(L, 1) == '#') {
-    lua_pushinteger(L, n-1);
+    lua_pushinteger(L, (lua_Integer)n - 1);
     return 1;
   }
   else {
@@ -506,6 +585,51 @@ static int luaB_tostring (lua_State *L) {
 }
 
 
+#if defined(GRIT_POWER_DEFER) || defined(GRIT_POWER_DEFER_OLD)
+/* func2close */
+static int luaB_defer (lua_State *L) {
+  luaL_checktype(L, 1, LUA_TFUNCTION);  /* check defer function */
+
+  lua_newtable(L);  /* to-be-closed dummy object */
+  lua_newtable(L);  /* metatable */
+  lua_pushvalue(L, 1);
+  lua_setfield(L, -2, "__close");
+  lua_setmetatable(L, -2);  /* pops: metatable */
+
+  return 1;
+}
+#endif
+
+
+#if defined(GRIT_POWER_JOAAT)
+static int luaB_joaat (lua_State *L) {
+  /* Handling numbers/booleans is an undocumented hand-holding feature */
+  const int type = lua_type(L, 1);
+  if (type != LUA_TNUMBER && type != LUA_TBOOLEAN && type != LUA_TSTRING)
+    return luaL_typeerror(L, 1, lua_typename(L, LUA_TSTRING));
+
+  lua_pushinteger(L, glm_tohash(L, 1, lua_toboolean(L, 2)));
+  return 1;
+}
+#endif
+
+
+#if defined(GRIT_POWER_WOW)
+static int luaB_scrub (lua_State *L) {
+  int i;
+  const int top = lua_gettop(L);
+  for (i = 1; i <= top; i++) {
+    const int type = lua_type(L, i);
+    if (type >= LUA_TTABLE || type == LUA_TLIGHTUSERDATA) {
+      lua_pushnil(L);
+      lua_replace(L, i);
+    }
+  }
+  return top;
+}
+#endif
+
+
 static const luaL_Reg base_funcs[] = {
   {"assert", luaB_assert},
   {"collectgarbage", luaB_collectgarbage},
@@ -517,6 +641,9 @@ static const luaL_Reg base_funcs[] = {
   {"load", luaB_load},
   {"next", luaB_next},
   {"pairs", luaB_pairs},
+#if defined(GRIT_POWER_EACH)
+  {"each", luaB_each},
+#endif
   {"pcall", luaB_pcall},
   {"print", luaB_print},
   {"warn", luaB_warn},
@@ -530,7 +657,55 @@ static const luaL_Reg base_funcs[] = {
   {"tostring", luaB_tostring},
   {"type", luaB_type},
   {"xpcall", luaB_xpcall},
+#if defined(GRIT_POWER_DEFER_OLD)
+  #if defined(GRIT_POWER_DEFER)
+    #error "Inconsistent defer configuration"
+  #endif
+  {"defer", luaB_defer},
+#elif defined(GRIT_POWER_DEFER)
+  {"func2close", luaB_defer},
+#endif
+#if defined(GRIT_POWER_JOAAT)
+  {"joaat", luaB_joaat},
+#endif
+#if defined(GRIT_POWER_WOW)
+  {"scrub", luaB_scrub},
+#endif
   /* placeholders */
+
+  {"vec", glmVec_vec}, {"vector", glmVec_vec},
+  {"vec1", glmVec_vec1}, {"vector1", glmVec_vec1},
+  {"vec2", glmVec_vec2}, {"vector2", glmVec_vec2},
+  {"vec3", glmVec_vec3}, {"vector3", glmVec_vec3},
+  {"vec4", glmVec_vec4}, {"vector4", glmVec_vec4},
+  {"ivec", glmVec_ivec},
+  {"ivec1", glmVec_ivec1},
+  {"ivec2", glmVec_ivec2},
+  {"ivec3", glmVec_ivec3},
+  {"ivec4", glmVec_ivec4},
+  {"bvec", glmVec_bvec},
+  {"bvec1", glmVec_bvec1},
+  {"bvec2", glmVec_bvec2},
+  {"bvec3", glmVec_bvec3},
+  {"bvec4", glmVec_bvec4},
+  {"mat", glmMat_mat},
+  {"mat2x2", glmMat_mat2x2}, {"mat2", glmMat_mat2x2},
+  {"mat2x3", glmMat_mat2x3},
+  {"mat2x4", glmMat_mat2x4},
+  {"mat3x2", glmMat_mat3x2},
+  {"mat3x3", glmMat_mat3x3}, {"mat3", glmMat_mat3x3},
+  {"mat3x4", glmMat_mat3x4},
+  {"mat4x2", glmMat_mat4x2},
+  {"mat4x3", glmMat_mat4x3},
+  {"mat4x4", glmMat_mat4x4}, {"mat4", glmMat_mat4x4},
+  {"qua", glmVec_qua}, {"quat", glmVec_qua},
+  /* gritLua compatibility functions */
+  {"dot", glmVec_dot},
+  {"cross", glmVec_cross},
+  {"inv", glmVec_inverse},
+  {"norm", glmVec_normalize},
+  {"slerp", glmVec_slerp},
+
   {LUA_GNAME, NULL},
   {"_VERSION", NULL},
   {NULL, NULL}

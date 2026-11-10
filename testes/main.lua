@@ -79,7 +79,7 @@ end
 RUN('lua -v')
 
 RUN('lua -v > %s', out)
-local release = string.match(getoutput(), "Lua (%d+%.%d+%.%d+)")
+local release = string.match(getoutput(), "Lua%a* (%d+%.%d+%.%d+)")
 
 print(string.format("(temporary program file used in these tests: %s)", prog))
 
