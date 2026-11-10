@@ -458,8 +458,13 @@
 #define LUAI_UACNUMBER	double
 
 #define LUA_NUMBER_FRMLEN	""
+#if defined(GRIT_COMPAT_NUMFMT)
+#define LUA_NUMBER_FMT		"%.14g"
+#define LUA_NUMBER_FMT_N	"%.14g"
+#else
 #define LUA_NUMBER_FMT		"%.15g"
 #define LUA_NUMBER_FMT_N	"%.17g"
+#endif
 
 #define l_mathop(op)		op
 

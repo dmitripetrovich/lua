@@ -656,6 +656,10 @@ static int ll_require (lua_State *L) {
     return 1;  /* package is already loaded */
   /* else must load package */
   lua_pop(L, 1);  /* remove 'getfield' result */
+#if defined(GRIT_POWER_READONLY)
+  if (lua_isreadonly(L, -1))
+    return luaL_error(L, "readonly " LUA_LOADED_TABLE " table");
+#endif
   findloader(L, name);
   lua_rotate(L, -2, 1);  /* function <-> loader data */
   lua_pushvalue(L, 1);  /* name is 1st argument to module loader */

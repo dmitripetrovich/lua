@@ -35,6 +35,13 @@
 #define setnodummy(t)		((t)->flags &= NOTBITDUMMY)
 #define setdummy(t)		((t)->flags |= BITDUMMY)
 
+#if defined(GRIT_POWER_READONLY)
+#define BITRONLY		(1 << 7)
+#define isreadonly(t)		((t)->flags & BITRONLY)
+#define setreadonly(t)		((t)->flags |= BITRONLY)
+#define setnotreadonly(t)	((t)->flags &= cast_byte(~BITRONLY))
+#endif
+
 
 
 /* allocated size for hash nodes */
@@ -178,6 +185,9 @@ LUAI_FUNC lua_Unsigned luaH_getn (lua_State *L, Table *t);
 LUAI_FUNC int luaH_type (const Table *t);
 LUAI_FUNC void luaH_wipetable (Table *t);
 LUAI_FUNC void luaH_clonetable (lua_State *L, const Table *t, Table *t2);
+#endif
+#if defined(GRIT_POWER_READONLY)
+LUAI_FUNC void luaH_setreadonly (Table *t, int readonly);
 #endif
 
 

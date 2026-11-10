@@ -35,6 +35,14 @@
 #define aux_getn(L,n,w)	(checktab(L, n, (w) | TAB_L), luaL_len(L, n))
 
 
+#if defined(GRIT_POWER_READONLY)
+#define checkwritable(L,arg) \
+  luaL_argcheck(L, !lua_isreadonly(L, arg), arg, "table is readonly")
+#else
+#define checkwritable(L,arg)	((void)0)
+#endif
+
+
 static int checkfield (lua_State *L, const char *key, int n) {
   lua_pushstring(L, key);
   return (lua_rawget(L, -n) != LUA_TNIL);
@@ -47,6 +55,8 @@ static int checkfield (lua_State *L, const char *key, int n) {
 */
 static void checktab (lua_State *L, int arg, int what) {
   int tp = lua_type(L, arg);
+  if (what & TAB_W)
+    checkwritable(L, arg);
   if (tp != LUA_TTABLE) {  /* is it not a table? */
     int n = 1;  /* number of elements to pop */
     if (lua_getmetatable(L, arg) &&  /* must have metatable */
@@ -433,6 +443,7 @@ static int type (lua_State *L) {
 
 static int treset (lua_State *L) {
   luaL_checktype(L, 1, LUA_TTABLE);
+  checkwritable(L, 1);
   lua_wipetable(L, 1);
 
   lua_pushvalue(L, 1);
@@ -445,9 +456,30 @@ static int tclone (lua_State *L) {
     luaL_checktype(L, 2, LUA_TTABLE);
   else
     lua_newtable(L);
+#if defined(GRIT_POWER_READONLY)
+  if (!lua_rawequal(L, 1, 2))
+    checkwritable(L, 2);
+#endif
 
   lua_clonetable(L, 1, 2);
   lua_pushvalue(L, 2);
+  return 1;
+}
+#endif
+
+#if defined(GRIT_POWER_READONLY)
+static int tfreeze (lua_State *L) {
+  luaL_checktype(L, 1, LUA_TTABLE);
+  if (l_unlikely(luaL_getmetafield(L, 1, "__metatable") != LUA_TNIL))
+    return luaL_error(L, "cannot change a protected metatable");
+  lua_setreadonly(L, 1, 1);
+  lua_pushvalue(L, 1);
+  return 1;
+}
+
+static int tisfrozen (lua_State *L) {
+  luaL_checktype(L, 1, LUA_TTABLE);
+  lua_pushboolean(L, lua_isreadonly(L, 1));
   return 1;
 }
 #endif
@@ -469,6 +501,10 @@ static const luaL_Reg tab_funcs[] = {
   {"new", tcreate},
   {"wipe", treset}, {"clear", treset},
   {"clone", tclone},
+#endif
+#if defined(GRIT_POWER_READONLY)
+  {"freeze", tfreeze},
+  {"isfrozen", tisfrozen},
 #endif
   {NULL, NULL}
 };

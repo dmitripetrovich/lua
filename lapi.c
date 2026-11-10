@@ -903,6 +903,33 @@ LUA_API void lua_createtable (lua_State *L, int narray, int nrec) {
 }
 
 
+#if defined(GRIT_POWER_READONLY)
+#define api_checkwritable(L,t)  \
+  if (l_unlikely(isreadonly(t))) luaG_readonlyerror(L)
+
+LUA_API int lua_isreadonly (lua_State *L, int idx) {
+  const TValue *o;
+  int readonly;
+  lua_lock(L);
+  o = index2value(L, idx);
+  readonly = ttistable(o) && isreadonly(hvalue(o));
+  lua_unlock(L);
+  return readonly;
+}
+
+LUA_API void lua_setreadonly (lua_State *L, int idx, int value) {
+  Table *t;
+  lua_lock(L);
+  t = gettable(L, idx);
+  api_check(L, t != hvalue(&G(L)->l_registry), "freezing registry");
+  luaH_setreadonly(t, value);
+  lua_unlock(L);
+}
+#else
+#define api_checkwritable(L,t)	((void)0)
+#endif
+
+
 #if defined(GRIT_POWER_WOW)
 LUA_API int lua_tabletype (lua_State *L, int idx) {
   const TValue *o = index2value(L, idx);
@@ -915,6 +942,7 @@ LUA_API void lua_wipetable (lua_State *L, int idx) {
   lua_lock(L);
   o = index2value(L, idx);
   api_check(L, ttistable(o), "table expected");
+  api_checkwritable(L, hvalue(o));
   luaH_wipetable(hvalue(o));
   lua_unlock(L);
 }
@@ -926,6 +954,8 @@ LUA_API void lua_clonetable (lua_State *L, int fromidx, int toidx) {
   to = index2value(L, toidx);
   api_check(L, ttistable(from), "table expected");
   api_check(L, ttistable(to), "table expected");
+  if (hvalue(from) != hvalue(to))
+    api_checkwritable(L, hvalue(to));
   luaH_clonetable(L, hvalue(from), hvalue(to));
   lua_unlock(L);
 }
@@ -1077,6 +1107,7 @@ static void aux_rawset (lua_State *L, int idx, TValue *key, int n) {
     glmMat_rawset(L, v, key, s2v(L->top.p - 1));
   else {
     Table *t = ensuretable(L, v);
+    api_checkwritable(L, t);
     luaH_set(L, t, key, s2v(L->top.p - 1));
     invalidateTMcache(t);
     luaC_barrierback(L, obj2gco(t), s2v(L->top.p - 1));
@@ -1110,6 +1141,7 @@ LUA_API void lua_rawseti (lua_State *L, int idx, lua_Integer n) {
   }
   else {
     Table *t = ensuretable(L, v);
+    api_checkwritable(L, t);
     luaH_setint(L, t, n, s2v(L->top.p - 1));
     luaC_barrierback(L, obj2gco(t), s2v(L->top.p - 1));
   }
@@ -1132,6 +1164,7 @@ LUA_API int lua_setmetatable (lua_State *L, int objindex) {
   }
   switch (ttype(obj)) {
     case LUA_TTABLE: {
+      api_checkwritable(L, hvalue(obj));
       hvalue(obj)->metatable = mt;
       if (mt) {
         luaC_objbarrier(L, gcvalue(obj), mt);

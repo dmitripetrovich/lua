@@ -1434,6 +1434,16 @@ void luaH_clonetable (lua_State *L, const Table *from, Table *to) {
 #endif
 
 
+#if defined(GRIT_POWER_READONLY)
+void luaH_setreadonly (Table *t, int readonly) {
+  if (readonly)
+    setreadonly(t);
+  else
+    setnotreadonly(t);
+}
+#endif
+
+
 #if defined(LUA_DEBUG)
 
 /* export this function for the test library */

@@ -23,6 +23,14 @@
 #include "lgrit_lib.h"
 
 
+#if defined(GRIT_POWER_READONLY)
+#define luaB_checkwritable(L,arg) \
+  luaL_argcheck(L, !lua_isreadonly(L, arg), arg, "table is readonly")
+#else
+#define luaB_checkwritable(L,arg)	((void)0)
+#endif
+
+
 static int luaB_print (lua_State *L) {
   int n = lua_gettop(L);  /* number of arguments */
   int i;
@@ -141,6 +149,7 @@ static int luaB_setmetatable (lua_State *L) {
   int t = lua_type(L, 2);
   luaL_checktype(L, 1, LUA_TTABLE);
   luaL_argexpected(L, t == LUA_TNIL || t == LUA_TTABLE, 2, "nil or table");
+  luaB_checkwritable(L, 1);
   if (l_unlikely(luaL_getmetafield(L, 1, "__metatable") != LUA_TNIL))
     return luaL_error(L, "cannot change a protected metatable");
   lua_settop(L, 2);
@@ -183,6 +192,7 @@ static int luaB_rawset (lua_State *L) {
     luaL_typeerror(L, 1, lua_typename(L, LUA_TTABLE));
   luaL_checkany(L, 2);
   luaL_checkany(L, 3);
+  luaB_checkwritable(L, 1);
   lua_settop(L, 3);
   lua_rawset(L, 1);
   return 1;

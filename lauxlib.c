@@ -1108,6 +1108,10 @@ LUALIB_API void luaL_requiref (lua_State *L, const char *modname,
   lua_getfield(L, -1, modname);  /* LOADED[modname] */
   if (!lua_toboolean(L, -1)) {  /* package not already loaded? */
     lua_pop(L, 1);  /* remove field */
+#if defined(GRIT_POWER_READONLY)
+    if (lua_isreadonly(L, -1))
+      luaL_error(L, "readonly " LUA_LOADED_TABLE " table");
+#endif
     lua_pushcfunction(L, openf);
     lua_pushstring(L, modname);  /* argument to open function */
     lua_call(L, 1, 1);  /* call 'openf' to open module */
@@ -1116,8 +1120,17 @@ LUALIB_API void luaL_requiref (lua_State *L, const char *modname,
   }
   lua_remove(L, -2);  /* remove LOADED table */
   if (glb) {
+#if defined(GRIT_POWER_READONLY)
+    lua_pushglobaltable(L);
+    if (!lua_isreadonly(L, -1)) {
+      lua_pushvalue(L, -2);
+      lua_setfield(L, -2, modname);
+    }
+    lua_pop(L, 1);
+#else
     lua_pushvalue(L, -1);  /* copy of module */
     lua_setglobal(L, modname);  /* _G[modname] = module */
+#endif
   }
 }
 

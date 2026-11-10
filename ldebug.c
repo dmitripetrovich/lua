@@ -870,6 +870,13 @@ l_noret luaG_runerror (lua_State *L, const char *fmt, ...) {
 }
 
 
+#if defined(GRIT_POWER_READONLY)
+l_noret luaG_readonlyerror (lua_State *L) {
+  luaG_runerror(L, "attempting to modify a readonly value");
+}
+#endif
+
+
 /*
 ** Check whether new instruction 'newpc' is in a different line from
 ** previous instruction 'oldpc'. More often than not, 'newpc' is only

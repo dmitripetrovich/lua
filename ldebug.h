@@ -55,6 +55,9 @@ LUAI_FUNC l_noret luaG_ordererror (lua_State *L, const TValue *p1,
                                                  const TValue *p2);
 LUAI_FUNC l_noret luaG_errnnil (lua_State *L, LClosure *cl, int k);
 LUAI_FUNC l_noret luaG_runerror (lua_State *L, const char *fmt, ...);
+#if defined(GRIT_POWER_READONLY)
+LUAI_FUNC l_noret luaG_readonlyerror (lua_State *L);
+#endif
 LUAI_FUNC const char *luaG_addinfo (lua_State *L, const char *msg,
                                                   TString *src, int line);
 LUAI_FUNC l_noret luaG_errormsg (lua_State *L);

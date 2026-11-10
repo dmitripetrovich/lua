@@ -1870,6 +1870,15 @@ static int runC (lua_State *L, lua_State *L1, const char *pc) {
       int t = getindex;
       lua_rawsetp(L1, t, cast_voidp(cast_sizet(getnum)));
     }
+#if defined(GRIT_POWER_READONLY)
+    else if EQ("isreadonly") {
+      lua_pushboolean(L1, lua_isreadonly(L1, getindex));
+    }
+    else if EQ("setreadonly") {
+      int t = getindex;
+      lua_setreadonly(L1, t, getnum);
+    }
+#endif
     else if EQ("remove") {
       lua_remove(L1, getnum);
     }

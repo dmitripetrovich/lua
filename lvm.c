@@ -354,6 +354,10 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
       Table *h = hvalue(t);  /* save 't' table */
       tm = fasttm(L, h->metatable, TM_NEWINDEX);  /* get metamethod */
       if (tm == NULL) {  /* no metamethod? */
+#if defined(GRIT_POWER_READONLY)
+        if (l_unlikely(isreadonly(h)))
+          luaG_readonlyerror(L);
+#endif
         sethvalue2s(L, L->top.p, h);  /* anchor 't' */
         L->top.p++;  /* assume EXTRA_STACK */
         luaH_finishset(L, h, key, val, hres);  /* set new value */
@@ -362,6 +366,13 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
         luaC_barrierback(L, obj2gco(h), val);
         return;
       }
+#if defined(GRIT_POWER_READONLY)
+      if (l_unlikely(isreadonly(h))) {
+        TValue aux;
+        if (!tagisempty(luaH_get(h, key, &aux)))
+          luaG_readonlyerror(L);
+      }
+#endif
       /* else will try the metamethod */
     }
     else {  /* not a table; check metamethod */
@@ -380,6 +391,12 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
       hres = HNOTATABLE;
     else {
       Table *h = hvalue(t);  /* next call can change the value at 't' */
+#if defined(GRIT_POWER_READONLY)
+      if (l_unlikely(isreadonly(h))) {
+        hres = HNOTFOUND;
+        continue;
+      }
+#endif
       hres = luaH_pset(h, key, val);
       if (hres == HOK) {
         luaC_barrierback(L, obj2gco(h), val);  /* luaV_finishfastset */
@@ -2010,6 +2027,10 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         unsigned n = cast_uint(GETARG_vB(i));
         unsigned last = cast_uint(GETARG_vC(i));
         Table *h = hvalue(s2v(ra));
+#if defined(GRIT_POWER_READONLY)
+        if (l_unlikely(isreadonly(h)))
+          halfProtect(luaG_readonlyerror(L));
+#endif
         if (n == 0)
           n = cast_uint(L->top.p - ra) - 1;  /* get up to the top */
         else

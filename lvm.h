@@ -91,12 +91,24 @@ typedef enum {
   else { luaH_fastgeti(hvalue(t), k, res, tag); }
 
 
+#if defined(GRIT_POWER_READONLY)
+#define luaV_fastset(t,k,val,hres,f) \
+  (hres = (!ttistable(t) ? HNOTATABLE : \
+           l_unlikely(isreadonly(hvalue(t))) ? HNOTFOUND : \
+           f(hvalue(t), k, val)))
+
+#define luaV_fastseti(t,k,val,hres) \
+  if (!ttistable(t)) hres = HNOTATABLE; \
+  else if (l_unlikely(isreadonly(hvalue(t)))) hres = HNOTFOUND; \
+  else { luaH_fastseti(hvalue(t), k, val, hres); }
+#else
 #define luaV_fastset(t,k,val,hres,f) \
   (hres = (!ttistable(t) ? HNOTATABLE : f(hvalue(t), k, val)))
 
 #define luaV_fastseti(t,k,val,hres) \
   if (!ttistable(t)) hres = HNOTATABLE; \
   else { luaH_fastseti(hvalue(t), k, val, hres); }
+#endif
 
 
 /*
