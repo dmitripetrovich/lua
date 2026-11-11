@@ -153,7 +153,9 @@ static l_mem objsize (GCObject *o) {
       res = luaS_sizelngstr(ts->u.lnglen, ts->shrlen);
       break;
     }
-    case LUA_VMATRIX: {
+    case LUA_VMATRIX2:
+    case LUA_VMATRIX3:
+    case LUA_VMATRIX4: {
       res = sizeof(GCMatrix);
       break;
     }
@@ -350,7 +352,9 @@ GCObject *luaC_newobj (lua_State *L, lu_byte tt, size_t sz) {
 static void reallymarkobject (global_State *g, GCObject *o) {
   g->GCmarked += objsize(o);
   switch (o->tt) {
-    case LUA_VMATRIX:
+    case LUA_VMATRIX2:
+    case LUA_VMATRIX3:
+    case LUA_VMATRIX4:
     case LUA_VSHRSTR:
 #if defined(GRIT_POWER_BLOB)
     case LUA_VBLOBSTR:
@@ -870,7 +874,9 @@ static void freeobj (lua_State *L, GCObject *o) {
     case LUA_VTABLE:
       luaH_free(L, gco2t(o));
       break;
-    case LUA_VMATRIX:
+    case LUA_VMATRIX2:
+    case LUA_VMATRIX3:
+    case LUA_VMATRIX4:
       luaM_free_(L, gco2mat(o), sizeof(GCMatrix));
       break;
     case LUA_VTHREAD:

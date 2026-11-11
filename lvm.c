@@ -24,7 +24,7 @@
 #include "lfunc.h"
 #include "lgc.h"
 #include "lobject.h"
-#include "lglm_core.h"
+#include "lglmcore.h"
 #include "lopcodes.h"
 #include "lstate.h"
 #include "lstring.h"
@@ -310,8 +310,13 @@ lu_byte luaV_finishget (lua_State *L, const TValue *t, TValue *key,
     if (tag == LUA_VNOTABLE) {  /* 't' is not a table? */
       lua_assert(!ttistable(t));
       tm = luaT_gettmbyobj(L, t, TM_INDEX);
-      if (l_unlikely(notm(tm)))
+      if (l_unlikely(notm(tm))) {
+        if (ttisglm(t)) {  /* @LuaGLM: result is nil */
+          setnilvalue2s(val);
+          return LUA_VNIL;
+        }
         luaG_typeerror(L, t, "index");  /* no metamethod */
+      }
       /* else will try the metamethod */
     }
     else {  /* 't' is a table */
@@ -378,7 +383,7 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
     else {  /* not a table; check metamethod */
       tm = luaT_gettmbyobj(L, t, TM_NEWINDEX);
       if (l_unlikely(notm(tm)))
-        luaG_typeerror(L, t, ttisvector(t) ? "mutate" : "index");
+        luaG_typeerror(L, t, ttisvector(t) ? "modify" : ttismatrix(t) ? "incorrectly modify" : "index");
     }
     /* try the metamethod */
     if (ttisfunction(tm)) {
@@ -666,11 +671,16 @@ int luaV_equalobj (lua_State *L, const TValue *t1, const TValue *t2) {
 #endif
       case LUA_VLNGSTR:
         return luaS_eqstr(tsvalue(t1), tsvalue(t2));
-      case LUA_VVECTOR2: return glmVec_equalObj(L, t1, t2, LUA_VVECTOR2);
-      case LUA_VVECTOR3: return glmVec_equalObj(L, t1, t2, LUA_VVECTOR3);
-      case LUA_VVECTOR4: return glmVec_equalObj(L, t1, t2, LUA_VVECTOR4);
-      case LUA_VQUAT: return glmVec_equalObj(L, t1, t2, LUA_VQUAT);
-      case LUA_VMATRIX: return glmMat_equalObj(L, t1, t2);
+      /* @LuaGLM: check type-specific metatable for TM_EQ */
+      case LUA_VVECTOR2: case LUA_VVECTOR3: case LUA_VVECTOR4: case LUA_VQUAT:
+      case LUA_VMATRIX2: case LUA_VMATRIX3: case LUA_VMATRIX4: {
+        if (lglm_equalobj(t1, t2)) return 1;
+        else if (L == NULL) return 0;
+        tm = luaT_gettmbyobj(L, t1, TM_EQ);
+        if (notm(tm))
+          tm = NULL;
+        break;  /* will try TM */
+      }
       case LUA_VUSERDATA: {
         if (uvalue(t1) == uvalue(t2)) return 1;
         else if (L == NULL) return 0;
@@ -777,17 +787,19 @@ void luaV_concat (lua_State *L, int total) {
 /*
 ** Main operation 'ra = #rb'.
 */
-void luaV_objlen (lua_State *L, StkId ra, const TValue *rb) {
+void luaV_objlen (lua_State *L, StkId ra, const TValue *rb, int api_call) {
   const TValue *tm;
   switch (ttypetag(rb)) {
     case LUA_VVECTOR2:
     case LUA_VVECTOR3:
     case LUA_VVECTOR4:
     case LUA_VQUAT:
-      glmVec_objlen(rb, ra);
+      lvec_len(rb, ra, api_call);
       return;
-    case LUA_VMATRIX:
-      glmMat_objlen(rb, ra);
+    case LUA_VMATRIX2:
+    case LUA_VMATRIX3:
+    case LUA_VMATRIX4:
+      lmat_len(rb, ra);
       return;
     case LUA_VTABLE: {
       Table *h = hvalue(rb);
@@ -1000,9 +1012,9 @@ void luaV_finishOp (lua_State *L) {
 
 /*
 ** Arithmetic operations with immediate operands. 'iop' is the integer
-** operation, 'fop' is the float operation.
+** operation, 'fop' is the float operation, 'vop' is the vector operation.
 */
-#define op_arithI(L,iop,fop) {  \
+#define op_arithI(L,iop,fop,vop) {  \
   TValue *ra = vRA(i); \
   TValue *v1 = vRB(i);  \
   int imm = GETARG_sC(i);  \
@@ -1014,6 +1026,10 @@ void luaV_finishOp (lua_State *L) {
     lua_Number nb = fltvalue(v1);  \
     lua_Number fimm = cast_num(imm);  \
     pc++; setfltvalue(ra, fop(L, nb, fimm)); \
+  }  \
+  else if (l_unlikely(ttisglm(v1))) {  \
+    /* correct top in case of emergency GC */  \
+    Protect(pc += vop(L, RA(i), v1, imm));  \
   }}
 
 
@@ -1021,66 +1037,70 @@ void luaV_finishOp (lua_State *L) {
 ** Auxiliary function for arithmetic operations over floats and others
 ** with two operands.
 */
-#define op_arithf_aux(L,v1,v2,fop) {  \
+#define op_arithf_aux(L,v1,v2,fop,vop) {  \
   lua_Number n1; lua_Number n2;  \
   if (tonumberns(v1, n1) && tonumberns(v2, n2)) {  \
     StkId ra = RA(i);  \
     pc++; setfltvalue(s2v(ra), fop(L, n1, n2));  \
+  }  \
+  else if (l_unlikely(ttisglm(v1) || ttisglm(v2))) {  \
+    StkId ra = RA(i);  \
+    Protect(pc += vop(L, ra, v1, v2));  \
   }}
 
 
 /*
 ** Arithmetic operations over floats and others with register operands.
 */
-#define op_arithf(L,fop) {  \
+#define op_arithf(L,fop,vop) {  \
   TValue *v1 = vRB(i);  \
   TValue *v2 = vRC(i);  \
-  op_arithf_aux(L, v1, v2, fop); }
+  op_arithf_aux(L, v1, v2, fop, vop); }
 
 
 /*
 ** Arithmetic operations with K operands for floats.
 */
-#define op_arithfK(L,fop) {  \
+#define op_arithfK(L,fop,vop) {  \
   TValue *v1 = vRB(i);  \
   TValue *v2 = KC(i); lua_assert(ttisnumber(v2));  \
-  op_arithf_aux(L, v1, v2, fop); }
+  op_arithf_aux(L, v1, v2, fop, vop); }
 
 
 /*
 ** Arithmetic operations over integers and floats.
 */
-#define op_arith_aux(L,v1,v2,iop,fop) {  \
+#define op_arith_aux(L,v1,v2,iop,fop,vop) {  \
   if (ttisinteger(v1) && ttisinteger(v2)) {  \
     StkId ra = RA(i); \
     lua_Integer i1 = ivalue(v1); lua_Integer i2 = ivalue(v2);  \
     pc++; setivalue(s2v(ra), iop(L, i1, i2));  \
   }  \
-  else op_arithf_aux(L, v1, v2, fop); }
+  else op_arithf_aux(L, v1, v2, fop, vop); }
 
 
 /*
 ** Arithmetic operations with register operands.
 */
-#define op_arith(L,iop,fop) {  \
+#define op_arith(L,iop,fop,vop) {  \
   TValue *v1 = vRB(i);  \
   TValue *v2 = vRC(i);  \
-  op_arith_aux(L, v1, v2, iop, fop); }
+  op_arith_aux(L, v1, v2, iop, fop, vop); }
 
 
 /*
 ** Arithmetic operations with K operands.
 */
-#define op_arithK(L,iop,fop) {  \
+#define op_arithK(L,iop,fop,vop) {  \
   TValue *v1 = vRB(i);  \
   TValue *v2 = KC(i); lua_assert(ttisnumber(v2));  \
-  op_arith_aux(L, v1, v2, iop, fop); }
+  op_arith_aux(L, v1, v2, iop, fop, vop); }
 
 
 /*
 ** Bitwise operations with constant operand.
 */
-#define op_bitwiseK(L,op) {  \
+#define op_bitwiseK(L,op,vop) {  \
   TValue *v1 = vRB(i);  \
   TValue *v2 = KC(i);  \
   lua_Integer i1;  \
@@ -1088,19 +1108,27 @@ void luaV_finishOp (lua_State *L) {
   if (tointegerns(v1, &i1)) {  \
     StkId ra = RA(i); \
     pc++; setivalue(s2v(ra), op(i1, i2));  \
+  }  \
+  else if (l_unlikely(ttisglm(v1))) {  \
+    StkId ra = RA(i); \
+    pc += vop(L, ra, v1, v2);  \
   }}
 
 
 /*
 ** Bitwise operations with register operands.
 */
-#define op_bitwise(L,op) {  \
+#define op_bitwise(L,op,vop) {  \
   TValue *v1 = vRB(i);  \
   TValue *v2 = vRC(i);  \
   lua_Integer i1; lua_Integer i2;  \
   if (tointegerns(v1, &i1) && tointegerns(v2, &i2)) {  \
     StkId ra = RA(i); \
     pc++; setivalue(s2v(ra), op(i1, i2));  \
+  }  \
+  else if (l_unlikely(ttisglm(v1) || ttisglm(v2))) {  \
+    StkId ra = RA(i); \
+    pc += vop(L, ra, v1, v2);  \
   }}
 
 
@@ -1364,8 +1392,8 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         TValue *rc = KC(i);
         TString *key = tsvalue(rc);  /* key must be a short string */
         if (ttisvector(upval)) {
-          if (l_unlikely(!glmVec_fastgets(upval, key, ra)))
-            Protect(glmVec_get(L, upval, rc, ra));
+          if (l_unlikely(!lvec_fastgets(upval, key, ra)))
+            Protect(lvec_get(L, upval, rc, ra));
         }
         else {
           lu_byte tag;
@@ -1380,16 +1408,16 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         TValue *rb = vRB(i);
         TValue *rc = vRC(i);
         if (ttisvector(rb)) {  /* fast track for integers / character indexing? */
-          if (ttisinteger(rc) && glmVec_fastgeti(rb, ivalue(rc), ra)) { /* nothing */ }
-          else if (ttisstring(rc) && glmVec_fastgets(rb, tsvalue(rc), ra)) { /* nothing */ }
+          if (ttisinteger(rc) && lvec_fastgeti(rb, ivalue(rc), ra)) { /* nothing */ }
+          else if (ttisstring(rc) && lvec_fastgets(rb, tsvalue(rc), ra)) { /* nothing */ }
           else {
-            Protect(glmVec_get(L, rb, rc, ra));
+            Protect(lvec_get(L, rb, rc, ra));
           }
         }
         else if (ttismatrix(rb)) {  /* fast track for integers? */
-          if (ttisinteger(rc) && glmMat_fastgeti(rb, ivalue(rc), ra)) { /* nothing */ }
+          if (ttisinteger(rc) && lmat_fastgeti(rb, ivalue(rc), ra)) { /* nothing */ }
           else {
-            Protect(glmMat_get(L, rb, rc, ra));
+            Protect(lmat_get(L, rb, rc, ra));
           }
         }
         else {
@@ -1408,13 +1436,15 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         StkId ra = RA(i);
         TValue *rb = vRB(i);
         int c = GETARG_C(i);
-        if (ttisvector(rb)) {  /* fast track for integers? */
-          if (l_unlikely(!glmVec_fastgeti(rb, c, ra)))
-            Protect(glmVec_geti(L, rb, c, ra));
-        }
-        else if (ttismatrix(rb)) {
-          if (l_unlikely(!glmMat_fastgeti(rb, c, ra)))
-            Protect(glmMat_geti(L, rb, c, ra));
+        if (ttisvector(rb) || ttismatrix(rb)) {  /* fast track for integers? */
+          if (l_unlikely(!(ttisvector(rb) ? lvec_fastgeti(rb, c, ra) : lmat_fastgeti(rb, c, ra)))) {
+            TValue key;
+            setivalue(&key, c);
+            if (ttisvector(rb))
+              Protect(lvec_get(L, rb, &key, ra));
+            else
+              Protect(lmat_get(L, rb, &key, ra));
+          }
         }
         else {
           lu_byte tag;
@@ -1433,8 +1463,8 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         TValue *rc = KC(i);
         TString *key = tsvalue(rc);  /* key must be a short string */
         if (ttisvector(rb)) {
-          if (l_unlikely(!glmVec_fastgets(rb, key, ra)))
-            Protect(glmVec_get(L, rb, rc, ra));
+          if (l_unlikely(!lvec_fastgets(rb, key, ra)))
+            Protect(lvec_get(L, rb, rc, ra));
         }
         else {
           lu_byte tag;
@@ -1449,16 +1479,12 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         TValue *upval = cl->upvals[GETARG_A(i)]->v.p;
         TValue *rb = KB(i);
         TValue *rc = RKC(i);
-        if (ttismatrix(upval))
-          Protect(glmMat_set(L, upval, rb, rc));
-        else {
-          TString *key = tsvalue(rb);  /* key must be a short string */
-          luaV_fastset(upval, key, rc, hres, luaH_psetshortstr);
-          if (hres == HOK)
-            luaV_finishfastset(L, upval, rc);
-          else
-            Protect(luaV_finishset(L, upval, rb, rc, hres));
-        }
+        TString *key = tsvalue(rb);  /* key must be a short string */
+        luaV_fastset(upval, key, rc, hres, luaH_psetshortstr);
+        if (hres == HOK)
+          luaV_finishfastset(L, upval, rc);
+        else
+          Protect(luaV_finishset(L, upval, rb, rc, hres));
         vmbreak;
       }
       vmcase(OP_SETTABLE) {
@@ -1467,7 +1493,7 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         TValue *rb = vRB(i);  /* key (table is in 'ra') */
         TValue *rc = RKC(i);  /* value */
         if (ttismatrix(s2v(ra)))
-          Protect(glmMat_set(L, s2v(ra), rb, rc));
+          Protect(lmat_set(L, s2v(ra), rb, rc));
         else {
           if (ttisinteger(rb)) {  /* fast track for integers? */
             luaV_fastseti(s2v(ra), ivalue(rb), rc, hres);
@@ -1488,7 +1514,7 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         int b = GETARG_B(i);
         TValue *rc = RKC(i);
         if (ttismatrix(s2v(ra)))
-          Protect(glmMat_seti(L, s2v(ra), b, rc));
+          Protect(lmat_seti(L, s2v(ra), b, rc));
         else {
           luaV_fastseti(s2v(ra), b, rc, hres);
           if (hres == HOK)
@@ -1543,8 +1569,8 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         TString *key = tsvalue(rc);  /* key must be a short string */
         setobj2s(L, ra + 1, rb);
         if (ttisvector(rb)) {
-          if (l_unlikely(!glmVec_fastgets(rb, key, ra)))
-            Protect(glmVec_get(L, rb, rc, ra));
+          if (l_unlikely(!lvec_fastgets(rb, key, ra)))
+            Protect(lvec_get(L, rb, rc, ra));
         }
         else {
           luaV_fastget(rb, key, s2v(ra), luaH_getshortstr, tag);
@@ -1554,49 +1580,49 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         vmbreak;
       }
       vmcase(OP_ADDI) {
-        op_arithI(L, l_addi, luai_numadd);
+        op_arithI(L, l_addi, luai_numadd, lglm_ADDI);
         vmbreak;
       }
       vmcase(OP_ADDK) {
-        op_arithK(L, l_addi, luai_numadd);
+        op_arithK(L, l_addi, luai_numadd, lglm_ADD);
         vmbreak;
       }
       vmcase(OP_SUBK) {
-        op_arithK(L, l_subi, luai_numsub);
+        op_arithK(L, l_subi, luai_numsub, lglm_SUB);
         vmbreak;
       }
       vmcase(OP_MULK) {
-        op_arithK(L, l_muli, luai_nummul);
+        op_arithK(L, l_muli, luai_nummul, lglm_MUL);
         vmbreak;
       }
       vmcase(OP_MODK) {
         savestate(L, ci);  /* in case of division by 0 */
-        op_arithK(L, luaV_mod, luaV_modf);
+        op_arithK(L, luaV_mod, luaV_modf, lglm_MOD);
         vmbreak;
       }
       vmcase(OP_POWK) {
-        op_arithfK(L, luai_numpow);
+        op_arithfK(L, luai_numpow, lglm_POW);
         vmbreak;
       }
       vmcase(OP_DIVK) {
-        op_arithfK(L, luai_numdiv);
+        op_arithfK(L, luai_numdiv, lglm_DIV);
         vmbreak;
       }
       vmcase(OP_IDIVK) {
         savestate(L, ci);  /* in case of division by 0 */
-        op_arithK(L, luaV_idiv, luai_numidiv);
+        op_arithK(L, luaV_idiv, luai_numidiv, lglm_IDIV);
         vmbreak;
       }
       vmcase(OP_BANDK) {
-        op_bitwiseK(L, l_band);
+        op_bitwiseK(L, l_band, lglm_BAND);
         vmbreak;
       }
       vmcase(OP_BORK) {
-        op_bitwiseK(L, l_bor);
+        op_bitwiseK(L, l_bor, lglm_BOR);
         vmbreak;
       }
       vmcase(OP_BXORK) {
-        op_bitwiseK(L, l_bxor);
+        op_bitwiseK(L, l_bxor, lglm_BXOR);
         vmbreak;
       }
       vmcase(OP_SHLI) {
@@ -1607,6 +1633,8 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         if (tointegerns(rb, &ib)) {
           pc++; setivalue(s2v(ra), luaV_shiftl(ic, ib));
         }
+        else if (ttisglm(rb))
+          pc += lglm_SHLI(L, ra, rb, ic);
         vmbreak;
       }
       vmcase(OP_SHRI) {
@@ -1617,56 +1645,58 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         if (tointegerns(rb, &ib)) {
           pc++; setivalue(s2v(ra), luaV_shiftl(ib, -ic));
         }
+        else if (ttisglm(rb))
+          pc += lglm_SHRI(L, ra, rb, -ic);
         vmbreak;
       }
       vmcase(OP_ADD) {
-        op_arith(L, l_addi, luai_numadd);
+        op_arith(L, l_addi, luai_numadd, lglm_ADD);
         vmbreak;
       }
       vmcase(OP_SUB) {
-        op_arith(L, l_subi, luai_numsub);
+        op_arith(L, l_subi, luai_numsub, lglm_SUB);
         vmbreak;
       }
       vmcase(OP_MUL) {
-        op_arith(L, l_muli, luai_nummul);
+        op_arith(L, l_muli, luai_nummul, lglm_MUL);
         vmbreak;
       }
       vmcase(OP_MOD) {
         savestate(L, ci);  /* in case of division by 0 */
-        op_arith(L, luaV_mod, luaV_modf);
+        op_arith(L, luaV_mod, luaV_modf, lglm_MOD);
         vmbreak;
       }
       vmcase(OP_POW) {
-        op_arithf(L, luai_numpow);
+        op_arithf(L, luai_numpow, lglm_POW);
         vmbreak;
       }
       vmcase(OP_DIV) {  /* float division (always with floats) */
-        op_arithf(L, luai_numdiv);
+        op_arithf(L, luai_numdiv, lglm_DIV);
         vmbreak;
       }
       vmcase(OP_IDIV) {  /* floor division */
         savestate(L, ci);  /* in case of division by 0 */
-        op_arith(L, luaV_idiv, luai_numidiv);
+        op_arith(L, luaV_idiv, luai_numidiv, lglm_IDIV);
         vmbreak;
       }
       vmcase(OP_BAND) {
-        op_bitwise(L, l_band);
+        op_bitwise(L, l_band, lglm_BAND);
         vmbreak;
       }
       vmcase(OP_BOR) {
-        op_bitwise(L, l_bor);
+        op_bitwise(L, l_bor, lglm_BOR);
         vmbreak;
       }
       vmcase(OP_BXOR) {
-        op_bitwise(L, l_bxor);
+        op_bitwise(L, l_bxor, lglm_BXOR);
         vmbreak;
       }
       vmcase(OP_SHL) {
-        op_bitwise(L, luaV_shiftl);
+        op_bitwise(L, luaV_shiftl, lglm_BSHL);
         vmbreak;
       }
       vmcase(OP_SHR) {
-        op_bitwise(L, luaV_shiftr);
+        op_bitwise(L, luaV_shiftr, lglm_BSHR);
         vmbreak;
       }
       vmcase(OP_MMBIN) {
@@ -1710,6 +1740,8 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         else if (tonumberns(rb, nb)) {
           setfltvalue(s2v(ra), luai_numunm(L, nb));
         }
+        else if (ttisglm(rb))  /* correct top in case of emergency GC */
+          Protect(lglm_UNM(L, ra, rb));
         else
           Protect(luaT_trybinTM(L, rb, rb, ra, TM_UNM));
         vmbreak;
@@ -1720,6 +1752,9 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         lua_Integer ib;
         if (tointegerns(rb, &ib)) {
           setivalue(s2v(ra), intop(^, ~l_castS2U(0), ib));
+        }
+        else if (ttisglm(rb) && lglm_BNOT(L, ra, rb)) {
+          /* FALLTHROUGH */
         }
         else
           Protect(luaT_trybinTM(L, rb, rb, ra, TM_BNOT));
@@ -1736,7 +1771,7 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
       }
       vmcase(OP_LEN) {
         StkId ra = RA(i);
-        Protect(luaV_objlen(L, ra, vRB(i)));
+        Protect(luaV_objlen(L, ra, vRB(i), 0));
         vmbreak;
       }
       vmcase(OP_CONCAT) {

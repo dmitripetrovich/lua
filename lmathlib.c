@@ -21,7 +21,7 @@
 #include "lauxlib.h"
 #include "lualib.h"
 #include "llimits.h"
-#include "lgrit_lib.h"
+#include "lglmaux.h"
 
 
 #undef PI
@@ -164,6 +164,19 @@ static int math_modf (lua_State *L) {
 static int math_sqrt (lua_State *L) {
   lua_pushnumber(L, l_mathop(sqrt)(luaL_checknumber(L, 1)));
   return 1;
+}
+
+
+/* grit-lua compatibility: numbers clamp to a float */
+static int math_clamp (lua_State *L) {
+  if (lua_type(L, 1) == LUA_TNUMBER && lua_type(L, 2) == LUA_TNUMBER && lua_type(L, 3) == LUA_TNUMBER) {
+    lua_Number x = lua_tonumber(L, 1);
+    lua_Number lo = lua_tonumber(L, 2);
+    lua_Number hi = lua_tonumber(L, 3);
+    lua_pushnumber(L, l_mathop(fmin)(l_mathop(fmax)(x, lo), hi));
+    return 1;
+  }
+  return luaglm_clamp(L);
 }
 
 
@@ -890,7 +903,7 @@ static const luaL_Reg mathlib[] = {
 #endif
 #endif
   /* grit-lua compatbility */
-  { "clamp", glmVec_clamp },
+  { "clamp", math_clamp },
   /* placeholders */
   {"random", NULL},
   {"randomseed", NULL},
@@ -922,4 +935,3 @@ LUAMOD_API int luaopen_math (lua_State *L) {
   setrandfunc(L);
   return 1;
 }
-

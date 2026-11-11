@@ -1082,7 +1082,7 @@ static int str_gsub (lua_State *L) {
   const char *src = luaL_checklstring(L, 1, &srcl);  /* subject */
   const char *p = luaL_checklstring(L, 2, &lp);  /* pattern */
   const char *lastmatch = NULL;  /* end of last match */
-  int tr = lua_type(L, 3);  /* replacement type */
+  int tr = lua_rawtype(L, 3);  /* replacement type */
   /* max replacements */
   lua_Integer max_s = luaL_optinteger(L, 4, cast_st2S(srcl) + 1);
   int anchor = (*p == '^');

@@ -14,9 +14,6 @@
 ** gcc -O2 -o lua -DLUA_USE_LINUX -Wl,-E onelua.c -lm -ldl
 **
 */
-#if !defined(__cplusplus)
-  #error "onelua must be compiled with cplusplus for GLM integration"
-#endif
 
 /* default is to build the full interpreter */
 #ifndef MAKE_LIB
@@ -104,7 +101,7 @@
 #include "ldo.c"
 #include "lvm.c"
 #include "lapi.c"
-#include "lglm.cpp"
+#include "lglm.c"
 
 /* auxiliary library -- used by all */
 #include "lauxlib.c"
@@ -122,9 +119,6 @@
 #include "ltablib.c"
 #include "lutf8lib.c"
 #include "linit.c"
-#if defined(LUA_INCLUDE_LIBGLM)
-#include "lglmlib.cpp"
-#endif
 #endif
 
 /* test library -- used only for internal development */

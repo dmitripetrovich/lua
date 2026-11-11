@@ -26,7 +26,7 @@
 
 #include "lauxlib.h"
 #include "llimits.h"
-#include "lgrit_lib.h"
+#include "lglmaux.h"
 
 
 /*
@@ -125,8 +125,7 @@ static int lastlevel (lua_State *L) {
 }
 
 
-LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1,
-                                const char *msg, int level) {
+LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1, const char *msg, int level) {
   luaL_Buffer b;
   lua_Debug ar;
   int last = lastlevel(L1);
@@ -182,16 +181,14 @@ LUALIB_API int luaL_argerror (lua_State *L, int arg, const char *extramsg) {
     if (strcmp(ar.namewhat, "method") == 0) {  /* colon syntax? */
       arg--;  /* do not count (extra) self argument */
       if (arg == 0)  /* error in self argument? */
-        return luaL_error(L, "calling '%s' on bad self (%s)",
-                               ar.name, extramsg);
+        return luaL_error(L, "calling '%s' on bad self (%s)", ar.name, extramsg);
       /* else go through; error in a regular argument */
     }
     argword = "argument";
   }
   if (ar.name == NULL)
     ar.name = (pushglobalfuncname(L, &ar)) ? lua_tostring(L, -1) : "?";
-  return luaL_error(L, "bad %s #%d to '%s' (%s)",
-                       argword, arg, ar.name, extramsg);
+  return luaL_error(L, "bad %s #%d to '%s' (%s)", argword, arg, ar.name, extramsg);
 }
 
 
@@ -202,6 +199,8 @@ LUALIB_API int luaL_typeerror (lua_State *L, int arg, const char *tname) {
     typearg = lua_tostring(L, -1);  /* use the given type name */
   else if (lua_type(L, arg) == LUA_TLIGHTUSERDATA)
     typearg = "light userdata";  /* special name for messages */
+  else if (lua_rawtype(L, arg) == LUA_TVECTOR || lua_rawtype(L, arg) == LUA_TMATRIX)
+    typearg = luaglm_typename(L, arg); /* @LuaGLM: use vecN/quat/matX labels */
   else
     typearg = luaL_typename(L, arg);  /* standard name */
   msg = lua_pushfstring(L, "%s expected, got %s", tname, typearg);
@@ -323,7 +322,7 @@ static void exactargs(lua_State* L, int expected) {
 }
 
 /* a list of names of userdata metatable fields which can not be modified by lua code */
-static const char *const protectedmetanames[] {
+static const char *const protectedmetanames[] = {
   "__metatable", /* used by the lua [get/set]metatable functions to hide the real metatable */
   "__gc", /* used by userdata to cleanup any native state */
   NULL
@@ -435,16 +434,13 @@ LUALIB_API void *luaL_checkudata (lua_State *L, int ud, const char *tname) {
 ** =======================================================
 */
 
-LUALIB_API int luaL_checkoption (lua_State *L, int arg, const char *def,
-                                 const char *const lst[]) {
-  const char *name = (def) ? luaL_optstring(L, arg, def) :
-                             luaL_checkstring(L, arg);
+LUALIB_API int luaL_checkoption (lua_State *L, int arg, const char *def, const char *const lst[]) {
+  const char *name = (def) ? luaL_optstring(L, arg, def) : luaL_checkstring(L, arg);
   int i;
   for (i=0; lst[i]; i++)
     if (strcmp(lst[i], name) == 0)
       return i;
-  return luaL_argerror(L, arg,
-                       lua_pushfstring(L, "invalid option '%s'", name));
+  return luaL_argerror(L, arg, lua_pushfstring(L, "invalid option '%s'", name));
 }
 
 
@@ -466,7 +462,7 @@ LUALIB_API void luaL_checkstack (lua_State *L, int space, const char *msg) {
 
 
 LUALIB_API void luaL_checktype (lua_State *L, int arg, int t) {
-  if (l_unlikely(lua_type(L, arg) != t))
+  if (l_unlikely(lua_rawtype(L, arg) != t))
     tag_error(L, arg, t);
 }
 
@@ -484,8 +480,7 @@ LUALIB_API const char *luaL_checklstring (lua_State *L, int arg, size_t *len) {
 }
 
 
-LUALIB_API const char *luaL_optlstring (lua_State *L, int arg,
-                                        const char *def, size_t *len) {
+LUALIB_API const char *luaL_optlstring (lua_State *L, int arg, const char *def, size_t *len) {
   if (lua_isnoneornil(L, arg)) {
     if (len)
       *len = (def ? strlen(def) : 0);
@@ -527,8 +522,7 @@ LUALIB_API lua_Integer luaL_checkinteger (lua_State *L, int arg) {
 }
 
 
-LUALIB_API lua_Integer luaL_optinteger (lua_State *L, int arg,
-                                                      lua_Integer def) {
+LUALIB_API lua_Integer luaL_optinteger (lua_State *L, int arg, lua_Integer def) {
   return luaL_opt(L, luaL_checkinteger, arg, def);
 }
 
@@ -1011,7 +1005,7 @@ LUALIB_API const char *luaL_tolstring (lua_State *L, int idx, size_t *len) {
       luaL_error(L, "'__tostring' must return a string");
   }
   else {
-    switch (lua_type(L, idx)) {
+    switch (lua_rawtype(L, idx)) {
       case LUA_TNUMBER: {
         char buff[LUA_N2SBUFFSZ];
         lua_numbertocstring(L, idx, buff);
@@ -1020,7 +1014,7 @@ LUALIB_API const char *luaL_tolstring (lua_State *L, int idx, size_t *len) {
       }
       case LUA_TVECTOR:
       case LUA_TMATRIX:
-        glm_pushstring(L, idx);
+        luaglm_pushstring(L, idx);
         break;
       case LUA_TSTRING:
         lua_pushvalue(L, idx);
@@ -1311,4 +1305,3 @@ LUALIB_API void luaL_checkversion_ (lua_State *L, lua_Number ver, size_t sz) {
     luaL_error(L, "version mismatch: app. needs %f, Lua core provides %f",
                   (LUAI_UACNUMBER)ver, (LUAI_UACNUMBER)v);
 }
-

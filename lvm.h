@@ -13,8 +13,10 @@
 #include "ltm.h"
 
 
-#if !defined(LUA_NOCVTN2S)
+#if !defined(LUA_NOCVTN2S) && defined(LUAGLM_COMPAT_GLM_CPP)
 #define cvt2str(o)	(ttisnumber(o) || ttisvector(o))
+#elif !defined(LUA_NOCVTN2S)
+#define cvt2str(o)	ttisnumber(o)
 #else
 #define cvt2str(o)	0	/* no conversion from numbers to strings */
 #endif
@@ -129,13 +131,10 @@ LUAI_FUNC int luaV_lessthan (lua_State *L, const TValue *l, const TValue *r);
 LUAI_FUNC int luaV_lessequal (lua_State *L, const TValue *l, const TValue *r);
 LUAI_FUNC int luaV_tonumber_ (const TValue *obj, lua_Number *n);
 LUAI_FUNC int luaV_tointeger (const TValue *obj, lua_Integer *p, F2Imod mode);
-LUAI_FUNC int luaV_tointegerns (const TValue *obj, lua_Integer *p,
-                                F2Imod mode);
+LUAI_FUNC int luaV_tointegerns (const TValue *obj, lua_Integer *p, F2Imod mode);
 LUAI_FUNC int luaV_flttointeger (lua_Number n, lua_Integer *p, F2Imod mode);
-LUAI_FUNC lu_byte luaV_finishget (lua_State *L, const TValue *t, TValue *key,
-                                                StkId val, lu_byte tag);
-LUAI_FUNC void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
-                                             TValue *val, int aux);
+LUAI_FUNC lu_byte luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val, lu_byte tag);
+LUAI_FUNC void luaV_finishset (lua_State *L, const TValue *t, TValue *key, TValue *val, int aux);
 LUAI_FUNC void luaV_finishOp (lua_State *L);
 LUAI_FUNC void luaV_execute (lua_State *L, CallInfo *ci);
 LUAI_FUNC void luaV_concat (lua_State *L, int total);
@@ -143,6 +142,6 @@ LUAI_FUNC lua_Integer luaV_idiv (lua_State *L, lua_Integer x, lua_Integer y);
 LUAI_FUNC lua_Integer luaV_mod (lua_State *L, lua_Integer x, lua_Integer y);
 LUAI_FUNC lua_Number luaV_modf (lua_State *L, lua_Number x, lua_Number y);
 LUAI_FUNC lua_Integer luaV_shiftl (lua_Integer x, lua_Integer y);
-LUAI_FUNC void luaV_objlen (lua_State *L, StkId ra, const TValue *rb);
+LUAI_FUNC void luaV_objlen (lua_State *L, StkId ra, const TValue *rb, int api_call);
 
 #endif

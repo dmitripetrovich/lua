@@ -22,7 +22,6 @@
 #include "llex.h"
 #include "lmem.h"
 #include "lobject.h"
-#include "lglm_core.h"
 #include "lopcodes.h"
 #include "lparser.h"
 #include "lstate.h"

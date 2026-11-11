@@ -71,12 +71,12 @@ typedef int (*lua_UndumpHook) (const char* p, size_t n);
 #define LUA_TBOOLEAN		1
 #define LUA_TLIGHTUSERDATA	2
 #define LUA_TNUMBER		3
-#define LUA_TVECTOR		4
-#define LUA_TSTRING		5
-#define LUA_TTABLE		6
-#define LUA_TFUNCTION		7
-#define LUA_TUSERDATA		8
-#define LUA_TTHREAD		9
+#define LUA_TSTRING		4
+#define LUA_TTABLE		5
+#define LUA_TFUNCTION		6
+#define LUA_TUSERDATA		7
+#define LUA_TTHREAD		8
+#define LUA_TVECTOR		9
 #define LUA_TMATRIX		10
 
 #define LUA_NUMTYPES		11
@@ -84,11 +84,7 @@ typedef int (*lua_UndumpHook) (const char* p, size_t n);
 /*
 ** vector variants exposed in the library to simplify the internal/external
 ** translation between vector-types. (gritLua compatibility)
-**
-** @NOTE: LUA_VVECTOR1 is an implicit vector type. Internally this value must
-** map to LUA_VNUMFLT.
 */
-#define LUA_VVECTOR1 (LUA_TNUMBER | (1 << 4))
 #define LUA_VVECTOR2 (LUA_TVECTOR | (0 << 4))
 #define LUA_VVECTOR3 (LUA_TVECTOR | (1 << 4))
 #define LUA_VVECTOR4 (LUA_TVECTOR | (2 << 4))
@@ -579,6 +575,52 @@ LUA_API lua_Integer lua_opaqueid(lua_State *L, int idx);
 /* }====================================================================== */
 
 
+/*
+** {==============================================================
+** Vector API
+** ===============================================================
+*/
+
+/* lua_type that does not sanitize vector/matrix values (@TypeCompat) */
+#if defined(LUAGLM_COMPAT_5_4)
+LUA_API int (lua_rawtype) (lua_State *L, int idx);
+#else
+#define lua_rawtype(L, I) lua_type((L), (I))
+#endif
+
+LUA_API int (lua_isvector) (lua_State *L, int idx);
+LUA_API int (lua_isquat) (lua_State *L, int idx);
+LUA_API int (lua_ismatrix) (lua_State *L, int idx);
+
+LUA_API int (lua_isvec2) (lua_State *L, int idx);
+LUA_API int (lua_isvec3) (lua_State *L, int idx);
+LUA_API int (lua_isvec4) (lua_State *L, int idx);
+LUA_API int (lua_ismat2) (lua_State *L, int idx);
+LUA_API int (lua_ismat3) (lua_State *L, int idx);
+LUA_API int (lua_ismat4) (lua_State *L, int idx);
+
+LUA_API int (lua_tovec2) (lua_State *L, int idx, lua_vec2 v2);
+LUA_API int (lua_tovec3) (lua_State *L, int idx, lua_vec3 v3);
+LUA_API int (lua_tovec4) (lua_State *L, int idx, lua_vec4 v4);
+LUA_API int (lua_toquat) (lua_State *L, int idx, lua_versor q);
+LUA_API int (lua_tomat2) (lua_State *L, int idx, lua_mat2 m2);
+LUA_API int (lua_tomat3) (lua_State *L, int idx, lua_mat3 m3);
+LUA_API int (lua_tomat4) (lua_State *L, int idx, lua_mat4 m4);
+
+LUA_API void (lua_pushvec2) (lua_State *L, const lua_vec2 v2);
+LUA_API void (lua_pushvec3) (lua_State *L, const lua_vec3 v3);
+LUA_API void (lua_pushvec4) (lua_State *L, const lua_vec4 v4);
+LUA_API void (lua_pushquat) (lua_State *L, const lua_versor q);
+LUA_API void (lua_pushmat2) (lua_State *L, const lua_mat2 m2);
+LUA_API void (lua_pushmat3) (lua_State *L, const lua_mat3 m3);
+LUA_API void (lua_pushmat4) (lua_State *L, const lua_mat4 m4);
+
+LUA_API int  (lua_tovector) (lua_State *L, int idx, float *v);
+LUA_API void (lua_pushvector) (lua_State *L, const float *v, int length);
+
+/* }============================================================ */
+
+
 #define LUAI_TOSTRAUX(x)	#x
 #define LUAI_TOSTR(x)		LUAI_TOSTRAUX(x)
 
@@ -592,10 +634,10 @@ LUA_API lua_Integer lua_opaqueid(lua_State *L, int idx);
 
 /******************************************************************************
 * LuaGLM
-* Copyright (C) 2020 - gottfriedleibniz
+* Copyright (C) 2025 - gottfriedleibniz
 \******************************************************************************
-* OpenGL Mathematics (GLM)
-* Copyright (C) 2005 - G-Truc Creation
+* cglm
+* Copyright (C) 2015 - Recep Aslantas <info@recp.me>
 \******************************************************************************
 * Lua
 * Copyright (C) 1994-2026 Lua.org, PUC-Rio.

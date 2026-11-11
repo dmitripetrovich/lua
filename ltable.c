@@ -34,7 +34,7 @@
 #include "lgc.h"
 #include "lmem.h"
 #include "lobject.h"
-#include "lglm_core.h"
+#include "lglmcore.h"
 #include "lstate.h"
 #include "lstring.h"
 #include "ltable.h"
@@ -196,11 +196,8 @@ static Node *mainpositionTV (const Table *t, const TValue *key) {
       lua_Number n = fltvalue(key);
       return hashmod(t, l_hashfloat(n));
     }
-    case LUA_VVECTOR2:
-    case LUA_VVECTOR3:
-    case LUA_VVECTOR4:
-    case LUA_VQUAT:
-      return hashmod(t, glmVec_hash(key));
+    case LUA_VVECTOR2: case LUA_VVECTOR3: case LUA_VVECTOR4: case LUA_VQUAT:
+      return hashpow2(t, lvec_hashkey(key));
     case LUA_VSHRSTR: {
       TString *ts = tsvalue(key);
       return hashstr(t, ts);
@@ -285,11 +282,8 @@ static int equalkey (const TValue *k1, const Node *n2, int deadok) {
         return fvalue(k1) == fvalueraw(keyval(n2));
       case ctb(LUA_VLNGSTR):
         return luaS_eqstr(tsvalue(k1), keystrval(n2));
-      case LUA_VVECTOR2:
-      case LUA_VVECTOR3:
-      case LUA_VVECTOR4:
-      case LUA_VQUAT:
-        return glmVec_equalKey(k1, n2, keytt(n2));
+      case LUA_VVECTOR2: case LUA_VVECTOR3: case LUA_VVECTOR4: case LUA_VQUAT:
+        return lvec_equalkey(k1, n2, keytt(n2));
 #if defined(GRIT_POWER_BLOB)
       case ctb(LUA_VBLOBSTR):  /* blobs stored by pointer */
 #endif
@@ -1190,8 +1184,8 @@ void luaH_finishset (lua_State *L, Table *t, const TValue *key,
         luaG_runerror(L, "table index is NaN");
     }
     else if (ttisvector(key)) {
-      if (l_unlikely(!glmVec_isfinite(key)))
-        luaG_runerror(L, "vector index has NaN component");
+      if (l_unlikely(!lvec_validkey(key)))
+        luaG_runerror(L, "vector index has a NaN element");
     }
     else if (isextstr(key)) {  /* external string? */
       /* If string is short, must internalize it to be used as table key */

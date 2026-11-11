@@ -17,7 +17,7 @@
 #include "lua.h"
 
 #include "lapi.h"
-#include "lgrit_lib.h"
+#include "lglmaux.h"
 #include "ldebug.h"
 #include "ldo.h"
 #include "lfunc.h"
@@ -654,9 +654,10 @@ static void rethook (lua_State *L, CallInfo *ci, int nres) {
 }
 
 
+#if defined(LUAGLM_COMPAT_GLM_CPP)
 /* Unpack the first vector/matrix object */
-static int glmVec_call_unpack(lua_State *L) { return glm_unpack_vector(L, 1); };
-static int glmMat_call_unpack(lua_State *L) { return glm_unpack_matrix(L, 1); };
+static int lglm_callunpack (lua_State *L) { return luaglm_unpack(L, 1); }
+#endif
 
 
 /*
@@ -669,23 +670,22 @@ static int glmMat_call_unpack(lua_State *L) { return glm_unpack_matrix(L, 1); };
 **  Raise an error if this counter overflows.
 */
 static unsigned tryfuncTM (lua_State *L, StkId func, unsigned status) {
+#if defined(LUAGLM_COMPAT_GLM_CPP)
   TValue unpack_fallback;
+#endif
   const TValue *tm;
   StkId p;
   tm = luaT_gettmbyobj(L, s2v(func), TM_CALL);
   if (l_unlikely(ttisnil(tm))) {  /* no metamethod? */
+#if defined(LUAGLM_COMPAT_GLM_CPP)
     /* Default _call operators for vectors and matrices unpack its contents */
-    if (ttisvector(s2v(func))) {
-      setfvalue(&unpack_fallback, glmVec_call_unpack);
+    if (ttisglm(s2v(func))) {
+      setfvalue(&unpack_fallback, lglm_callunpack);
+      tm = &unpack_fallback;
     }
-    else if (ttismatrix(s2v(func))) {
-      setfvalue(&unpack_fallback, glmMat_call_unpack);
-    }
-    else {
-      setnilvalue(&unpack_fallback);
-      luaG_callerror(L, s2v(func));  /* nothing to call */
-    }
-    tm = &unpack_fallback;
+    else
+#endif
+    luaG_callerror(L, s2v(func));  /* nothing to call */
   }
   for (p = L->top.p; p > func; p--)  /* open space for metamethod */
     setobjs2s(L, p, p-1);

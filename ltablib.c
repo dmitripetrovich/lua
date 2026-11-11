@@ -19,7 +19,7 @@
 #include "lauxlib.h"
 #include "lualib.h"
 #include "llimits.h"
-#include "lgrit_lib.h"
+#include "lglmaux.h"
 
 
 /*
@@ -54,7 +54,7 @@ static int checkfield (lua_State *L, const char *key, int n) {
 ** has a metatable with the required metamethods).
 */
 static void checktab (lua_State *L, int arg, int what) {
-  int tp = lua_type(L, arg);
+  int tp = lua_rawtype(L, arg);
   if (what & TAB_W)
     checkwritable(L, arg);
   if (tp != LUA_TTABLE) {  /* is it not a table? */
@@ -218,10 +218,8 @@ static int tpack (lua_State *L) {
 static int tunpack (lua_State *L) {
   lua_Unsigned n;
   lua_Integer len, i, e;
-  if (lua_isvector_t(L, 1))
-    return glm_unpack_vector(L, 1);
-  else if (lua_ismatrix_t(L, 1))
-    return glm_unpack_matrix(L, 1);
+  if (lua_rawtype(L, 1) == LUA_TVECTOR || lua_rawtype(L, 1) == LUA_TMATRIX)
+    return luaglm_unpack(L, 1);
 
   len = aux_getn(L, 1, TAB_R);
   i = luaL_optinteger(L, 2, 1);

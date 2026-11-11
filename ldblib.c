@@ -62,7 +62,7 @@ static int db_getmetatable (lua_State *L) {
 
 
 static int db_setmetatable (lua_State *L) {
-  int t = lua_type(L, 2);
+  int t = lua_rawtype(L, 2);
   luaL_argexpected(L, t == LUA_TNIL || t == LUA_TTABLE, 2, "nil or table");
 #if defined(LUA_SANDBOX)
   /* block setting the mt of a userdata value, or the global mt for lightuserdata */

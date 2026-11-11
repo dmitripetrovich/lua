@@ -28,7 +28,7 @@
 #include "lstate.h"
 #include "lstring.h"
 #include "lvm.h"
-#include "lglm_core.h"
+#include "lglmaux.h"
 
 
 /*
@@ -466,11 +466,41 @@ unsigned luaO_tostringbuff (const TValue *obj, char *buff) {
 ** Convert a number object to a Lua string, replacing the value at 'obj'
 */
 void luaO_tostring (lua_State *L, TValue *obj) {
-  char buff[11 + 4 * LUA_N2SBUFFSZ];
-  unsigned len = ttisvector(obj) ? cast_uint(glmVec_tostr(obj, buff, sizeof(buff)))
-                                 : luaO_tostringbuff(obj, buff);
+  char buff[LUAGLM_MAXNUMBER2STR];
+  unsigned len = ttisvector(obj) ? cast_uint(lglm_tostr(obj, buff, sizeof(buff))) : luaO_tostringbuff(obj, buff);
   setsvalue(L, obj, luaS_newlstr(L, buff, len));
 }
+
+
+/*
+** Table for accessing vectors:
+**   x, y, z, w
+**   X, Y, Z, W
+**   r, g, b, a
+**   R, G, B, A
+** Most compilers will compile the equivalent switch statement to a LUT. If
+** RGBA support is dropped, then a LUT will not be needed.
+*/
+#define FF 0xFF
+LUAI_DDEF const lu_byte luaO_vecindex[UCHAR_MAX + 1] = {
+  FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF,   /* 0 */
+  FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF,  /* 16 */
+  FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF,  /* 32 */
+  FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF,  /* 48 */
+  FF,  3,  2, FF, FF, FF, FF,  1, FF, FF, FF, FF, FF, FF, FF, FF,  /* 64 */
+  FF, FF,  0, FF, FF, FF, FF,  3,  0,  1,  2, FF, FF, FF, FF, FF,  /* 80 */
+  FF,  3,  2, FF, FF, FF, FF,  1, FF, FF, FF, FF, FF, FF, FF, FF,  /* 96 */
+  FF, FF,  0, FF, FF, FF, FF,  3,  0,  1,  2, FF, FF, FF, FF, FF, /* 112 */
+  FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, /* 128 */
+  FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, /* 144 */
+  FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, /* 160 */
+  FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, /* 176 */
+  FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, /* 192 */
+  FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, /* 208 */
+  FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, /* 224 */
+  FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF, FF  /* 240 */
+};
+#undef FF
 
 
 
@@ -564,11 +594,8 @@ static void addstr2buff (BuffFS *buff, const char *str, size_t slen) {
     }
     else {
       size_t newsize = buff->buffsize + slen;  /* limited to MAX_SIZE/2 */
-      char *newb =
-        (buff->b == buff->space)  /* still using static space? */
-        ? luaM_reallocvector(buff->L, NULL, 0, newsize, char)
-        : luaM_reallocvector(buff->L, buff->b, buff->buffsize, newsize,
-                                                               char);
+      /* still using static space? */
+      char *newb = (buff->b == buff->space) ? luaM_reallocvector(buff->L, NULL, 0, newsize, char) : luaM_reallocvector(buff->L, buff->b, buff->buffsize, newsize, char);
       if (newb == NULL) {  /* allocation error? */
         buff->err = 1;  /* signal a memory error */
         return;

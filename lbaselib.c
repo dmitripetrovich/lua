@@ -20,7 +20,7 @@
 #include "lauxlib.h"
 #include "lualib.h"
 #include "llimits.h"
-#include "lgrit_lib.h"
+#include "lglmaux.h"
 
 
 #if defined(GRIT_POWER_READONLY)
@@ -146,7 +146,7 @@ static int luaB_getmetatable (lua_State *L) {
 
 
 static int luaB_setmetatable (lua_State *L) {
-  int t = lua_type(L, 2);
+  int t = lua_rawtype(L, 2);
   luaL_checktype(L, 1, LUA_TTABLE);
   luaL_argexpected(L, t == LUA_TNIL || t == LUA_TTABLE, 2, "nil or table");
   luaB_checkwritable(L, 1);
@@ -168,8 +168,8 @@ static int luaB_rawequal (lua_State *L) {
 
 #define luaB_haslen(t) ((t) == LUA_TTABLE || (t) == LUA_TSTRING || (t) == LUA_TVECTOR || (t) == LUA_TMATRIX)
 static int luaB_rawlen (lua_State *L) {
-  int t = lua_type(L, 1);
-  luaL_argexpected(L, luaB_haslen(t), 1, "table or string or vector");
+  int t = lua_rawtype(L, 1);
+  luaL_argexpected(L, luaB_haslen(t), 1, "table or string");
   lua_pushinteger(L, l_castU2S(lua_rawlen(L, 1)));
   return 1;
 }
@@ -177,8 +177,8 @@ static int luaB_rawlen (lua_State *L) {
 
 #define luaB_hasget(t) ((t) == LUA_TTABLE || (t) == LUA_TVECTOR || (t) == LUA_TMATRIX)
 static int luaB_rawget (lua_State *L) {
-  const int type = lua_type(L, 1);
-  if (!luaB_hasget(type))
+  int t = lua_rawtype(L, 1);
+  if (!luaB_hasget(t))
     return luaL_typeerror(L, 1, lua_typename(L, LUA_TTABLE));
   luaL_checkany(L, 2);
   lua_settop(L, 2);
@@ -186,9 +186,10 @@ static int luaB_rawget (lua_State *L) {
   return 1;
 }
 
+#define luaB_hasset(t) ((t) == LUA_TTABLE || (t) == LUA_TMATRIX)
 static int luaB_rawset (lua_State *L) {
-  const int type = lua_type(L, 1);
-  if (type != LUA_TTABLE && type != LUA_TMATRIX)
+  int t = lua_rawtype(L, 1);
+  if (!luaB_hasset(t))
     luaL_typeerror(L, 1, lua_typename(L, LUA_TTABLE));
   luaL_checkany(L, 2);
   luaL_checkany(L, 3);
@@ -275,10 +276,10 @@ static int luaB_collectgarbage (lua_State *L) {
 
 #define luaB_glmtype(t) ((t) == LUA_TVECTOR || (t) == LUA_TMATRIX)
 static int luaB_type (lua_State *L) {
-  int t = lua_type(L, 1);
+  int t = lua_rawtype(L, 1);
   luaL_argcheck(L, t != LUA_TNONE, 1, "value expected");
   if (luaB_glmtype(t))
-    lua_pushstring(L, glm_typename(L, 1));
+    lua_pushstring(L, luaglm_typename(L, 1));
   else
     lua_pushstring(L, lua_typename(L, t));
   return 1;
@@ -287,8 +288,8 @@ static int luaB_type (lua_State *L) {
 
 #define luaB_hasnext(t) ((t) == LUA_TTABLE || (t) == LUA_TVECTOR || (t) == LUA_TMATRIX)
 static int luaB_next (lua_State *L) {
-  const int type = lua_type(L, 1);
-  if (!luaB_hasnext(type))
+  int t = lua_rawtype(L, 1);
+  if (!luaB_hasnext(t))
     return luaL_typeerror(L, 1, lua_typename(L, LUA_TTABLE));
   lua_settop(L, 2);  /* create a 2nd argument if there isn't one */
   if (lua_next(L, 1))
@@ -360,9 +361,9 @@ static int ipairsaux (lua_State *L) {
 ** Traversal function for 'ipairs' for raw tables
 */
 static int ipairsaux_raw (lua_State *L) {
-  const int type = lua_type(L, 1);
+  int t = lua_rawtype(L, 1);
   lua_Integer i = luaL_checkinteger(L, 2) + 1;
-  if (type != LUA_TTABLE && type != LUA_TMATRIX)
+  if (!luaB_hasnext(t))
     luaL_typeerror(L, 1, lua_typename(L, LUA_TTABLE));
   lua_pushinteger(L, i);
   return (lua_rawgeti(L, 1, i) == LUA_TNIL) ? 1 : 2;
@@ -396,16 +397,9 @@ static int luaB_ipairs (lua_State *L) {
 */
 static int luaB_ipairs (lua_State *L) {
   luaL_checkany(L, 1);
-  if (lua_isvector_t(L, 1) || lua_ismatrix_t(L, 1)) {
-    lua_pushcfunction(L, luaB_next);  /* will return generator, */
-    lua_pushvalue(L, 1);  /* state, */
-    lua_pushinteger(L, 0);
-  }
-  else {
-    lua_pushcfunction(L, ipairsaux);  /* iteration function */
-    lua_pushvalue(L, 1);  /* state */
-    lua_pushinteger(L, 0);  /* initial value */
-  }
+  lua_pushcfunction(L, ipairsaux);  /* iteration function */
+  lua_pushvalue(L, 1);  /* state */
+  lua_pushinteger(L, 0);  /* initial value */
   return 3;
 }
 #endif
@@ -618,7 +612,7 @@ static int luaB_joaat (lua_State *L) {
   if (type != LUA_TNUMBER && type != LUA_TBOOLEAN && type != LUA_TSTRING)
     return luaL_typeerror(L, 1, lua_typename(L, LUA_TSTRING));
 
-  lua_pushinteger(L, glm_tohash(L, 1, lua_toboolean(L, 2)));
+  lua_pushinteger(L, luaglm_tohash(L, 1, lua_toboolean(L, 2)));
   return 1;
 }
 #endif
@@ -630,7 +624,7 @@ static int luaB_scrub (lua_State *L) {
   const int top = lua_gettop(L);
   for (i = 1; i <= top; i++) {
     const int type = lua_type(L, i);
-    if (type >= LUA_TTABLE || type == LUA_TLIGHTUSERDATA) {
+    if ((type >= LUA_TTABLE && type != LUA_TVECTOR) || type == LUA_TLIGHTUSERDATA) {
       lua_pushnil(L);
       lua_replace(L, i);
     }
@@ -682,50 +676,178 @@ static const luaL_Reg base_funcs[] = {
   {"scrub", luaB_scrub},
 #endif
   /* placeholders */
-
-  {"vec", glmVec_vec}, {"vector", glmVec_vec},
-  {"vec1", glmVec_vec1}, {"vector1", glmVec_vec1},
-  {"vec2", glmVec_vec2}, {"vector2", glmVec_vec2},
-  {"vec3", glmVec_vec3}, {"vector3", glmVec_vec3},
-  {"vec4", glmVec_vec4}, {"vector4", glmVec_vec4},
-  {"ivec", glmVec_ivec},
-  {"ivec1", glmVec_ivec1},
-  {"ivec2", glmVec_ivec2},
-  {"ivec3", glmVec_ivec3},
-  {"ivec4", glmVec_ivec4},
-  {"bvec", glmVec_bvec},
-  {"bvec1", glmVec_bvec1},
-  {"bvec2", glmVec_bvec2},
-  {"bvec3", glmVec_bvec3},
-  {"bvec4", glmVec_bvec4},
-  {"mat", glmMat_mat},
-  {"mat2x2", glmMat_mat2x2}, {"mat2", glmMat_mat2x2},
-  {"mat2x3", glmMat_mat2x3},
-  {"mat2x4", glmMat_mat2x4},
-  {"mat3x2", glmMat_mat3x2},
-  {"mat3x3", glmMat_mat3x3}, {"mat3", glmMat_mat3x3},
-  {"mat3x4", glmMat_mat3x4},
-  {"mat4x2", glmMat_mat4x2},
-  {"mat4x3", glmMat_mat4x3},
-  {"mat4x4", glmMat_mat4x4}, {"mat4", glmMat_mat4x4},
-  {"qua", glmVec_qua}, {"quat", glmVec_qua},
-  /* gritLua compatibility functions */
-  {"dot", glmVec_dot},
-  {"cross", glmVec_cross},
-  {"inv", glmVec_inverse},
-  {"norm", glmVec_normalize},
-  {"slerp", glmVec_slerp},
-
   {LUA_GNAME, NULL},
   {"_VERSION", NULL},
   {NULL, NULL}
 };
 
 
+/* GLSL Functions */
+static const luaL_Reg glsl_funcs[] = {
+  {"vec", luaglm_vec},
+  {"vec2", luaglm_vec2},
+  {"vec3", luaglm_vec3},
+  {"vec4", luaglm_vec4},
+  {"ivec", luaglm_ivec},
+  {"ivec2", luaglm_ivec2},
+  {"ivec3", luaglm_ivec3},
+  {"ivec4", luaglm_ivec4},
+  {"bvec", luaglm_bvec},
+  {"bvec2", luaglm_bvec2},
+  {"bvec3", luaglm_bvec3},
+  {"bvec4", luaglm_bvec4},
+  {"mat", luaglm_mat},
+  {"mat2", luaglm_mat2x2}, {"mat2x2", luaglm_mat2x2},
+  {"mat3", luaglm_mat3x3}, {"mat3x3", luaglm_mat3x3},
+  {"mat4", luaglm_mat4x4}, {"mat4x4", luaglm_mat4x4},
+  {"quat", luaglm_quat},
+  /* 8.1. Angle and Trigonometry Functions */
+  {"radians", luaglm_rad},
+  {"degrees", luaglm_deg},
+  {"sin", luaglm_sin},
+  {"cos", luaglm_cos},
+  {"tan", luaglm_tan},
+  {"asin", luaglm_asin},
+  {"acos", luaglm_acos},
+  {"atan", luaglm_atan},
+  {"sinh", luaglm_sinh},
+  {"cosh", luaglm_cosh},
+  {"tanh", luaglm_tanh},
+  {"asinh", luaglm_asinh},
+  {"acosh", luaglm_acosh},
+  {"atanh", luaglm_atanh},
+  /* 8.2. Exponential Functions */
+  {"pow", luaglm_pow},
+  {"exp", luaglm_exp},
+  {"log", luaglm_log},
+  {"exp2", luaglm_exp2},
+  {"log2", luaglm_log2},
+  {"sqrt", luaglm_sqrt},
+  {"inversesqrt", luaglm_invsqrt},
+  /* 8.3. Common Functions */
+  {"abs", luaglm_abs},
+  {"sign", luaglm_sign},
+  {"floor", luaglm_floor},
+  {"trunc", luaglm_trunc},
+  {"round", luaglm_round},
+  {"roundEven", luaglm_round},
+  {"ceil", luaglm_ceil},
+  {"fract", luaglm_fract},
+  {"mod", luaglm_mod},
+  {"modf", luaglm_modf},
+  {"min", luaglm_min},
+  {"max", luaglm_max},
+  {"clamp", luaglm_clamp},
+  {"mix", luaglm_mix},
+  {"step", luaglm_step},
+  {"smoothstep", luaglm_smoothstep},
+  {"isnan", luaglm_isnan},
+  {"isinf", luaglm_isinf},
+  {"fma", luaglm_fma},
+  {"frexp", luaglm_frexp},
+  {"ldexp", luaglm_ldexp},
+  /* 8.5. Geometric Functions */
+  {"length", luaglm_length},
+  {"distance", luaglm_distance},
+  {"dot", luaglm_dot},
+  {"cross", luaglm_cross},
+  {"normalize", luaglm_normalize},
+  {"faceforward", luaglm_faceforward},
+  {"reflect", luaglm_reflect},
+  {"refract", luaglm_refract},
+  /* 8.6 Matrix Functions */
+  {"matrixCompMult", luaglm_matrixcompmult},
+  {"outerProduct", luaglm_outerproduct},
+  {"transpose", luaglm_transpose},
+  {"determinant", luaglm_det},
+  {"inverse", luaglm_inverse},
+  /* 8.7. Vector Relational Functions */
+  {"lessThan", luaglm_lessThan},
+  {"lessThanEqual", luaglm_lessThanEqual},
+  {"greaterThan", luaglm_greaterThan},
+  {"greaterThanEqual", luaglm_greaterThanEqual},
+  {"equal", luaglm_equal},
+  {"notEqual", luaglm_notEqual},
+  {"any", luaglm_any},
+  {"all", luaglm_all},
+  {"not_", luaglm_not},
+  /* 8.8. Integer Functions */
+  {"bitfieldExtract", luaglm_bitfieldExtract},
+  {"bitfieldInsert", luaglm_bitfieldInsert},
+  {"bitfieldReverse", luaglm_bitfieldReverse},
+  {"bitCount", luaglm_bitCount},
+  {"findLSB", luaglm_findLSB},
+  {"findMSB", luaglm_findMSB},
+  {NULL, NULL}
+};
+
+
+/* 8.X. Extensions */
+static const luaL_Reg glsl_ext[] = {
+  {"approx", luaglm_approx},
+  {"angle", luaglm_angle},
+  {"axis", luaglm_quat_axis},
+  {"quat_for", luaglm_quat_for},
+  {"slerp", luaglm_slerp},
+  {"translate", luaglm_translate},
+  {"scale", luaglm_scale},
+  {"rotate", luaglm_rotate},
+  {"frustum", luaglm_frustum},
+  {"ortho", luaglm_ortho},
+  {"perspective", luaglm_perspective},
+  {"project", luaglm_project},
+  {"unproject", luaglm_unproject},
+  {"lookat", luaglm_lookat},
+  {"billboard", luaglm_billboard},
+  {"compose", luaglm_compose},
+  {"decompose", luaglm_decompose},
+  {"from_euler", luaglm_from_euler},
+  {"to_euler", luaglm_to_euler},
+  /* Compatibility Functions */
+  {"lerp", luaglm_mix},
+  {"inv", luaglm_inverse},
+  {"norm", luaglm_normalize},
+  /* 8.Z. Constants */
+  {"epsilon", NULL},
+  {NULL, NULL}
+};
+
+
+#if defined(LUAGLM_COMPAT_GLM_CPP)
+/* grit-lua Compatibility functions */
+static const luaL_Reg glsl_compat[] = {
+  {"vector", luaglm_vec},
+  {"vector2", luaglm_vec2},
+  {"vector3", luaglm_vec3},
+  {"vector4", luaglm_vec4},
+  {"qua", luaglm_quat},
+  {"inv", luaglm_inverse},
+  {"norm", luaglm_normalize},
+  {"slerp", luaglm_slerp},
+  {NULL, NULL}
+};
+#endif
+
+
+LUAMOD_API int luaopen_glm (lua_State *L) {
+  luaL_newlib(L, glsl_ext);
+  lua_pushnumber(L, cast_num(FLT_EPSILON));
+  lua_setfield(L, -2, "epsilon");
+  return 1;
+}
+
+
 LUAMOD_API int luaopen_base (lua_State *L) {
   /* open lib into global table */
   lua_pushglobaltable(L);
   luaL_setfuncs(L, base_funcs, 0);
+  luaL_setfuncs(L, glsl_funcs, 0);
+#if defined(LUAGLM_COMPAT_GLM_CPP)
+  luaL_setfuncs(L, glsl_compat, 0);
+#endif
+  /* open the GLSL extensions into the global 'glm' */
+  luaL_requiref(L, LUA_GLMLIBNAME, luaopen_glm, 1);
+  lua_pop(L, 1);
   /* set global _G */
   lua_pushvalue(L, -1);
   lua_setfield(L, -2, LUA_GNAME);
@@ -734,4 +856,3 @@ LUAMOD_API int luaopen_base (lua_State *L) {
   lua_setfield(L, -2, "_VERSION");
   return 1;
 }
-

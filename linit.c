@@ -19,9 +19,6 @@
 #include "lualib.h"
 #include "lauxlib.h"
 #include "llimits.h"
-#if defined(LUA_INCLUDE_LIBGLM)
-#include "lglmlib.hpp"
-#endif
 
 
 /*
@@ -39,9 +36,6 @@ static const luaL_Reg stdlibs[] = {
   {LUA_STRLIBNAME, luaopen_string},
   {LUA_TABLIBNAME, luaopen_table},
   {LUA_UTF8LIBNAME, luaopen_utf8},
-#if defined(LUA_INCLUDE_LIBGLM)
-  {LUA_GLMLIBNAME, luaopen_glm},
-#endif
   {NULL, NULL}
 };
 
@@ -63,11 +57,7 @@ LUALIB_API void luaL_openselectedlibs (lua_State *L, int load, int preload) {
       lua_setfield(L, -2, lib->name);  /* add library to PRELOAD table */
     }
   }
-#if defined(LUA_INCLUDE_LIBGLM)
-  lua_assert((mask >> 1) == LUA_GLMLIBK);
-#else
   lua_assert((mask >> 1) == LUA_UTF8LIBK);
-#endif
   lua_pop(L, 1);  /* remove PRELOAD table */
 }
 

@@ -14,7 +14,6 @@
 
 #include "llimits.h"
 #include "lua.h"
-#include "lglm.hpp"
 
 
 /*
@@ -44,13 +43,21 @@
 
 
 
+/* Internal vector representation */
+typedef union luai_Float4 {
+  lua_vec4 v4;
+  lua_vec3 v3;
+  lua_vec2 v2;
+  lua_versor q;
+} luai_Float4;
+
 /*
 ** Union of all Lua values
 */
-LUA_GLM_ALIGNED_TYPEDEF(union, Value) {
+typedef union Value {
   struct GCObject *gc;    /* collectable objects */
   void *p;         /* light userdata */
-  glmVector f4;    /* vector and quaternion stub */
+  luai_Float4 f4;  /* vector and quaternion stub */
   lua_CFunction f; /* light C functions */
   lua_Integer i;   /* integer numbers */
   lua_Number n;    /* float numbers */
@@ -832,6 +839,7 @@ typedef struct Table {
 /*
 ** {==================================================================
 ** Vector Object API
+** @ImplicitVec: single component vectors are represented by LUA_TNUMBER
 ** ===================================================================
 */
 
@@ -852,20 +860,38 @@ typedef struct Table {
 #define ttisvector4(o) checktag((o), LUA_VVECTOR4)
 #define ttisquat(o) checktag((o), LUA_VQUAT)
 
-#define vvalue_raw(o) ((o).f4)
-#define vvalue_(o) vvalue_raw(val_((o)))
-#define vvalue_ref(o) check_exp((ttisvector(o) || ttisquat(o)), &vvalue_(o))
-
-#define vvalue(o) check_exp((ttisvector(o) || ttisquat(o)), vvalue_(o))
-#define vecvalue(o) check_exp(ttisvector(o), vvalue_(o))
-#define quatvalue(o) check_exp(ttisquat(o), vvalue_(o))
-#define setqvalue(obj, x) setvvalue(obj, x, LUA_VQUAT)
+#define vvaltt(o) rawtt(o)
+#define vvalueraw(o) ((o).f4)
+#define vvalue_(o) vvalueraw(val_((o)))
+#define vvalue(o) check_exp(ttisvector(o), vvalue_(o))
 #define setvvalue(obj, x, o) \
   LUA_MLM_BEGIN              \
   TValue *io = (obj);        \
   val_(io).f4 = (x);         \
   settt_(io, (o));           \
   LUA_MLM_END
+
+/* get/set wrappers for accessing luai_Float4 by index */
+#define vgeti(v, i) ((v).v4[i])
+#define vseti(v, i, f) ((v).v4[i] = (f))
+
+/* Compute the vector tag associated with component size L. Does not sanitize
+** and assumes equals 2, 3, or 4 */
+#define vvaltag(L) cast_byte(makevariant(LUA_TVECTOR, ((L) - 2) /* & 0x3 */))
+
+/* Compute the vector length associated with vector tag V. Does not sanitize
+** and assumes a valid tag */
+#define vvallen(V) (((V) == LUA_VQUAT) ? 4 : (2 + (((V) & 0x30) >> 4)))
+#define ttvlen(o) vvallen(vvaltt(o))
+
+/* Compare raw types (used to verify mat+mat or vec+vec operations) */
+#define tteq(o1, o2) (rawtt(o1) == rawtt(o2))
+
+/* Compare variant bits (used to verify dimensions to vec+mat operations) */
+#define ttvareq(o1, o2) ((rawtt(o1) & 0x30) == (rawtt(o2) & 0x30))
+
+/* Table for accessing (and swizzling) vectors. */
+LUAI_DDEC(const lu_byte luaO_vecindex[UCHAR_MAX + 1];)
 
 /* }================================================================== */
 
@@ -875,19 +901,46 @@ typedef struct Table {
 ** ===================================================================
 */
 
+typedef union lua_Matrix {
+  lua_mat4 m4;  /* X-by-4 matrix */
+  lua_mat3 m3;  /* X-by-3 matrix */
+  lua_mat2 m2;  /* X-by-2 matrix */
+} lua_Matrix;
+
 typedef struct GCMatrix {
   CommonHeader;
-  glmMatrix mat4;
+  lua_Matrix m;
 } GCMatrix;
 
-#define LUA_VMATRIX makevariant(LUA_TMATRIX, 0)
+#define LUA_VMATRIX2 makevariant(LUA_TMATRIX, 0)
+#define LUA_VMATRIX3 makevariant(LUA_TMATRIX, 1)
+#define LUA_VMATRIX4 makevariant(LUA_TMATRIX, 2)
 
-#define ttismatrix(o) checktag((o), ctb(LUA_VMATRIX))
-#define mvalue(o)	check_exp(ttismatrix(o), gco2mat(val_(o).gc)->mat4)
-#define mvalue_ref(o)	check_exp(ttismatrix(o), &gco2mat(val_(o).gc)->mat4)
+#define ttismatrix(o) checktype((o), LUA_TMATRIX)
+#define ttismatrix2(o) checktag((o), ctb(LUA_VMATRIX2))
+#define ttismatrix3(o) checktag((o), ctb(LUA_VMATRIX3))
+#define ttismatrix4(o) checktag((o), ctb(LUA_VMATRIX4))
+#define ttisglm(o) (ttisvector(o) || ttismatrix(o))
 
-#define setmvalue2s(L, o, x) setmvalue(L, s2v(o), x)
-#define setmvalue(L, obj, x) glm_setmvalue(L, obj, x)
+#define mvaltt(o) ttypetag(o)
+#define mvalue_(o) gco2mat(val_(o).gc)->m
+
+#define mvalue(o) check_exp(ttismatrix(o), mvalue_(o))
+#define m2value(o) check_exp(ttismatrix2(o), mvalue_(o).m2)
+#define m3value(o) check_exp(ttismatrix3(o), mvalue_(o).m3)
+#define m4value(o) check_exp(ttismatrix4(o), mvalue_(o).m4)
+#define setmvalue(L, o, x, t) \
+  LUA_MLM_BEGIN               \
+  TValue *io = (o);           \
+  GCMatrix *x_ = (x);         \
+  val_(io).gc = obj2gco(x_);  \
+  settt_(io, ctb(t));         \
+  checkliveness(L, io);       \
+  LUA_MLM_END
+
+#define mvaltag(L) cast_byte(makevariant(LUA_TMATRIX, ((L) - 2) /* & 0x3 */))
+#define mvallen(V) (2 + (((V) & 0x30) >> 4))
+#define ttmlen(o) mvallen(mvaltt(o))
 
 /* }================================================================== */
 
@@ -932,6 +985,9 @@ LUAI_FUNC const char *luaO_pushvfstring (lua_State *L, const char *fmt,
                                                        va_list argp);
 LUAI_FUNC const char *luaO_pushfstring (lua_State *L, const char *fmt, ...);
 LUAI_FUNC void luaO_chunkid (char *out, const char *source, size_t srclen);
+LUAI_FUNC lua_Integer luaO_HashString (const char *string, size_t length,
+                                       int ignore_case);
+LUAI_FUNC int lglm_tostr (const TValue *obj, char *buff, size_t len);
 
 /*
 ** GameLua: scriptHandler

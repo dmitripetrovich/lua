@@ -747,10 +747,10 @@
 */
 #if defined(LLONG_MAX)
 /* use ISO C99 stuff */
-#define LUAI_MAXALIGN long double u; lua_Float4 v; void *s; long long l
+#define LUAI_MAXALIGN long double u; void *s; long long l
 #else
 /* use only C89 stuff */
-#define LUAI_MAXALIGN  lua_Number n; lua_Float4 v; double u; void *s; lua_Integer i; long l
+#define LUAI_MAXALIGN  lua_Number n; double u; void *s; lua_Integer i; long l
 #endif
 
 /* }================================================================== */
@@ -782,14 +782,6 @@
   #define LUA_FALLTHROUGH /* FALLTHROUGH */
 #endif
 
-#if defined(_MSC_VER)
-  #define LUA_ALIGNED_(x) __declspec(align(x))
-#elif __has_attribute(aligned)
-  #define LUA_ALIGNED_(x) __attribute__((aligned(x)))
-#else
-  #define LUA_ALIGNED_(x)
-#endif
-
 #if defined(_MSC_VER) && _MSC_VER >= 1400
   #define LUA_RESTRICT __restrict
 #elif defined(__GNUC__) && ((__GNUC__ > 3) || (__GNUC__ == 3 && __GNUC_MINOR__ >= 1))
@@ -813,115 +805,52 @@
 #endif
 
 /*
+@@ LUA_HAS_BUILTIN __has_builtin wrapper
+*/
+#if defined(__has_builtin)
+  #define LUA_HAS_BUILTIN(x) __has_builtin(x)
+#else
+  #define LUA_HAS_BUILTIN(x) 0
+#endif
+
+/*
+** {====================================================================
+** LuaGLM Configuration
+** =====================================================================
+*/
+
+/*
+** Lua 5.4 C-API compatibility.
+** @TypeCompat: Map LUA_T{VECTOR,MATRIX} to LUA_TTABLE in lapi/lauxlib
+*/
+/*#define LUAGLM_COMPAT_5_4*/
+
+/* Enable LuaGLM backwards compatibility (implied by any GRIT_COMPAT_*) */
+#if defined(GRIT_COMPAT_GLM) || defined(GRIT_COMPAT_IPAIRS) \
+  || defined(GRIT_COMPAT_GETN) || defined(GRIT_COMPAT_NUMFMT)
+#if !defined(LUAGLM_COMPAT_GLM_CPP)
+#define LUAGLM_COMPAT_GLM_CPP
+#endif
+#endif
+
+/* }================================================================== */
+
+/*
 ** {==================================================================
-** @DEPRECATED gritLua vector API
-**
-** Libraries linked against this runtime that use any GLM/vector feature will
-** require knowledge of changes to:
-**
-**    1. LUA_GLM_NUMBER_TYPE
-**    2. GLM_FORCE_SIZE_T_LENGTH
-**    3. GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
-**
-** In addition GLM_FORCE_QUAT_DATA_XYZW (formerly GLM_FORCE_QUAT_DATA_WXYZ)
-** needs to be considered for quaternions when operating within the C boundary.
+** Vector and Matrix Definitions
 ** ===================================================================
 */
 
-#define LUA_GRIT_API
+/* Vector and Quaternion extension */
+typedef float lua_vec2[2];
+typedef float lua_vec3[3];
+typedef float lua_vec4[4];
+typedef float lua_versor[4];
 
-/* @NOTE: GRIT_LONG_FLOAT has been deprecated and replaced by LUA_GLM_NUMBER_TYPE */
-#if defined(GRIT_LONG_FLOAT) && !defined(LUA_GLM_NUMBER_TYPE)
-  #define LUA_GLM_NUMBER_TYPE
-#endif
-
-#if defined(LUA_GLM_NUMBER_TYPE) && LUA_FLOAT_TYPE != LUA_FLOAT_LONGDOUBLE
-  #define LUA_VEC_TYPE LUA_FLOAT_TYPE
-  #define LUA_VEC_NUMBER LUA_NUMBER
-#else
-  #define LUA_VEC_TYPE LUA_FLOAT_FLOAT
-  #define LUA_VEC_NUMBER float
-#endif
-
-/*
-** @EXPERIMENT Alignment macro for improved compiler intrinsics. This macro is
-** temporary and will likely change in future commits.
-**
-** @TODO: Technically should follow GLM and only allow alignment when:
-**    1. GLM_CONFIG_XYZW_ONLY is not enabled; and
-**    2. GLM_CONFIG_ANONYMOUS_STRUCT == GLM_ENABLE
-*/
-#if !defined(RC_INVOKED) /* ignore MSVC resource compiler issues */
-#if defined(GLM_FORCE_DEFAULT_ALIGNED_GENTYPES)
-  #if LUA_VEC_TYPE == LUA_FLOAT_DOUBLE
-    #error "__m256 advanced vector extnesions are not supported!"
-  #else
-    #define LUA_GLM_ALIGN LUA_ALIGNED_(16)
-  #endif
-#endif
-#endif
-
-/* Helper macro for defining aligned types; see GLM_ALIGNED_TYPEDEF */
-#if defined(LUA_GLM_ALIGN)
-  #define LUA_GLM_ALIGNED_TYPE(type, name) type LUA_GLM_ALIGN name
-  #define LUA_GLM_ALIGNED_TYPEDEF(type, name) typedef LUA_GLM_ALIGN type name
-#else
-  #define LUA_GLM_ALIGNED_TYPE(type, name) type name
-  #define LUA_GLM_ALIGNED_TYPEDEF(type, name) typedef type name
-#endif
-
-/*
-** GLM_FORCE_SIZE_T_LENGTH forces length_t to be size_t. Otherwise it is
-** defined as an int (as GLSL declares it). This type requires synchronization
-** across the C and CPP boundaries.
-*/
-#if defined(GLM_FORCE_SIZE_T_LENGTH)
-  typedef size_t grit_length_t;
-#else
-  typedef int grit_length_t;
-#endif
-
-/* vector/matrix floating point type */
-typedef LUA_VEC_NUMBER lua_VecF;
-typedef struct lua_CFloat4 { lua_VecF x, y, z, w; } lua_CFloat4;
-typedef struct lua_CFloat3 { lua_VecF x, y, z; } lua_CFloat3;
-typedef struct lua_CFloat2 { lua_VecF x, y; } lua_CFloat2;
-
-/*
-** gritLua vector and quat extension. This structure is intended to be a
-** byte-wise equivalent/alias to glmVector in lglm.hpp and operates within the C
-** boundaries of the Lua runtime.
-*/
-LUA_GLM_ALIGNED_TYPEDEF(struct, lua_CFloat4) lua_Float4;
-
-/*
-** gritLua column-oriented matrix extension. This structure is intended to be a
-** byte-wise equivalent to glmMatrix in lglm.hpp and operates within the C
-** boundaries of the Lua runtime.
-**
-** @NOTE: When GLM_FORCE_DEFAULT_ALIGNED_GENTYPES is enabled (attempt to) mirror
-** the alignment specified in glm/detail/qualifier.hpp. Note GLM uses unions to
-** implicitly load and store values instead of explicit _mm_loadu_ps and
-** _mm_storeu_ps calls.
-**
-** The current lua_Mat4 definition minimizes the number of changes required to
-** make alignment consistent across different compilers (and minimizes the
-** number of changes when this inevitably gets reverted). Avoiding issues of
-** aligned loads, unaligned loads, auto-aligning, etc.
-*
-** These safeguards will not be required if LuaGLM ever becomes a strictly C++
-** compiled runtime. As the "C" parts of this runtime can use the structs
-** defined in lglm.hpp
-*/
-LUA_GLM_ALIGNED_TYPEDEF(struct, lua_Mat4) {
-  union Columns {
-    LUA_GLM_ALIGNED_TYPE(lua_CFloat2, m2[4]);  /* Aligned 2-by-X matrix */
-    LUA_GLM_ALIGNED_TYPE(lua_CFloat3, m3[4]);  /* Aligned 3-by-X matrix */
-    LUA_GLM_ALIGNED_TYPE(lua_CFloat4, m4[4]);  /* Aligned 4-by-X matrix */
-  } m;
-  grit_length_t size;  /* Number of columns */
-  grit_length_t secondary;  /* Size of each column vector */
-} lua_Mat4;
+/* Matrix extension */
+typedef lua_vec2 lua_mat2[4];
+typedef lua_vec3 lua_mat3[4];
+typedef lua_vec4 lua_mat4[4];
 
 /* }================================================================== */
 

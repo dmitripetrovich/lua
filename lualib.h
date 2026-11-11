@@ -54,7 +54,8 @@ LUAMOD_API int (luaopen_table) (lua_State *L);
 #define LUA_UTF8LIBK	(LUA_TABLIBK << 1)
 LUAMOD_API int (luaopen_utf8) (lua_State *L);
 
-#define LUA_GLMLIBK	(LUA_UTF8LIBK << 1)
+#define LUA_GLMLIBNAME	"glm"
+LUAMOD_API int (luaopen_glm) (lua_State *L);
 
 
 /* open selected libraries */

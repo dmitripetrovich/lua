@@ -142,35 +142,6 @@ static void dumpInteger (DumpState *D, lua_Integer x) {
 }
 
 
-static void dumpVectorType(DumpState *D, const glmVector &v, int t) {
-  switch (t) {
-    case LUA_VVECTOR2:
-      dumpVar(D, v.v2.x);
-      dumpVar(D, v.v2.y);
-      break;
-    case LUA_VVECTOR3:
-      dumpVar(D, v.v3.x);
-      dumpVar(D, v.v3.y);
-      dumpVar(D, v.v3.z);
-      break;
-    case LUA_VVECTOR4:
-      dumpVar(D, v.v4.x);
-      dumpVar(D, v.v4.y);
-      dumpVar(D, v.v4.z);
-      dumpVar(D, v.v4.w);
-      break;
-    case LUA_VQUAT:
-      dumpVar(D, v.q.x);
-      dumpVar(D, v.q.y);
-      dumpVar(D, v.q.z);
-      dumpVar(D, v.q.w);
-      break;
-    default:
-      break;
-  }
-}
-
-
 /*
 ** Dump a String. First dump its "size":
 ** size==0 is followed by an index and means "reuse saved string with
@@ -236,12 +207,6 @@ static void dumpConstants (DumpState *D, const Proto *f) {
         break;
       case LUA_VNUMINT:
         dumpInteger(D, ivalue(o));
-        break;
-      case LUA_VVECTOR2:
-      case LUA_VVECTOR3:
-      case LUA_VVECTOR4:
-      case LUA_VQUAT:
-        dumpVectorType(D, vvalue(o), tt);
         break;
       case LUA_VSHRSTR:
 #if defined(GRIT_POWER_BLOB)
