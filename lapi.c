@@ -973,6 +973,40 @@ LUA_API void lua_clonetable (lua_State *L, int fromidx, int toidx) {
   luaH_clonetable(L, hvalue(from), hvalue(to));
   lua_unlock(L);
 }
+
+/*
+** Pushes a new table whose array part holds 'narr' copies of the value at
+** 'fillidx' (an index into the stack as it was before this call).
+*/
+LUA_API void lua_filltable (lua_State *L, int narr, int fillidx) {
+  const TValue *v;
+  Table *t;
+  int i;
+  lua_lock(L);
+  api_check(L, narr >= 0, "negative size");
+  v = index2value(L, fillidx);
+  t = luaH_new(L);
+  sethvalue2s(L, L->top.p, t);
+  api_incr_top(L);
+  if (narr > 0) {
+    luaH_resize(L, t, cast_uint(narr), 0);
+    for (i = 0; i < narr; i++)
+      obj2arr(t, cast_uint(i), v);
+    luaC_barrierback(L, obj2gco(t), v);
+  }
+  luaC_checkGC(L);
+  lua_unlock(L);
+}
+
+LUA_API void lua_compacttable (lua_State *L, int idx) {
+  const TValue *o;
+  lua_lock(L);
+  o = index2value(L, idx);
+  api_check(L, ttistable(o), "table expected");
+  api_checkwritable(L, hvalue(o));
+  luaH_compact(L, hvalue(o));
+  lua_unlock(L);
+}
 #endif
 
 

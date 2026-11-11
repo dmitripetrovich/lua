@@ -1455,6 +1455,35 @@ void luaH_clonetable (lua_State *L, const Table *from, Table *to) {
   if (isblack(obj2gco(to)))
     luaC_barrierback_(L, obj2gco(to));
 }
+
+/*
+** Shrink a table to its contents: the array part ends at its border
+** (entries after it move to the hash part), and the hash part is sized
+** for the entries it keeps, without deleted keys.
+*/
+void luaH_compact (lua_State *L, Table *t) {
+  unsigned asize = t->asize;
+  unsigned newasize = asize;
+  unsigned nhsize = 0;
+  unsigned i;
+  if (asize > 0) {
+    lua_Unsigned border = luaH_getn(L, t);
+    if (border < asize)
+      newasize = cast_uint(border);
+  }
+  for (i = newasize; i < asize; i++) {  /* entries leaving the array */
+    if (!tagisempty(*getArrTag(t, i)))
+      nhsize++;
+  }
+  for (i = 0; i < allocsizenode(t); i++) {  /* entries in the hash */
+    if (!isempty(gval(gnode(t, i))))
+      nhsize++;
+  }
+  if (newasize == asize &&
+      (nhsize == 0 ? 0u : twoto(luaO_ceillog2(nhsize))) == allocsizenode(t))
+    return;  /* already compact */
+  luaH_resize(L, t, newasize, nhsize);
+}
 #endif
 
 

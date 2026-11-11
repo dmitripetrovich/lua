@@ -195,6 +195,7 @@ do
   check("bad argument #1 to 'table.", table.wipe, t)
   check(ARG, table.wipe, t)
   check(ARG, table.clear, t)
+  check(ARG, table.compact, t)
   check("bad argument #2 to 'table.clone' (" .. ARG .. ")", table.clone, {1}, t)
   same(t, orig)
 

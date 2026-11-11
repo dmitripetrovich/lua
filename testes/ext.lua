@@ -381,4 +381,82 @@ do
   assert(1 .. 2 == "12")
 end
 
+
+print("testing table.fill and table.compact")
+
+do
+  local t = table.fill(5, "x")
+  assert(#t == 5 and t[1] == "x" and t[5] == "x" and t[6] == nil)
+  assert(table.type(t) == "array")
+  local v = {}
+  t = table.fill(3, v)
+  assert(t[1] == v and t[3] == v and #t == 3)
+  t = table.fill(4)
+  assert(next(t) == nil and #t == 0)
+  t = table.fill(0, 1)
+  assert(next(t) == nil)
+  t = table.fill(3, false)
+  assert(t[1] == false and t[3] == false and #t == 3)
+  t[4] = 1
+  assert(#t == 4)
+  assert(not pcall(table.fill, -1, 1))
+  assert(not pcall(table.fill, "x"))
+
+  for _, mode in ipairs({"incremental", "generational"}) do
+    local old = collectgarbage(mode)
+    t = table.fill(100, {})
+    collectgarbage()
+    t[50] = {}
+    collectgarbage()
+    assert(type(t[1]) == "table" and t[1] == t[100] and t[50] ~= t[1])
+    collectgarbage(old)
+  end
+end
+
+do
+  local t = {}
+  for i = 1, 100000 do t[i] = i end
+  for i = 11, 100000 do t[i] = nil end
+  t.k = "v"
+  collectgarbage()
+  collectgarbage()
+  local before = collectgarbage("count")
+  assert(table.compact(t) == t)
+  collectgarbage()
+  collectgarbage()
+  assert(before - collectgarbage("count") > 500)
+  assert(#t == 10 and t[10] == 10 and t[11] == nil and t.k == "v")
+  local n = 0
+  for _ in pairs(t) do n = n + 1 end
+  assert(n == 11)
+  t[11] = 11
+  assert(#t == 11 and t[11] == 11)
+  assert(table.compact(t) == t and #t == 11 and t.k == "v")
+
+  local h = {1, 2, 3, 4, 5, 6, 7, 8}
+  h[3] = nil
+  table.compact(h)
+  for i = 1, 8 do assert(h[i] == (i ~= 3 and i or nil)) end
+  n = 0
+  for _ in pairs(h) do n = n + 1 end
+  assert(n == 7)
+
+  local e = {1, 2, 3}
+  e[1], e[2], e[3] = nil, nil, nil
+  table.compact(e)
+  assert(next(e) == nil and table.type(e) == "empty")
+
+  local hash = {}
+  for i = 1, 1000 do hash["k" .. i] = i end
+  for i = 2, 1000 do hash["k" .. i] = nil end
+  table.compact(hash)
+  assert(hash.k1 == 1 and next(hash, "k1") == nil and table.type(hash) == "hash")
+  hash.k2 = 2
+  assert(hash.k2 == 2)
+
+  local empty = {}
+  assert(table.compact(empty) == empty and next(empty) == nil)
+  assert(not pcall(table.compact, 1))
+end
+
 print("OK")

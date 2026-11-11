@@ -448,6 +448,24 @@ static int treset (lua_State *L) {
   return 1;
 }
 
+static int tfill (lua_State *L) {
+  lua_Unsigned size = (lua_Unsigned)luaL_checkinteger(L, 1);
+  luaL_argcheck(L, size <= cast_uint(INT_MAX), 1, "out of range");
+  if (lua_isnoneornil(L, 2))
+    lua_createtable(L, cast_int(size), 0);
+  else
+    lua_filltable(L, cast_int(size), 2);
+  return 1;
+}
+
+static int tcompact (lua_State *L) {
+  luaL_checktype(L, 1, LUA_TTABLE);
+  checkwritable(L, 1);
+  lua_compacttable(L, 1);
+  lua_pushvalue(L, 1);
+  return 1;
+}
+
 static int tclone (lua_State *L) {
   luaL_checktype(L, 1, LUA_TTABLE);
   if (lua_gettop(L) >= 2)  /* supplied sink */
@@ -499,6 +517,8 @@ static const luaL_Reg tab_funcs[] = {
   {"new", tcreate},
   {"wipe", treset}, {"clear", treset},
   {"clone", tclone},
+  {"fill", tfill},
+  {"compact", tcompact},
 #endif
 #if defined(GRIT_POWER_READONLY)
   {"freeze", tfreeze},
