@@ -459,4 +459,30 @@ do
   assert(not pcall(table.compact, 1))
 end
 
+
+print("testing integer formatting")
+
+do
+  local function same (i)
+    local s = string.format("%d", i)
+    assert(tostring(i) == s, s)
+    assert(i .. "" == s and "" .. i == s, s)
+  end
+  for _, i in ipairs({0, 1, -1, 9, 10, -10, 99, 100, -100, 101, 999, 1000, 12345, -98765, 4294967295, 4294967296, math.maxinteger, math.mininteger, math.maxinteger - 1, math.mininteger + 1}) do
+    same(i)
+  end
+  local p = 1
+  for _ = 0, 18 do
+    same(p); same(p - 1); same(p + 1); same(-p); same(-p + 1); same(-p - 1)
+    p = p * 10
+  end
+  math.randomseed(42)
+  for _ = 1, 200000 do
+    same(math.random(math.mininteger, math.maxinteger))
+    same(math.random(-100000, 100000))
+  end
+  assert(tostring(1.0) == "1.0" and tostring(-0.5) == "-0.5")
+  assert(string.format("%s|%s", 7, -7) == "7|-7")
+end
+
 print("OK")

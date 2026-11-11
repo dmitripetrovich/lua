@@ -447,6 +447,45 @@ static int tostringbuffFloat (lua_Number n, char *buff) {
 }
 
 
+#if defined(LUA_EXT_ITOA)
+/*
+** Write integer 'x' in decimal to 'buff', with a final zero, and return
+** its length. The digits are built backwards in 'tmp', two at a time.
+*/
+static int tostringbuffInt (lua_Integer x, char *buff) {
+  static const char digits[] = "0001020304050607080910111213141516171819"
+                               "2021222324252627282930313233343536373839"
+                               "4041424344454647484950515253545556575859"
+                               "6061626364656667686970717273747576777879"
+                               "8081828384858687888990919293949596979899";
+  char tmp[24];  /* 20 digits and a sign at most */
+  char *end = tmp + sizeof(tmp);
+  char *front = end;
+  lua_Unsigned u = l_castS2U(x);
+  int len;
+  if (x < 0)
+    u = 0u - u;  /* magnitude, also for LUA_MININTEGER */
+  while (u >= 100) {
+    front -= 2;
+    memcpy(front, &digits[2 * (u % 100)], 2);
+    u /= 100;
+  }
+  if (u < 10)
+    *--front = cast_char('0' + u);
+  else {
+    front -= 2;
+    memcpy(front, &digits[2 * u], 2);
+  }
+  if (x < 0)
+    *--front = '-';
+  len = cast_int(end - front);
+  memcpy(buff, front, cast_sizet(len));
+  buff[len] = '\0';
+  return len;
+}
+#endif
+
+
 /*
 ** Convert a number object to a string, adding it to a buffer.
 */
@@ -454,7 +493,11 @@ unsigned luaO_tostringbuff (const TValue *obj, char *buff) {
   int len;
   lua_assert(ttisnumber(obj));
   if (ttisinteger(obj))
+#if defined(LUA_EXT_ITOA)
+    len = tostringbuffInt(ivalue(obj), buff);
+#else
     len = lua_integer2str(buff, LUA_N2SBUFFSZ, ivalue(obj));
+#endif
   else
     len = tostringbuffFloat(fltvalue(obj), buff);
   lua_assert(len < LUA_N2SBUFFSZ);

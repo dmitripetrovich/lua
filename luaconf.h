@@ -842,6 +842,14 @@
 #define LUA_EXT_ITERATION
 #endif
 
+/*
+** Integer formatting: 'tostring', '..' and lua_tolstring write integers
+** two digits at a time from a table instead of calling 'snprintf'.
+*/
+#if !defined(LUA_NO_EXT_ITOA) && !defined(LUA_EXT_ITOA)
+#define LUA_EXT_ITOA
+#endif
+
 /* }================================================================== */
 
 /*
