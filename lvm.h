@@ -144,4 +144,13 @@ LUAI_FUNC lua_Number luaV_modf (lua_State *L, lua_Number x, lua_Number y);
 LUAI_FUNC lua_Integer luaV_shiftl (lua_Integer x, lua_Integer y);
 LUAI_FUNC void luaV_objlen (lua_State *L, StkId ra, const TValue *rb, int api_call);
 
+#if defined(LUA_EXT_ITERATION)
+/* the iteration functions an optimized 'for' loop recognizes (lbaselib.c) */
+LUAI_FUNC int luaB_next (lua_State *L);
+LUAI_FUNC int luaB_ipairsaux (lua_State *L);
+#if defined(GRIT_COMPAT_IPAIRS)
+LUAI_FUNC int luaB_ipairsaux_raw (lua_State *L);
+#endif
+#endif
+
 #endif

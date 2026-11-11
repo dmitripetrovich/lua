@@ -2020,6 +2020,26 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
        setobj(L, &temp, s2v(ra + 3));
        setobjs2s(L, ra + 3, ra + 2);
        setobj2s(L, ra + 2, &temp);
+#if defined(LUA_EXT_ITERATION)
+        /* 'next' or 'ipairs' over a table with no closing value: keep the
+           loop's position in the closing slot instead (see OP_TFORCALL) */
+        if (ttisnil(s2v(ra + 2)) && ttislcf(s2v(ra)) && ttistable(s2v(ra + 1))
+            && !trap) {
+          lua_CFunction f = fvalue(s2v(ra));
+          if (f == luaB_next && ttisnil(s2v(ra + 3))) {
+            setitervalue(s2v(ra + 2), 0, LUA_VPAIRS);
+          }
+          else if (f == luaB_ipairsaux && ttisinteger(s2v(ra + 3))) {
+            setitervalue(s2v(ra + 2), 0, LUA_VIPAIRS);
+          }
+#if defined(GRIT_COMPAT_IPAIRS)
+          else if (f == luaB_ipairsaux_raw && ttisinteger(s2v(ra + 3))) {
+            setitervalue(s2v(ra + 2), 0, LUA_VIPAIRSRAW);
+          }
+#endif
+        }
+        if (!ttisitern(s2v(ra + 2)))
+#endif
         /* create to-be-closed upvalue (if closing var. is not nil) */
 #if defined(GRIT_POWER_DEFER)
         halfProtect(luaF_newtbcupval(L, ra + 2, 0));
@@ -2040,6 +2060,48 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
            return will be the new value for the control variable.
         */
         StkId ra = RA(i);
+#if defined(LUA_EXT_ITERATION)
+        if (ttisitern(s2v(ra + 2))) {
+          Table *t = hvalue(s2v(ra + 1));
+          int extra, c = GETARG_C(i);
+          for (extra = 2; extra < c; extra++)  /* clear extra variables */
+            setnilvalue(s2v(ra + 3 + extra));
+          if (l_unlikely(trap)) {  /* hooks see every call: go back to them */
+            setnilvalue(s2v(ra + 2));
+            goto l_tforcallcall;
+          }
+          if (ttispairs(s2v(ra + 2))) {
+            unsigned int idx = luaH_rawnext(L, t, ra + 3, itervalue(s2v(ra + 2)));
+            i = *(pc++);  /* go to next instruction */
+            lua_assert(GET_OPCODE(i) == OP_TFORLOOP && ra == RA(i));
+            if (idx) {  /* an entry: key in control variable, value after */
+              chgitervalue(s2v(ra + 2), idx);
+              pc -= GETARG_Bx(i);  /* jump back */
+            }
+            vmbreak;
+          }
+          else {  /* ipairs */
+            lua_Integer n = intop(+, ivalue(s2v(ra + 3)), 1);
+            lu_byte tag;
+            luaH_fastgeti(t, n, s2v(ra + 4), tag);
+            if (!tagisempty(tag)) {  /* t[n] exists */
+              setivalue(s2v(ra + 3), n);
+              i = *(pc++);  /* go to next instruction */
+              lua_assert(GET_OPCODE(i) == OP_TFORLOOP && ra == RA(i));
+              pc -= GETARG_Bx(i);  /* jump back */
+              vmbreak;
+            }
+            if (ttisipairsraw(s2v(ra + 2)) ||
+                fasttm(L, t->metatable, TM_INDEX) == NULL) {  /* the end */
+              i = *(pc++);  /* go to next instruction */
+              lua_assert(GET_OPCODE(i) == OP_TFORLOOP && ra == RA(i));
+              vmbreak;
+            }
+            setnilvalue(s2v(ra + 2));  /* __index may give t[n]: call */
+          }
+        }
+       l_tforcallcall:
+#endif
         setobjs2s(L, ra + 5, ra + 3);  /* copy the control variable */
         setobjs2s(L, ra + 4, ra + 1);  /* copy state */
         setobjs2s(L, ra + 3, ra);  /* copy function */

@@ -22,6 +22,9 @@
 #define LUA_TUPVAL	LUA_NUMTYPES  /* upvalues */
 #define LUA_TPROTO	(LUA_NUMTYPES+1)  /* function prototypes */
 #define LUA_TDEADKEY	(LUA_NUMTYPES+2)  /* removed keys in tables */
+#if defined(LUA_EXT_ITERATION)
+#define LUA_TITER	(LUA_NUMTYPES+3)  /* positions of optimized 'for' loops */
+#endif
 
 
 
@@ -61,6 +64,9 @@ typedef union Value {
   lua_CFunction f; /* light C functions */
   lua_Integer i;   /* integer numbers */
   lua_Number n;    /* float numbers */
+#if defined(LUA_EXT_ITERATION)
+  unsigned int it; /* position of an optimized 'for' loop */
+#endif
   /* not used, but may avoid warnings for uninitialized value */
   lu_byte ub;
 } Value;
@@ -835,6 +841,37 @@ typedef struct Table {
 #define keyisdead(node)		(keytt(node) == LUA_TDEADKEY)
 
 /* }================================================================== */
+
+/*
+** {==================================================================
+** Optimized iteration
+** ===================================================================
+*/
+
+#if defined(LUA_EXT_ITERATION)
+
+/*
+** Variant tags for the position kept in a generic 'for' loop's closing
+** slot: 'next' (pairs), 'ipairs' honouring __index, and raw 'ipairs'
+*/
+#define LUA_VPAIRS	makevariant(LUA_TITER, 0)
+#define LUA_VIPAIRS	makevariant(LUA_TITER, 1)
+#define LUA_VIPAIRSRAW	makevariant(LUA_TITER, 2)
+
+#define ttisitern(o)	checktype((o), LUA_TITER)
+#define ttispairs(o)	checktag((o), LUA_VPAIRS)
+#define ttisipairsraw(o)	checktag((o), LUA_VIPAIRSRAW)
+
+#define itervalue(o)	check_exp(ttisitern(o), val_(o).it)
+#define setitervalue(obj,x,t) \
+	{ TValue *io=(obj); val_(io).it=(x); settt_(io, t); }
+#define chgitervalue(obj,x) \
+	{ TValue *io=(obj); lua_assert(ttisitern(io)); val_(io).it=(x); }
+
+#endif
+
+/* }================================================================== */
+
 
 /*
 ** {==================================================================

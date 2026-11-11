@@ -232,6 +232,11 @@ LUA_API const char *lua_getlocal (lua_State *L, const lua_Debug *ar, int n) {
     StkId pos = NULL;  /* to avoid warnings */
     name = luaG_findlocal(L, ar->i_ci, n, &pos);
     if (name) {
+#if defined(LUA_EXT_ITERATION)
+      if (l_unlikely(ttisitern(s2v(pos))))  /* an optimized loop's position */
+        setnilvalue(s2v(L->top.p));
+      else
+#endif
       setobjs2s(L, L->top.p, pos);
       api_incr_top(L);
     }
@@ -248,6 +253,15 @@ LUA_API const char *lua_setlocal (lua_State *L, const lua_Debug *ar, int n) {
   name = luaG_findlocal(L, ar->i_ci, n, &pos);
   if (name) {
     api_checkpop(L, 1);
+#if defined(LUA_EXT_ITERATION)
+    {  /* a changed loop variable: its loop goes back to calling */
+      StkId base = ar->i_ci->func.p + 1;
+      StkId p = (pos - base >= 2) ? pos - 2 : base;
+      for (; p <= pos + 2 && p < L->top.p - 1; p++)
+        if (ttisitern(s2v(p)))
+          setnilvalue(s2v(p));
+    }
+#endif
     setobjs2s(L, pos, L->top.p - 1);
     L->top.p--;  /* pop value */
   }

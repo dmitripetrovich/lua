@@ -287,7 +287,20 @@ static int luaB_type (lua_State *L) {
 
 
 #define luaB_hasnext(t) ((t) == LUA_TTABLE || (t) == LUA_TVECTOR || (t) == LUA_TMATRIX)
-static int luaB_next (lua_State *L) {
+
+/* the iteration functions an optimized 'for' loop recognizes (lvm.c) */
+#if defined(LUA_EXT_ITERATION)
+#define LUAB_ITERFUNC	LUAI_FUNC
+LUAB_ITERFUNC int luaB_next (lua_State *L);
+LUAB_ITERFUNC int luaB_ipairsaux (lua_State *L);
+#if defined(GRIT_COMPAT_IPAIRS)
+LUAB_ITERFUNC int luaB_ipairsaux_raw (lua_State *L);
+#endif
+#else
+#define LUAB_ITERFUNC	static
+#endif
+
+LUAB_ITERFUNC int luaB_next (lua_State *L) {
   int t = lua_rawtype(L, 1);
   if (!luaB_hasnext(t))
     return luaL_typeerror(L, 1, lua_typename(L, LUA_TTABLE));
@@ -349,7 +362,7 @@ static int luaB_each (lua_State *L) {
 /*
 ** Traversal function for 'ipairs'
 */
-static int ipairsaux (lua_State *L) {
+LUAB_ITERFUNC int luaB_ipairsaux (lua_State *L) {
   lua_Integer i = luaL_checkinteger(L, 2);
   i = luaL_intop(+, i, 1);
   lua_pushinteger(L, i);
@@ -360,7 +373,7 @@ static int ipairsaux (lua_State *L) {
 /*
 ** Traversal function for 'ipairs' for raw tables
 */
-static int ipairsaux_raw (lua_State *L) {
+LUAB_ITERFUNC int luaB_ipairsaux_raw (lua_State *L) {
   int t = lua_rawtype(L, 1);
   lua_Integer i = luaL_checkinteger(L, 2) + 1;
   if (!luaB_hasnext(t))
@@ -371,13 +384,12 @@ static int ipairsaux_raw (lua_State *L) {
 
 
 /*
-** This function will use either 'ipairsaux' or 'ipairsaux_raw' to
+** This function will use either 'luaB_ipairsaux' or 'luaB_ipairsaux_raw' to
 ** traverse a table, depending on whether the table has metamethods
 ** that can affect the traversal.
 */
 static int luaB_ipairs (lua_State *L) {
-  lua_CFunction iter = (luaL_getmetafield(L, 1, "__index") != LUA_TNIL)
-                       ? ipairsaux : ipairsaux_raw;
+  lua_CFunction iter = (luaL_getmetafield(L, 1, "__index") != LUA_TNIL) ? luaB_ipairsaux : luaB_ipairsaux_raw;
   luaL_checkany(L, 1);
   if (luaL_getmetafield(L, 1, "__ipairs") == LUA_TNIL) {  /* no metamethod? */
     lua_pushcfunction(L, iter);  /* iteration function */
@@ -392,12 +404,12 @@ static int luaB_ipairs (lua_State *L) {
 }
 #else
 /*
-** 'ipairs' function. Returns 'ipairsaux', given "table", 0.
+** 'ipairs' function. Returns 'luaB_ipairsaux', given "table", 0.
 ** (The given "table" may not be a table.)
 */
 static int luaB_ipairs (lua_State *L) {
   luaL_checkany(L, 1);
-  lua_pushcfunction(L, ipairsaux);  /* iteration function */
+  lua_pushcfunction(L, luaB_ipairsaux);  /* iteration function */
   lua_pushvalue(L, 1);  /* state */
   lua_pushinteger(L, 0);  /* initial value */
   return 3;

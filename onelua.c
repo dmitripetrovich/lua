@@ -106,9 +106,13 @@
 /* auxiliary library -- used by all */
 #include "lauxlib.c"
 
+/* basic library -- luac too, for the iteration functions lvm.c compares */
+#if !defined(MAKE_LUAC) || defined(LUA_EXT_ITERATION)
+#include "lbaselib.c"
+#endif
+
 /* standard library  -- not used by luac */
 #ifndef MAKE_LUAC
-#include "lbaselib.c"
 #include "lcorolib.c"
 #include "ldblib.c"
 #include "liolib.c"

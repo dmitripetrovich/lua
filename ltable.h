@@ -166,20 +166,19 @@ LUAI_FUNC int luaH_psetshortstr (Table *t, TString *key, TValue *val);
 LUAI_FUNC int luaH_psetstr (Table *t, TString *key, TValue *val);
 LUAI_FUNC int luaH_pset (Table *t, const TValue *key, TValue *val);
 
-LUAI_FUNC void luaH_setint (lua_State *L, Table *t, lua_Integer key,
-                                                    TValue *value);
-LUAI_FUNC void luaH_set (lua_State *L, Table *t, const TValue *key,
-                                                 TValue *value);
+LUAI_FUNC void luaH_setint (lua_State *L, Table *t, lua_Integer key, TValue *value);
+LUAI_FUNC void luaH_set (lua_State *L, Table *t, const TValue *key, TValue *value);
 
-LUAI_FUNC void luaH_finishset (lua_State *L, Table *t, const TValue *key,
-                                              TValue *value, int hres);
+LUAI_FUNC void luaH_finishset (lua_State *L, Table *t, const TValue *key, TValue *value, int hres);
 LUAI_FUNC Table *luaH_new (lua_State *L);
-LUAI_FUNC void luaH_resize (lua_State *L, Table *t, unsigned nasize,
-                                                    unsigned nhsize);
+LUAI_FUNC void luaH_resize (lua_State *L, Table *t, unsigned nasize, unsigned nhsize);
 LUAI_FUNC void luaH_resizearray (lua_State *L, Table *t, unsigned nasize);
 LUAI_FUNC lu_mem luaH_size (Table *t);
 LUAI_FUNC void luaH_free (lua_State *L, Table *t);
 LUAI_FUNC int luaH_next (lua_State *L, Table *t, StkId key);
+#if defined(LUA_EXT_ITERATION)
+LUAI_FUNC unsigned int luaH_rawnext (lua_State *L, Table *t, StkId v, unsigned int idx);
+#endif
 LUAI_FUNC lua_Unsigned luaH_getn (lua_State *L, Table *t);
 #if defined(GRIT_POWER_WOW)
 LUAI_FUNC int luaH_type (const Table *t);

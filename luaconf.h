@@ -833,6 +833,15 @@
 #endif
 #endif
 
+/*
+** Optimized iteration: a generic 'for' over 'pairs', 'ipairs' or 'next' on a
+** table keeps its position in the loop's unused closing slot, so each step
+** reads the next entry without a call or a key lookup.
+*/
+#if !defined(LUA_NO_EXT_ITERATION) && !defined(LUA_EXT_ITERATION)
+#define LUA_EXT_ITERATION
+#endif
+
 /* }================================================================== */
 
 /*

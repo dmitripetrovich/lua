@@ -392,6 +392,36 @@ int luaH_next (lua_State *L, Table *t, StkId key) {
 }
 
 
+#if defined(LUA_EXT_ITERATION)
+/*
+** 'luaH_next' for an optimized 'for' loop: starts at position 'idx' (0 for
+** the first entry) instead of finding a key, puts the next entry's key and
+** value at 'v' and 'v + 1', and returns the position after it (0 when there
+** are no more entries).
+*/
+unsigned int luaH_rawnext (lua_State *L, Table *t, StkId v, unsigned int idx) {
+  unsigned int asize = t->asize;
+  for (; idx < asize; idx++) {  /* try first array part */
+    lu_byte tag = *getArrTag(t, idx);
+    if (!tagisempty(tag)) {  /* a non-empty entry? */
+      setivalue(s2v(v), cast_int(idx) + 1);
+      farr2val(t, idx, tag, s2v(v + 1));
+      return idx + 1;
+    }
+  }
+  for (idx -= asize; idx < sizenode(t); idx++) {  /* hash part */
+    Node *n = gnode(t, idx);
+    if (!isempty(gval(n))) {  /* a non-empty entry? */
+      getnodekey(L, s2v(v), n);
+      setobj2s(L, v + 1, gval(n));
+      return idx + asize + 1;
+    }
+  }
+  return 0;  /* no more elements */
+}
+#endif
+
+
 /* Extra space in Node array if it has a lastfree entry */
 #define extraLastfree(t)	(haslastfree(t) ? sizeof(Limbox) : 0)
 
