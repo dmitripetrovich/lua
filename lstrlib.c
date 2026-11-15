@@ -163,17 +163,37 @@ static int str_rep (lua_State *L) {
 }
 
 
+/*
+** Charge 'n' steps of a long loop to the count hook ('lua_checkhook')
+** once every HOOKSTEPS of them; '*steps' accumulates them.
+*/
+#define HOOKSTEPS	1024
+
+static void hooksteps (lua_State *L, size_t *steps, size_t n) {
+  if ((*steps += n) >= HOOKSTEPS) {
+    lua_checkhook(L, (*steps > INT_MAX) ? INT_MAX : (int)*steps);
+    *steps = 0;
+  }
+}
+
+
 #if defined(GRIT_POWER_WOW)
 static int str_trim (lua_State *L) {
   size_t len = 0;
   const char *str = luaL_checklstring(L, 1, &len);
   const char *delimiter = luaL_optstring(L, 2, "\t\n\v\f\r "); /* isspace */
+  size_t dlen = strlen(delimiter) + 1;
+  size_t steps = 0;
 
   const char *back = str + len - 1;
-  while (str <= back && strchr(delimiter, *str))
+  while (str <= back && strchr(delimiter, *str)) {
+    hooksteps(L, &steps, dlen);
     str++;
-  while (back > str && strchr(delimiter, *back))
+  }
+  while (back > str && strchr(delimiter, *back)) {
+    hooksteps(L, &steps, dlen);
     back--;
+  }
 
   lua_pushlstring(L, str, back - str + 1);
   return 1;
@@ -184,13 +204,16 @@ static int str_split (lua_State *L) {
   const char *str = luaL_checkstring(L, 2);
   int limit = (int)luaL_optinteger(L, 3, 0);
   int count = 0;
+  size_t dlen = strlen(delimiter) + 1;
+  size_t steps = 0;
 
-  lua_settop(L, 0); /* clear new slots */
+  lua_settop(L, 3);  /* keep the strings while their pieces are made */
   if (limit == 0 || limit > 1) {
     const char *end;
     for (end = str; *end; ++end) {
       const char *s;
       int split = 0;
+      hooksteps(L, &steps, dlen);
       for (s = delimiter; *s; ++s) {
         if (*s == *end) {
           split = 1;
@@ -493,6 +516,7 @@ typedef struct MatchState {
   lua_State *L;
   int matchdepth;  /* control for recursive depth (to avoid C stack overflow) */
   int level;  /* total number of captures (finished or unfinished) */
+  size_t hooksteps;  /* steps not yet charged to the count hook */
   struct {
     const char *init;
     ptrdiff_t len;  /* length or special value (CAP_*) */
@@ -607,7 +631,10 @@ static int singlematch (MatchState *ms, const char *s, const char *p,
     switch (*p) {
       case '.': return 1;  /* matches any char */
       case L_ESC: return match_class(c, cast_uchar(*(p+1)));
-      case '[': return matchbracketclass(c, p, ep-1);
+      case '[': {
+        hooksteps(ms->L, &ms->hooksteps, (size_t)(ep - p));
+        return matchbracketclass(c, p, ep-1);
+      }
       default:  return (cast_uchar(*p) == c);
     }
   }
@@ -624,6 +651,7 @@ static const char *matchbalance (MatchState *ms, const char *s,
     int e = *(p+1);
     int cont = 1;
     while (++s < ms->src_end) {
+      hooksteps(ms->L, &ms->hooksteps, 1);
       if (*s == e) {
         if (--cont == 0) return s+1;
       }
@@ -637,8 +665,10 @@ static const char *matchbalance (MatchState *ms, const char *s,
 static const char *max_expand (MatchState *ms, const char *s,
                                  const char *p, const char *ep) {
   ptrdiff_t i = 0;  /* counts maximum expand for item */
-  while (singlematch(ms, s + i, p, ep))
+  while (singlematch(ms, s + i, p, ep)) {
+    hooksteps(ms->L, &ms->hooksteps, 1);
     i++;
+  }
   /* keeps trying to match with the maximum repetitions */
   while (i>=0) {
     const char *res = match(ms, (s+i), ep+1);
@@ -691,6 +721,7 @@ static const char *match_capture (MatchState *ms, const char *s, int l) {
   size_t len;
   l = check_capture(ms, l);
   len = cast_sizet(ms->capture[l].len);
+  hooksteps(ms->L, &ms->hooksteps, len);
   if ((size_t)(ms->src_end-s) >= len &&
       memcmp(ms->capture[l].init, s, len) == 0)
     return s+len;
@@ -702,6 +733,7 @@ static const char *match (MatchState *ms, const char *s, const char *p) {
   if (l_unlikely(ms->matchdepth-- == 0))
     luaL_error(ms->L, "pattern too complex");
   init: /* using goto to optimize tail recursion */
+  hooksteps(ms->L, &ms->hooksteps, 1);
   if (p != ms->p_end) {  /* end of pattern? */
     switch (*p) {
       case '(': {  /* start capture */
@@ -801,15 +833,16 @@ static const char *match (MatchState *ms, const char *s, const char *p) {
 
 
 
-static const char *lmemfind (const char *s1, size_t l1,
-                               const char *s2, size_t l2) {
+static const char *lmemfind (lua_State *L, const char *s1, size_t l1, const char *s2, size_t l2) {
   if (l2 == 0) return s1;  /* empty strings are everywhere */
   else if (l2 > l1) return NULL;  /* avoids a negative 'l1' */
   else {
     const char *init;  /* to search for a '*s2' inside 's1' */
+    size_t steps = 0;
     l2--;  /* 1st char will be checked by 'memchr' */
     l1 = l1-l2;  /* 's2' cannot be found after that */
     while (l1 > 0 && (init = (const char *)memchr(s1, *s2, l1)) != NULL) {
+      hooksteps(L, &steps, l2 + 1);
       init++;   /* 1st char is already checked */
       if (memcmp(init, s2+1, l2) == 0)
         return init-1;
@@ -895,6 +928,7 @@ static void prepstate (MatchState *ms, lua_State *L,
   ms->src_init = s;
   ms->src_end = s + ls;
   ms->p_end = p + lp;
+  ms->hooksteps = 0;
 }
 
 
@@ -920,7 +954,7 @@ static int str_find_aux (lua_State *L, int find) {
   /* explicit request or no special characters? */
   if (find && (lua_toboolean(L, 4) || nospecials(p, lp))) {
     /* do a plain search */
-    const char *s2 = lmemfind(s + init, ls - init, p, lp);
+    const char *s2 = lmemfind(L, s + init, ls - init, p, lp);
     if (s2) {
       lua_pushinteger(L, ct_diff2S(s2 - s) + 1);
       lua_pushinteger(L, cast_st2S(ct_diff2sz(s2 - s) + lp));
@@ -2128,4 +2162,3 @@ LUAMOD_API int luaopen_string (lua_State *L) {
   createmetatable(L);
   return 1;
 }
-

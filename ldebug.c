@@ -36,8 +36,7 @@
 static const char strlocal[] = "local";
 static const char strupval[] = "upvalue";
 
-static const char *funcnamefromcall (lua_State *L, CallInfo *ci,
-                                                   const char **name);
+static const char *funcnamefromcall (lua_State *L, CallInfo *ci, const char **name);
 
 
 static int currentpc (CallInfo *ci) {
@@ -156,6 +155,21 @@ LUA_API int lua_gethookmask (lua_State *L) {
 
 LUA_API int lua_gethookcount (lua_State *L) {
   return L->basehookcount;
+}
+
+
+/*
+** Charge 'steps' instructions' worth of work done inside a C function
+** to the count hook, calling the hook when its count runs out, so that
+** long loops in C can be interrupted the same way as Lua code.
+*/
+LUA_API void lua_checkhook (lua_State *L, int steps) {
+  lua_lock(L);
+  if ((L->hookmask & LUA_MASKCOUNT) && L->basehookcount > 0 && (L->hookcount -= steps) <= 0) {
+    resethookcount(L);
+    luaD_hook(L, LUA_HOOKCOUNT, -1, 0, 0);
+  }
+  lua_unlock(L);
 }
 
 
@@ -997,4 +1011,3 @@ int luaG_traceexec (lua_State *L, const Instruction *pc) {
   }
   return 1;  /* keep 'trap' on */
 }
-

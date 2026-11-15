@@ -155,6 +155,7 @@ void mp_encode_lua_table_as_array (lua_State *L, lua_msgpack *ud, int idx, int l
   msgpack_pack_array(mp_get_packer(L, ud), array_length);
   mp_checkstack(L, 1);
   for (j = 1; j <= array_length; j++) {
+    lua_checkhook(L, 1);
 #if LUA_VERSION_NUM >= 503
     lua_rawgeti(L, idx, mp_cast(lua_Integer, j));
 #else
