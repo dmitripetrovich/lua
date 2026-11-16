@@ -318,7 +318,15 @@
 
 #else				/* }{ */
 
+/*
+@@ LUA_C_LINKAGE gives the API C linkage when Lua is compiled as C++,
+** so that C code can call a C++-compiled Lua.
+*/
+#if defined(__cplusplus) && defined(LUA_C_LINKAGE)
+#define LUA_API		extern "C"
+#else
 #define LUA_API		extern
+#endif
 
 #endif				/* } */
 
@@ -872,4 +880,3 @@ typedef lua_vec4 lua_mat4[4];
 /* }================================================================== */
 
 #endif
-
