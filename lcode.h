@@ -81,6 +81,11 @@ LUAI_FUNC void luaK_exp2reg (FuncState *fs, expdesc *e, int reg);
 LUAI_FUNC void luaK_exp2val (FuncState *fs, expdesc *e);
 LUAI_FUNC void luaK_self (FuncState *fs, expdesc *e, expdesc *key);
 LUAI_FUNC void luaK_indexed (FuncState *fs, expdesc *t, expdesc *k);
+#if defined(GRIT_POWER_IMPORT)
+LUAI_FUNC int luaK_importable (FuncState *fs, expdesc *v);
+LUAI_FUNC int luaK_importnext (FuncState *fs, expdesc *v, expdesc *k);
+LUAI_FUNC void luaK_importvar (FuncState *fs, expdesc *v);
+#endif
 LUAI_FUNC void luaK_goiftrue (FuncState *fs, expdesc *e);
 LUAI_FUNC void luaK_storevar (FuncState *fs, expdesc *var, expdesc *e);
 LUAI_FUNC void luaK_setreturns (FuncState *fs, expdesc *e, int nresults);

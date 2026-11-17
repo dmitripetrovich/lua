@@ -330,6 +330,17 @@ typedef void (*lua_Budget) (lua_State *L, void *ud);
 LUA_API void  (lua_setbudget) (lua_State *L, lua_Budget f, void *ud, int steps);
 #endif
 
+#if defined(GRIT_POWER_FASTCALL)
+enum {
+  LUA_FASTABS, LUA_FASTFLOOR, LUA_FASTCEIL, LUA_FASTSQRT, LUA_FASTMIN, LUA_FASTMAX,
+  LUA_FASTSIN, LUA_FASTCOS, LUA_FASTCLAMP, LUA_FASTTYPE, LUA_FASTRAWEQUAL, LUA_FASTRAWGET,
+  LUA_FASTSTRLEN, LUA_FASTSTRBYTE, LUA_FASTVEC2, LUA_FASTVEC3, LUA_FASTVEC4,
+  LUA_FASTLENGTH, LUA_FASTDISTANCE, LUA_FASTDOT, LUA_NUMFAST
+};
+
+LUA_API void  (lua_setfastcall) (lua_State *L, int id, lua_CFunction f);
+#endif
+
 #if defined(GRIT_POWER_GCPACE)
 typedef int (*lua_GCPace) (void *ud);
 

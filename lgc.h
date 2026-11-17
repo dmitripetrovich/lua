@@ -83,6 +83,18 @@
 
 #define TESTBIT		7
 
+#if defined(GRIT_POWER_IMPORT)
+#if defined(LUA_DEBUG)
+#error "GRIT_POWER_IMPORT keeps its table mark in TESTBIT, which LUA_DEBUG uses"
+#endif
+#if !defined(GRIT_POWER_READONLY)
+#error "GRIT_POWER_IMPORT needs the write guards of GRIT_POWER_READONLY"
+#endif
+#define IMPORTBIT	TESTBIT
+#define isimported(t)	testbit((t)->marked, IMPORTBIT)
+#define luaC_unimport(g,t)	(resetbit((t)->marked, IMPORTBIT), (g)->importepoch++)
+#endif
+
 
 
 #define WHITEBITS	bit2mask(WHITE0BIT, WHITE1BIT)

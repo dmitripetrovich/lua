@@ -664,6 +664,16 @@ static void PrintCode(const Proto* f)
    case OP_VARARGPREP:
 	printf("%d",a);
 	break;
+#if defined(GRIT_POWER_FASTCALL)
+   case OP_FASTCALL:
+	printf("%d %d",a,b);
+	break;
+#endif
+#if defined(GRIT_POWER_IMPORT)
+   case OP_GETIMPORT:
+	printf("%d %d",a,bx);
+	break;
+#endif
    case OP_EXTRAARG:
 	printf("%d",ax);
 	break;

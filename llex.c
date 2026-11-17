@@ -210,6 +210,10 @@ void luaX_setinput (lua_State *L, LexState *ls, ZIO *z, TString *source,
   ls->glbn = luaS_newliteral(L, "global");  /* get "global" string */
   ls->glbn->extra = 0;  /* mark it as not reserved */
 #endif
+#if defined(GRIT_POWER_CONTINUE)
+  ls->ctnn = luaX_newstring(ls, "continue", 8);
+  ls->ctnl = luaX_newstring(ls, "(continue)", 10);
+#endif
   luaZ_resizebuffer(ls->L, ls->buff, LUA_MINBUFFER);  /* initialize buffer */
 }
 

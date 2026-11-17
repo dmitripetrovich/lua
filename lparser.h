@@ -68,6 +68,9 @@ typedef enum {
               info = instruction pc */
   VCALL,  /* expression is a function call; info = instruction pc */
   VVARARG  /* vararg expression; info = instruction pc */
+#if defined(GRIT_POWER_IMPORT)
+  , VIMPORT
+#endif
 } expkind;
 
 
@@ -92,6 +95,13 @@ typedef struct expdesc {
       lu_byte ridx;  /* register holding the variable */
       short vidx;  /* index in 'actvar.arr' */
     } var;
+#if defined(GRIT_POWER_IMPORT)
+    struct {
+      short k[3];
+      lu_byte up;
+      lu_byte n;
+    } imp;
+#endif
   } u;
   int t;  /* patch list of 'exit when true' */
   int f;  /* patch list of 'exit when false' */
@@ -183,6 +193,12 @@ typedef struct FuncState {
   lu_byte freereg;  /* first free register */
   lu_byte iwthabs;  /* instructions issued since last absolute line info */
   lu_byte needclose;  /* function needs to close upvalues when returning */
+#if defined(GRIT_POWER_CONTINUE)
+  int untilref;
+#endif
+#if defined(GRIT_POWER_IMPORT)
+  int nimports;
+#endif
 } FuncState;
 
 

@@ -54,6 +54,9 @@ typedef struct BlockCnt {
   lu_byte upval;  /* true if some variable in the block is an upvalue */
   lu_byte isloop;  /* 1 if 'block' is a loop; 2 if it has pending breaks */
   lu_byte insidetbc;  /* true if inside the scope of a to-be-closed var. */
+#if defined(GRIT_POWER_CONTINUE)
+  lu_byte hascont;
+#endif
 } BlockCnt;
 
 
@@ -438,6 +441,10 @@ static int searchvar (FuncState *fs, TString *n, expdesc *var) {
       }
     }
     else if (eqstr(n, vd->vd.name)) {  /* found? */
+#if defined(GRIT_POWER_CONTINUE)
+      if (fs->untilref >= -1 && i > fs->untilref)
+        fs->untilref = i;
+#endif
       if (vd->vd.kind == RDKCTC)  /* compile-time constant? */
         init_exp(var, VCONST, fs->firstlocal + i);
       else {  /* local variable */
@@ -588,6 +595,10 @@ static void adjust_assign (LexState *ls, int nvars, int nexps, expdesc *e) {
 static l_noret jumpscopeerror (LexState *ls, Labeldesc *gt) {
   TString *tsname = getlocalvardesc(ls->fs, gt->nactvar)->vd.name;
   const char *varname = (tsname != NULL) ? getstr(tsname) : "*";
+#if defined(GRIT_POWER_CONTINUE)
+  if (eqstr(gt->name, ls->ctnl))
+    luaK_semerror(ls, "local '%s' used in the repeat..until condition is undefined because continue statement on line %d jumps over it", varname, gt->line);
+#endif
   luaK_semerror(ls,
      "<goto %s> at line %d jumps into the scope of '%s'",
       getstr(gt->name), gt->line, varname);  /* raise the error */
@@ -608,8 +619,13 @@ static void closegoto (LexState *ls, int g, Labeldesc *label, int bup) {
   Labellist *gl = &ls->dyd->gt;  /* list of gotos */
   Labeldesc *gt = &gl->arr[g];  /* goto to be resolved */
   lua_assert(eqstr(gt->name, label->name));
-  if (l_unlikely(gt->nactvar < label->nactvar))  /* enter some scope? */
+  if (l_unlikely(gt->nactvar < label->nactvar)) {  /* enter some scope? */
+#if defined(GRIT_POWER_CONTINUE)
+    if (eqstr(gt->name, ls->ctnl))
+      gt->nactvar = cast_short(label->nactvar - 1);
+#endif
     jumpscopeerror(ls, gt);
+  }
   if (gt->close ||
       (label->nactvar < gt->nactvar && bup)) {  /* needs close? */
     lu_byte stklevel = reglevel(fs, label->nactvar);
@@ -727,6 +743,9 @@ static void solvegotos (FuncState *fs, BlockCnt *bl) {
 
 static void enterblock (FuncState *fs, BlockCnt *bl, lu_byte isloop) {
   bl->isloop = isloop;
+#if defined(GRIT_POWER_CONTINUE)
+  bl->hascont = 0;
+#endif
   bl->nactvar = fs->nactvar;
   bl->firstlabel = fs->ls->dyd->label.n;
   bl->firstgoto = fs->ls->dyd->gt.n;
@@ -834,6 +853,12 @@ static void open_func (LexState *ls, FuncState *fs, BlockCnt *bl) {
   fs->ndebugvars = 0;
   fs->nactvar = 0;
   fs->needclose = 0;
+#if defined(GRIT_POWER_CONTINUE)
+  fs->untilref = -2;
+#endif
+#if defined(GRIT_POWER_IMPORT)
+  fs->nimports = 0;
+#endif
   fs->firstlocal = ls->dyd->actvar.n;
   fs->firstlabel = ls->dyd->label.n;
   fs->bl = NULL;
@@ -863,6 +888,9 @@ static void close_func (LexState *ls) {
   luaM_shrinkvector(L, f->p, f->sizep, fs->np, Proto *);
   luaM_shrinkvector(L, f->locvars, f->sizelocvars, fs->ndebugvars, LocVar);
   luaM_shrinkvector(L, f->upvalues, f->sizeupvalues, fs->nups, Upvaldesc);
+#if defined(GRIT_POWER_IMPORT)
+  luaM_shrinkvector(L, f->imports, f->sizeimports, fs->nimports, Import);
+#endif
   /* remove kcache table from scanner table ("weigh" its anchor) */
   sethvalue(L, &temp, fs->kcache);  /* key to be set to nil */
   luaH_set(L, ls->h, &temp, &G(L)->nilvalue);
@@ -910,6 +938,17 @@ static void fieldsel (LexState *ls, expdesc *v) {
   /* fieldsel -> ['.' | ':'] NAME */
   FuncState *fs = ls->fs;
   expdesc key;
+#if defined(GRIT_POWER_IMPORT)
+  if (luaK_importable(fs, v)) {
+    luaX_next(ls);
+    codename(ls, &key);
+    if (luaK_importnext(fs, v, &key))
+      return;
+    luaK_exp2anyregup(fs, v);
+    luaK_indexed(fs, v, &key);
+    return;
+  }
+#endif
   luaK_exp2anyregup(fs, v);
   luaX_next(ls);  /* skip the dot or colon */
   codename(ls, &key);
@@ -1240,7 +1279,40 @@ static int explist (LexState *ls, expdesc *v) {
 }
 
 
-static void funcargs (LexState *ls, expdesc *f) {
+#if defined(GRIT_POWER_FASTCALL)
+static const struct {
+  const char *space;
+  const char *name;
+  int id;
+} fastnames[] = {
+  {"math", "abs", LUA_FASTABS}, {"math", "floor", LUA_FASTFLOOR}, {"math", "ceil", LUA_FASTCEIL},
+  {"math", "sqrt", LUA_FASTSQRT}, {"math", "min", LUA_FASTMIN}, {"math", "max", LUA_FASTMAX},
+  {"math", "sin", LUA_FASTSIN}, {"math", "cos", LUA_FASTCOS}, {"math", "clamp", LUA_FASTCLAMP},
+  {NULL, "type", LUA_FASTTYPE}, {NULL, "rawequal", LUA_FASTRAWEQUAL}, {NULL, "rawget", LUA_FASTRAWGET},
+  {"string", "len", LUA_FASTSTRLEN}, {"string", "byte", LUA_FASTSTRBYTE},
+  {NULL, "vec2", LUA_FASTVEC2}, {NULL, "vec3", LUA_FASTVEC3}, {NULL, "vec4", LUA_FASTVEC4},
+  {NULL, "length", LUA_FASTLENGTH}, {NULL, "distance", LUA_FASTDISTANCE}, {NULL, "dot", LUA_FASTDOT}
+};
+
+
+static int fastid (TString *first, TString *second) {
+  size_t i;
+  if (first == NULL)
+    return -1;
+  for (i = 0; i < sizeof(fastnames) / sizeof(fastnames[0]); i++) {
+    if (second == NULL) {
+      if (fastnames[i].space == NULL && strcmp(getstr(first), fastnames[i].name) == 0)
+        return fastnames[i].id;
+    }
+    else if (fastnames[i].space != NULL && strcmp(getstr(first), fastnames[i].space) == 0 && strcmp(getstr(second), fastnames[i].name) == 0)
+      return fastnames[i].id;
+  }
+  return -1;
+}
+#endif
+
+
+static void funcargs (LexState *ls, expdesc *f, int fast) {
   FuncState *fs = ls->fs;
   expdesc args;
   int base, nparams;
@@ -1288,6 +1360,12 @@ static void funcargs (LexState *ls, expdesc *f) {
       luaK_exp2nextreg(fs, &args);  /* close last argument */
     nparams = fs->freereg - (base+1);
   }
+#if defined(GRIT_POWER_FASTCALL)
+  if (fast >= 0 && nparams != LUA_MULTRET)
+    luaK_codeABC(fs, OP_FASTCALL, base, fast, 0);
+#else
+  UNUSED(fast);
+#endif
   init_exp(f, VCALL, luaK_codeABC(fs, OP_CALL, base, nparams+1, 2));
   luaK_fixline(fs, line);
   /* call removes function and arguments and leaves one result (unless
@@ -1334,6 +1412,11 @@ static int suffixedcondexp (LexState *ls, expdesc *v) {
 #if defined(GRIT_POWER_SAFENAV)
   int exits = NO_JUMP, exited = 0;
 #endif
+#if defined(GRIT_POWER_FASTCALL)
+  TString *first = (ls->t.token == TK_NAME) ? ls->t.seminfo.ts : NULL;
+  TString *second = NULL;
+  int path = (first != NULL) ? 1 : 0;
+#endif
   primaryexp(ls, v);
   for (;;) {
 #if defined(GRIT_POWER_SAFENAV)
@@ -1346,8 +1429,20 @@ static int suffixedcondexp (LexState *ls, expdesc *v) {
       exited = 0;
     }
 #endif
+#if defined(GRIT_POWER_FASTCALL)
+    if (ls->t.token != '.' && ls->t.token != '(' && ls->t.token != TK_STRING && ls->t.token != '{')
+      path = 0;
+#endif
     switch (ls->t.token) {
       case '.': {  /* fieldsel */
+#if defined(GRIT_POWER_FASTCALL)
+        if (path == 1 && luaX_lookahead(ls) == TK_NAME) {
+          second = ls->lookahead.seminfo.ts;
+          path = 2;
+        }
+        else
+          path = 0;
+#endif
         fieldsel(ls, v);
         break;
       }
@@ -1363,7 +1458,7 @@ static int suffixedcondexp (LexState *ls, expdesc *v) {
         luaX_next(ls);
         codename(ls, &key);
         luaK_self(fs, v, &key);
-        funcargs(ls, v);
+        funcargs(ls, v, -1);
         break;
       }
 #if defined(GRIT_POWER_JOAAT)
@@ -1371,7 +1466,12 @@ static int suffixedcondexp (LexState *ls, expdesc *v) {
 #endif
       case '(': case TK_STRING: case '{' /*}*/: {  /* funcargs */
         luaK_exp2nextreg(fs, v);
-        funcargs(ls, v);
+#if defined(GRIT_POWER_FASTCALL)
+        funcargs(ls, v, (path != 0) ? fastid(first, (path == 2) ? second : NULL) : -1);
+        path = 0;
+#else
+        funcargs(ls, v, -1);
+#endif
         break;
       }
       default: {
@@ -1802,6 +1902,10 @@ static void restassign (LexState *ls, struct LHS_assign *lh, int nvars) {
     struct LHS_assign nv;
     nv.prev = lh;
     suffixedexp(ls, &nv.v);
+#if defined(GRIT_POWER_IMPORT)
+    if (nv.v.k == VIMPORT)
+      luaK_importvar(ls->fs, &nv.v);
+#endif
     if (!vkisindexed(nv.v.k))
       check_conflict(ls, lh, &nv.v);
     enterlevel(ls);  /* control recursion depth */
@@ -1864,6 +1968,43 @@ static void breakstat (LexState *ls, int line) {
 }
 
 
+#if defined(GRIT_POWER_CONTINUE)
+static int continuefollows (int t) {
+  switch (t) {
+    case '=': case ',': case '.': case '[': case ':':
+    case '(': case '{': case TK_STRING: case TK_IN:
+#if defined(GRIT_POWER_JOAAT)
+    case TK_HASH:
+#endif
+#if defined(GRIT_POWER_SAFENAV)
+    case '?':
+#endif
+      return 0;
+    default:
+#if defined(GRIT_POWER_COMPOUND)
+      if (opeqexpr(t))
+        return 0;
+#endif
+      return 1;
+  }
+}
+
+
+static void continuestat (LexState *ls, int line) {
+  BlockCnt *bl;
+  for (bl = ls->fs->bl; bl != NULL; bl = bl->previous) {
+    if (bl->isloop)
+      goto ok;
+  }
+  luaX_syntaxerror(ls, "continue outside loop");
+ ok:
+  bl->hascont = 1;
+  luaX_next(ls);
+  newgotoentry(ls, ls->ctnl, line);
+}
+#endif
+
+
 /*
 ** Check whether there is already a label with the given 'name' at
 ** current function.
@@ -1898,6 +2039,10 @@ static void whilestat (LexState *ls, int line) {
   enterblock(fs, &bl, 1);
   checknext(ls, TK_DO);
   block(ls);
+#if defined(GRIT_POWER_CONTINUE)
+  if (bl.hascont)
+    newlabelentry(ls, &ls->dyd->label, ls->ctnl, 0, whileinit);
+#endif
   luaK_jumpto(fs, whileinit);
   check_match(ls, TK_END, TK_WHILE, line);
   leaveblock(fs);
@@ -1916,6 +2061,17 @@ static void repeatstat (LexState *ls, int line) {
   luaX_next(ls);  /* skip REPEAT */
   statlist(ls);
   check_match(ls, TK_UNTIL, TK_REPEAT, line);
+#if defined(GRIT_POWER_CONTINUE)
+  if (bl1.hascont) {
+    int label = newlabelentry(ls, &ls->dyd->label, ls->ctnl, 0, luaK_getlabel(fs));
+    int saved = fs->untilref;
+    fs->untilref = -1;
+    condexit = cond(ls);
+    ls->dyd->label.arr[label].nactvar = cast_short((fs->untilref + 1 > bl2.nactvar) ? fs->untilref + 1 : bl2.nactvar);
+    fs->untilref = saved;
+  }
+  else
+#endif
   condexit = cond(ls);  /* read condition (inside scope block) */
   if (bl2.upval) {  /* upvalues? */
     int exit = luaK_jump(fs);  /* normal exit must jump over fix */
@@ -1977,6 +2133,10 @@ static void forbody (LexState *ls, int base, int line, int nvars, int isgen) {
   luaK_reserveregs(fs, nvars);
   block(ls);
   leaveblock(fs);  /* end of scope for declared variables */
+#if defined(GRIT_POWER_CONTINUE)
+  if (fs->bl->hascont)
+    newlabelentry(ls, &ls->dyd->label, ls->ctnl, 0, luaK_getlabel(fs));
+#endif
   fixforjump(fs, prep, luaK_getlabel(fs), 0);
   if (isgen) {  /* generic for? */
     luaK_codeABC(fs, OP_TFORCALL, base, 0, nvars);
@@ -2343,6 +2503,10 @@ static void funcstat (LexState *ls, int line) {
   expdesc v, b;
   luaX_next(ls);  /* skip FUNCTION */
   ismethod = funcname(ls, &v);
+#if defined(GRIT_POWER_IMPORT)
+  if (v.k == VIMPORT)
+    luaK_importvar(ls->fs, &v);
+#endif
   check_readonly(ls, &v);
   body(ls, &b, ismethod, line);
   luaK_storevar(ls->fs, &v, &b);
@@ -2393,6 +2557,10 @@ static void exprstat (LexState *ls) {
   FuncState *fs = ls->fs;
   struct LHS_assign v;
   int exits = suffixedcondexp(ls, &v.v);
+#if defined(GRIT_POWER_IMPORT)
+  if (v.v.k == VIMPORT)
+    luaK_importvar(fs, &v.v);
+#endif
   if (ls->t.token == '=' || ls->t.token == ','
 #if defined(GRIT_POWER_INTABLE)
       || ls->t.token == TK_IN
@@ -2525,8 +2693,9 @@ static void statement (LexState *ls) {
       gotostat(ls, line);
       break;
     }
-#if LUA_COMPAT_GLOBAL
+#if LUA_COMPAT_GLOBAL || defined(GRIT_POWER_CONTINUE)
     case TK_NAME: {
+#if LUA_COMPAT_GLOBAL
       /* compatibility code to parse global keyword when "global"
          is not reserved */
       if (ls->t.seminfo.ts == ls->glbn) {  /* current = "global"? */
@@ -2538,6 +2707,13 @@ static void statement (LexState *ls) {
           break;
         }
       }  /* else... */
+#endif
+#if defined(GRIT_POWER_CONTINUE)
+      if (ls->t.seminfo.ts == ls->ctnn && continuefollows(luaX_lookahead(ls))) {
+        continuestat(ls, line);
+        break;
+      }
+#endif
     }
 #endif
     /* FALLTHROUGH */

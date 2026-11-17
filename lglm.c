@@ -1702,6 +1702,102 @@ int luaglm_distance(lua_State *L) {
   return 1;
 }
 
+#if defined(GRIT_POWER_FASTCALL)
+static int glm_fastvector (StkId ra, int nargs, int n) {
+  vec4 v;
+  int i;
+  if (nargs != n)
+    return -1;
+  glm_vec4_zero(v);
+  for (i = 0; i < n; i++) {
+    const TValue *o = s2v(ra + 1 + i);
+    if (ttisinteger(o))
+      v[i] = glm_cf(ivalue(o));
+    else if (ttisfloat(o))
+      v[i] = glm_cf(fltvalue(o));
+    else
+      return -1;
+  }
+  glm_vid_op(ra, vvaltag(n), glm_vec4_copy, v);
+  return 1;
+}
+
+
+int luaglm_fastcall (lua_State *L, int id, StkId ra, int nargs) {
+  TValue *o1 = s2v(ra + 1);
+  TValue *o2 = s2v(ra + 2);
+  UNUSED(L);
+  switch (id) {
+    case LUA_FASTVEC2: return glm_fastvector(ra, nargs, 2);
+    case LUA_FASTVEC3: return glm_fastvector(ra, nargs, 3);
+    case LUA_FASTVEC4: return glm_fastvector(ra, nargs, 4);
+    case LUA_FASTLENGTH: {
+      if (nargs < 1)
+        return -1;
+      if (ttisinteger(o1)) {
+        setivalue(s2v(ra), 1);
+      }
+      else if (ttisnumber(o1)) {
+        setfltvalue(s2v(ra), l_mathop(1.0));
+      }
+      else if (ttisvector(o1))
+        lvec_len(o1, ra, 0);
+      else
+        return -1;
+      return 1;
+    }
+    case LUA_FASTDISTANCE: {
+      if (nargs < 2)
+        return -1;
+      if (ttisvector(o1) && tteq(o1, o2)) {
+        float result;
+        switch (vvaltt(o1)) {
+          case LUA_VVECTOR2: result = glm_vec2_distance(glm_v2(o1), glm_v2(o2)); break;
+          case LUA_VVECTOR3: result = glm_vec3_distance(glm_v3(o1), glm_v3(o2)); break;
+          default: result = glm_vec4_distance(glm_vid(o1), glm_vid(o2)); break;
+        }
+        setfltvalue(s2v(ra), cast_num(result));
+      }
+      else if (ttisinteger(o1) && ttisinteger(o2)) {
+        lua_Integer i = luaL_intop(-, ivalue(o1), ivalue(o2));
+        setivalue(s2v(ra), l_absI(i));
+      }
+      else if (ttisnumber(o1) && ttisnumber(o2)) {
+        setfltvalue(s2v(ra), l_mathop(fabs)(nvalue(o1) - nvalue(o2)));
+      }
+      else
+        return -1;
+      return 1;
+    }
+    case LUA_FASTDOT: {
+      if (nargs < 2)
+        return -1;
+      if (ttisvector(o1) && tteq(o1, o2)) {
+        float dot;
+        switch (vvaltt(o1)) {
+          case LUA_VVECTOR2: dot = glm_vec2_dot(glm_v2(o1), glm_v2(o2)); break;
+          case LUA_VVECTOR3: dot = glm_vec3_dot(glm_v3(o1), glm_v3(o2)); break;
+          default: dot = glm_vec4_dot(glm_vid(o1), glm_vid(o2)); break;
+        }
+        setfltvalue(s2v(ra), cast_num(dot));
+      }
+      else if (ttisinteger(o1) && ttisinteger(o2)) {
+        setivalue(s2v(ra), ivalue(o1) * ivalue(o2));
+      }
+      else if (ttisnumber(o1) && ttisnumber(o2)) {
+        setfltvalue(s2v(ra), nvalue(o1) * nvalue(o2));
+      }
+      else
+        return -1;
+      return 1;
+    }
+    default:
+      return -1;
+  }
+}
+#endif
+
+
 int luaglm_dot(lua_State *L) {
   TValue *o1 = (TValue *)glm_index2value(L, 1);
   TValue *o2 = (TValue *)glm_index2value(L, 2);

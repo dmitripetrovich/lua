@@ -813,8 +813,44 @@ void luaK_vapar2local (FuncState *fs, expdesc *var) {
 ** Ensure that expression 'e' is not a variable (nor a <const>).
 ** (Expression still may have jump lists.)
 */
+#if defined(GRIT_POWER_IMPORT)
+static void dischargeimport (FuncState *fs, expdesc *e) {
+  Proto *f = fs->f;
+  int n = e->u.imp.n;
+  int reg = fs->freereg;
+  int oldsize = f->sizeimports;
+  int i;
+  luaM_growvector(fs->ls->L, f->imports, fs->nimports, f->sizeimports, Import, MAXARG_Bx, "imports");
+  while (oldsize < f->sizeimports) {
+    f->imports[oldsize].env = NULL;
+    f->imports[oldsize].epoch = 0;
+    setnilvalue(&f->imports[oldsize].value);
+    oldsize++;
+  }
+  f->imports[fs->nimports].up = e->u.imp.up;
+  f->imports[fs->nimports].n = cast_byte(n);
+  for (i = 0; i < 3; i++)
+    f->imports[fs->nimports].k[i] = (i < n) ? e->u.imp.k[i] : 0;
+  luaK_reserveregs(fs, 1);
+  luaK_codeABx(fs, OP_GETIMPORT, reg, cast_uint(fs->nimports));
+  fs->nimports++;
+  luaK_codeABC(fs, OP_GETTABUP, reg, e->u.imp.up, e->u.imp.k[0]);
+  for (i = 1; i < n; i++)
+    luaK_codeABC(fs, OP_GETFIELD, reg, reg, e->u.imp.k[i]);
+  e->u.info = reg;
+  e->k = VNONRELOC;
+}
+#endif
+
+
 void luaK_dischargevars (FuncState *fs, expdesc *e) {
   switch (e->k) {
+#if defined(GRIT_POWER_IMPORT)
+    case VIMPORT: {
+      dischargeimport(fs, e);
+      break;
+    }
+#endif
     case VCONST: {
       const2exp(const2val(fs, e), e);
       break;
@@ -1109,6 +1145,10 @@ static void codeABRK (FuncState *fs, OpCode o, int A, int B,
 ** Generate code to store result of expression 'ex' into variable 'var'.
 */
 void luaK_storevar (FuncState *fs, expdesc *var, expdesc *ex) {
+#if defined(GRIT_POWER_IMPORT)
+  if (var->k == VIMPORT)
+    luaK_importvar(fs, var);
+#endif
   switch (var->k) {
     case VLOCAL: {
       freeexp(fs, ex);
@@ -1358,6 +1398,62 @@ static void fillidxk (expdesc *t, int idx, expkind k) {
 ** Keys can be literal strings in the constant table or arbitrary
 ** values in registers.
 */
+#if defined(GRIT_POWER_IMPORT)
+int luaK_importable (FuncState *fs, expdesc *v) {
+  if (hasjumps(v))
+    return 0;
+  if (v->k == VIMPORT)
+    return v->u.imp.n < 3;
+  return v->k == VINDEXUP && v->u.ind.idx <= MAXARG_C && fs->f->upvalues[v->u.ind.t].name == fs->ls->envn;
+}
+
+
+int luaK_importnext (FuncState *fs, expdesc *v, expdesc *k) {
+  short key;
+  if (k->k == VKSTR)
+    str2K(fs, k);
+  if (!isKstr(fs, k) || k->u.info > MAXARG_C)
+    return 0;
+  key = cast_short(k->u.info);
+  if (v->k == VINDEXUP) {
+    lu_byte up = v->u.ind.t;
+    short first = v->u.ind.idx;
+    v->u.imp.up = up;
+    v->u.imp.k[0] = first;
+    v->u.imp.n = 1;
+    v->k = VIMPORT;
+  }
+  v->u.imp.k[v->u.imp.n] = key;
+  v->u.imp.n++;
+  return 1;
+}
+
+
+void luaK_importvar (FuncState *fs, expdesc *v) {
+  expdesc key;
+  int n = v->u.imp.n;
+  TString *last = tsvalue(&fs->f->k[v->u.imp.k[n - 1]]);
+  if (n == 2) {
+    lu_byte up = v->u.imp.up;
+    short first = v->u.imp.k[0];
+    v->u.ind.t = up;
+    v->u.ind.idx = first;
+    v->u.ind.keystr = first;
+    v->u.ind.ro = 0;
+    v->k = VINDEXUP;
+  }
+  else
+    v->u.imp.n = cast_byte(n - 1);
+  luaK_exp2anyregup(fs, v);
+  key.k = VKSTR;
+  key.u.strval = last;
+  key.t = NO_JUMP;
+  key.f = NO_JUMP;
+  luaK_indexed(fs, v, &key);
+}
+#endif
+
+
 void luaK_indexed (FuncState *fs, expdesc *t, expdesc *k) {
   int keystr = -1;
   if (k->k == VKSTR)

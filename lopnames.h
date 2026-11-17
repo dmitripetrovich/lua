@@ -100,6 +100,12 @@ static const char *const opnames[] = {
   "GETVARG",
   "ERRNNIL",
   "VARARGPREP",
+#if defined(GRIT_POWER_FASTCALL)
+  "FASTCALL",
+#endif
+#if defined(GRIT_POWER_IMPORT)
+  "GETIMPORT",
+#endif
   "EXTRAARG",
   NULL
 };

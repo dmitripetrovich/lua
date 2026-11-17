@@ -673,7 +673,15 @@ static l_mem traverseproto (global_State *g, Proto *f) {
     markobjectN(g, f->p[i]);
   for (i = 0; i < f->sizelocvars; i++)  /* mark local-variable names */
     markobjectN(g, f->locvars[i].varname);
+#if defined(GRIT_POWER_IMPORT)
+  for (i = 0; i < f->sizeimports; i++) {
+    markobjectN(g, f->imports[i].env);
+    markvalue(g, &f->imports[i].value);
+  }
+  return 1 + f->sizek + f->sizeupvalues + f->sizep + f->sizelocvars + f->sizeimports;
+#else
   return 1 + f->sizek + f->sizeupvalues + f->sizep + f->sizelocvars;
+#endif
 }
 
 

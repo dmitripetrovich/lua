@@ -371,6 +371,12 @@ typedef struct GAME_SD global_State {
 #if defined(GRIT_POWER_ALLOWANCE)
   lua_Allowance allowf;
 #endif
+#if defined(GRIT_POWER_FASTCALL)
+  lua_CFunction fastfn[LUA_NUMFAST];
+#endif
+#if defined(GRIT_POWER_IMPORT)
+  lua_Unsigned importepoch;
+#endif
 #if defined(GRIT_POWER_BUDGET)
   l_mem budget;
   l_mem basebudget;

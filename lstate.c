@@ -377,6 +377,13 @@ LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud, unsigned seed) {
 #if defined(GRIT_POWER_ALLOWANCE)
   g->allowf = NULL;
 #endif
+#if defined(GRIT_POWER_FASTCALL)
+  for (i = 0; i < LUA_NUMFAST; i++)
+    g->fastfn[i] = NULL;
+#endif
+#if defined(GRIT_POWER_IMPORT)
+  g->importepoch = 1;
+#endif
 #if defined(GRIT_POWER_BUDGET)
   g->budgetf = NULL;
   g->ud_budget = NULL;

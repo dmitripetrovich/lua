@@ -336,6 +336,33 @@ static void loadDebug (LoadState *S, Proto *f) {
 }
 
 
+#if defined(GRIT_POWER_IMPORT)
+static void loadImports (LoadState *S, Proto *f) {
+  int i, j;
+  int n = loadInt(S);
+  f->imports = luaM_newvectorchecked(S->L, n, Import);
+  f->sizeimports = n;
+  for (i = 0; i < n; i++) {
+    f->imports[i].env = NULL;
+    f->imports[i].epoch = 0;
+    setnilvalue(&f->imports[i].value);
+  }
+  for (i = 0; i < n; i++) {
+    f->imports[i].up = loadByte(S);
+    f->imports[i].n = loadByte(S);
+    if (f->imports[i].n < 1 || f->imports[i].n > 3 || f->imports[i].up >= f->sizeupvalues)
+      error(S, "bad import");
+    for (j = 0; j < 3; j++) {
+      int k = loadInt(S);
+      if (j < f->imports[i].n && (k < 0 || k >= f->sizek || !ttisshrstring(&f->k[k])))
+        error(S, "bad import");
+      f->imports[i].k[j] = cast_short(k);
+    }
+  }
+}
+#endif
+
+
 static void loadFunction (LoadState *S, Proto *f) {
   f->linedefined = loadInt(S);
   f->lastlinedefined = loadInt(S);
@@ -348,6 +375,9 @@ static void loadFunction (LoadState *S, Proto *f) {
   loadCode(S, f);
   loadConstants(S, f);
   loadUpvalues(S, f);
+#if defined(GRIT_POWER_IMPORT)
+  loadImports(S, f);
+#endif
   loadProtos(S, f);
   loadString(S, f, &f->source);
   loadDebug(S, f);

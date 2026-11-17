@@ -268,6 +268,20 @@ static void dumpDebug (DumpState *D, const Proto *f) {
 }
 
 
+#if defined(GRIT_POWER_IMPORT)
+static void dumpImports (DumpState *D, const Proto *f) {
+  int i, j;
+  dumpInt(D, f->sizeimports);
+  for (i = 0; i < f->sizeimports; i++) {
+    dumpByte(D, f->imports[i].up);
+    dumpByte(D, f->imports[i].n);
+    for (j = 0; j < 3; j++)
+      dumpInt(D, f->imports[i].k[j]);
+  }
+}
+#endif
+
+
 static void dumpFunction (DumpState *D, const Proto *f) {
   dumpInt(D, f->linedefined);
   dumpInt(D, f->lastlinedefined);
@@ -277,6 +291,9 @@ static void dumpFunction (DumpState *D, const Proto *f) {
   dumpCode(D, f);
   dumpConstants(D, f);
   dumpUpvalues(D, f);
+#if defined(GRIT_POWER_IMPORT)
+  dumpImports(D, f);
+#endif
   dumpProtos(D, f);
   dumpString(D, D->strip ? NULL : f->source);
   dumpDebug(D, f);

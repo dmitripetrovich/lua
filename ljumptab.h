@@ -112,6 +112,12 @@ static const void *const disptab[NUM_OPCODES] = {
 &&L_OP_GETVARG,
 &&L_OP_ERRNNIL,
 &&L_OP_VARARGPREP,
+#if defined(GRIT_POWER_FASTCALL)
+&&L_OP_FASTCALL,
+#endif
+#if defined(GRIT_POWER_IMPORT)
+&&L_OP_GETIMPORT,
+#endif
 &&L_OP_EXTRAARG
 
 };

@@ -296,6 +296,10 @@ Proto *luaF_newproto (lua_State *L) {
   f->sizeabslineinfo = 0;
   f->upvalues = NULL;
   f->sizeupvalues = 0;
+#if defined(GRIT_POWER_IMPORT)
+  f->imports = NULL;
+  f->sizeimports = 0;
+#endif
   f->numparams = 0;
   f->flag = 0;
   f->maxstacksize = 0;
@@ -310,6 +314,9 @@ Proto *luaF_newproto (lua_State *L) {
 
 lu_mem luaF_protosize (Proto *p) {
   lu_mem sz = cast(lu_mem, sizeof(Proto)) + cast_uint(p->sizep) * sizeof(Proto*) + cast_uint(p->sizek) * sizeof(TValue) + cast_uint(p->sizelocvars) * sizeof(LocVar) + cast_uint(p->sizeupvalues) * sizeof(Upvaldesc);
+#if defined(GRIT_POWER_IMPORT)
+  sz += cast_uint(p->sizeimports) * sizeof(Import);
+#endif
   if (!(p->flag & PF_FIXED)) {
     sz += cast_uint(p->sizecode) * sizeof(Instruction);
     sz += cast_uint(p->sizelineinfo) * sizeof(lu_byte);
@@ -329,6 +336,9 @@ void luaF_freeproto (lua_State *L, Proto *f) {
   luaM_freearray(L, f->k, cast_sizet(f->sizek));
   luaM_freearray(L, f->locvars, cast_sizet(f->sizelocvars));
   luaM_freearray(L, f->upvalues, cast_sizet(f->sizeupvalues));
+#if defined(GRIT_POWER_IMPORT)
+  luaM_freearray(L, f->imports, cast_sizet(f->sizeimports));
+#endif
   luaM_free(L, f);
 }
 

@@ -917,9 +917,14 @@ LUA_API void lua_createtable (lua_State *L, int narray, int nrec) {
 }
 
 
-#if defined(GRIT_POWER_READONLY)
+#if defined(GRIT_POWER_IMPORT)
+#define api_checkwritable(L,t)  \
+  { if (l_unlikely(isreadonly(t))) luaG_readonlyerror(L); if (l_unlikely(isimported(t))) luaC_unimport(G(L), t); }
+#elif defined(GRIT_POWER_READONLY)
 #define api_checkwritable(L,t)  \
   if (l_unlikely(isreadonly(t))) luaG_readonlyerror(L)
+#endif
+#if defined(GRIT_POWER_READONLY)
 
 LUA_API int lua_isreadonly (lua_State *L, int idx) {
   const TValue *o;
@@ -1611,6 +1616,16 @@ void lua_setwarnf (lua_State *L, lua_WarnFunction f, void *ud) {
   G(L)->warnf = f;
   lua_unlock(L);
 }
+
+
+#if defined(GRIT_POWER_FASTCALL)
+LUA_API void lua_setfastcall (lua_State *L, int id, lua_CFunction f) {
+  lua_lock(L);
+  api_check(L, id >= 0 && id < LUA_NUMFAST, "invalid fast call");
+  G(L)->fastfn[id] = f;
+  lua_unlock(L);
+}
+#endif
 
 
 #if defined(GRIT_POWER_ALLOWANCE)

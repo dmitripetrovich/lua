@@ -856,5 +856,16 @@ LUAMOD_API int luaopen_base (lua_State *L) {
   /* set global _VERSION */
   lua_pushliteral(L, LUA_VERSION);
   lua_setfield(L, -2, "_VERSION");
+#if defined(GRIT_POWER_FASTCALL)
+  lua_setfastcall(L, LUA_FASTTYPE, luaB_type);
+  lua_setfastcall(L, LUA_FASTRAWEQUAL, luaB_rawequal);
+  lua_setfastcall(L, LUA_FASTRAWGET, luaB_rawget);
+  lua_setfastcall(L, LUA_FASTVEC2, luaglm_vec2);
+  lua_setfastcall(L, LUA_FASTVEC3, luaglm_vec3);
+  lua_setfastcall(L, LUA_FASTVEC4, luaglm_vec4);
+  lua_setfastcall(L, LUA_FASTLENGTH, luaglm_length);
+  lua_setfastcall(L, LUA_FASTDISTANCE, luaglm_distance);
+  lua_setfastcall(L, LUA_FASTDOT, luaglm_dot);
+#endif
   return 1;
 }

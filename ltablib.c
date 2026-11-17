@@ -486,6 +486,31 @@ static int tclone (lua_State *L) {
 }
 #endif
 
+#if defined(GRIT_POWER_FINDSPLIT)
+static int tfind (lua_State *L) {
+  lua_Integer i;
+  lua_Integer first;
+  luaL_checktype(L, 1, LUA_TTABLE);
+  luaL_checkany(L, 2);
+  i = luaL_optinteger(L, 3, 1);
+  luaL_argcheck(L, i >= 1, 3, "index out of range");
+  first = i;
+  for (;; i++) {
+    if (lua_rawgeti(L, 1, i) == LUA_TNIL)
+      break;
+    if (lua_rawequal(L, -1, 2)) {
+      luaL_checkhook(L, l_castS2U(i - first + 1));
+      lua_pushinteger(L, i);
+      return 1;
+    }
+    lua_pop(L, 1);
+  }
+  luaL_checkhook(L, l_castS2U(i - first + 1));
+  lua_pushnil(L);
+  return 1;
+}
+#endif
+
 #if defined(GRIT_POWER_READONLY)
 static int tfreeze (lua_State *L) {
   luaL_checktype(L, 1, LUA_TTABLE);
@@ -526,6 +551,9 @@ static const luaL_Reg tab_funcs[] = {
 #if defined(GRIT_POWER_READONLY)
   {"freeze", tfreeze},
   {"isfrozen", tisfrozen},
+#endif
+#if defined(GRIT_POWER_FINDSPLIT)
+  {"find", tfind},
 #endif
   {NULL, NULL}
 };

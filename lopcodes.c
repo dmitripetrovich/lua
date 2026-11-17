@@ -108,6 +108,12 @@ LUAI_DDEF const lu_byte luaP_opmodes[NUM_OPCODES] = {
  ,opmode(0, 0, 0, 0, 1, iABC)		/* OP_GETVARG */
  ,opmode(0, 0, 0, 0, 0, iABx)		/* OP_ERRNNIL */
  ,opmode(0, 0, 0, 0, 0, iABC)		/* OP_VARARGPREP */
+#if defined(GRIT_POWER_FASTCALL)
+ ,opmode(0, 0, 0, 0, 0, iABC)
+#endif
+#if defined(GRIT_POWER_IMPORT)
+ ,opmode(0, 0, 0, 0, 1, iABx)
+#endif
  ,opmode(0, 0, 0, 0, 0, iAx)		/* OP_EXTRAARG */
 };
 

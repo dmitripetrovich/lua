@@ -347,6 +347,13 @@ OP_ERRNNIL,/*	A Bx	raise error if R[A] ~= nil (K[Bx - 1] is global name)*/
 
 OP_VARARGPREP,/* 	(adjust varargs)				*/
 
+#if defined(GRIT_POWER_FASTCALL)
+OP_FASTCALL,
+#endif
+#if defined(GRIT_POWER_IMPORT)
+OP_GETIMPORT,
+#endif
+
 OP_EXTRAARG/*	Ax	extra (larger) argument for previous opcode	*/
 } OpCode;
 

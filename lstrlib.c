@@ -137,6 +137,64 @@ static int str_upper (lua_State *L) {
 }
 
 
+#if defined(GRIT_POWER_FINDSPLIT)
+#define SPLITPIECE	64
+
+static int str_splitby (lua_State *L) {
+  size_t l, lsep;
+  const char *s = luaL_checklstring(L, 1, &l);
+  const char *sep = luaL_optlstring(L, 2, ",", &lsep);
+  size_t pieces = 0;
+  size_t start = 0;
+  size_t i = 0;
+  lua_Integer n = 0;
+  if (lsep == 0)
+    pieces = l;
+  else {
+    while (i + lsep <= l) {
+      if (memcmp(s + i, sep, lsep) == 0) {
+        pieces++;
+        i += lsep;
+      }
+      else
+        i++;
+    }
+    pieces++;
+  }
+  if (l_unlikely(pieces >= (size_t)INT_MAX || pieces > (MAX_SIZE - l) / SPLITPIECE))
+    return luaL_error(L, "resulting table too large");
+#if defined(GRIT_POWER_ALLOWANCE)
+  if (l_unlikely(!lua_allows(L, pieces * SPLITPIECE + l)))
+    return luaL_error(L, "resulting table too large");
+#endif
+  lua_createtable(L, (int)pieces, 0);
+  if (lsep == 0) {
+    for (i = 0; i < l; i++) {
+      lua_pushlstring(L, s + i, 1);
+      lua_rawseti(L, -2, ++n);
+    }
+  }
+  else {
+    i = 0;
+    while (i + lsep <= l) {
+      if (memcmp(s + i, sep, lsep) == 0) {
+        lua_pushlstring(L, s + start, i - start);
+        lua_rawseti(L, -2, ++n);
+        i += lsep;
+        start = i;
+      }
+      else
+        i++;
+    }
+    lua_pushlstring(L, s + start, l - start);
+    lua_rawseti(L, -2, ++n);
+  }
+  luaL_checkhook(L, l + pieces);
+  return 1;
+}
+#endif
+
+
 /*
 ** MAX_SIZE is limited both by size_t and lua_Integer.
 ** When x <= MAX_SIZE, x can be safely cast to size_t or lua_Integer.
@@ -2138,6 +2196,9 @@ static const luaL_Reg strlib[] = {
   {"lower", str_lower},
   {"match", str_match},
   {"rep", str_rep},
+#if defined(GRIT_POWER_FINDSPLIT)
+  {"split", str_splitby},
+#endif
 #if defined(GRIT_POWER_WOW)
   {"strtrim", str_trim},
   {"strsplit", str_split},
@@ -2181,5 +2242,9 @@ static void createmetatable (lua_State *L) {
 LUAMOD_API int luaopen_string (lua_State *L) {
   luaL_newlib(L, strlib);
   createmetatable(L);
+#if defined(GRIT_POWER_FASTCALL)
+  lua_setfastcall(L, LUA_FASTSTRLEN, str_len);
+  lua_setfastcall(L, LUA_FASTSTRBYTE, str_byte);
+#endif
   return 1;
 }

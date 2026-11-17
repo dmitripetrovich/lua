@@ -357,6 +357,18 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
     const TValue *tm;  /* '__newindex' metamethod */
     if (hres != HNOTATABLE) {  /* is 't' a table? */
       Table *h = hvalue(t);  /* save 't' table */
+#if defined(GRIT_POWER_IMPORT)
+      if (l_unlikely(isimported(h))) {
+        luaC_unimport(G(L), h);
+        if (!isreadonly(h)) {
+          hres = luaH_pset(h, key, val);
+          if (hres == HOK) {
+            luaC_barrierback(L, obj2gco(h), val);
+            return;
+          }
+        }
+      }
+#endif
       tm = fasttm(L, h->metatable, TM_NEWINDEX);  /* get metamethod */
       if (tm == NULL) {  /* no metamethod? */
 #if defined(GRIT_POWER_READONLY)
@@ -401,6 +413,10 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
         hres = HNOTFOUND;
         continue;
       }
+#endif
+#if defined(GRIT_POWER_IMPORT)
+      if (l_unlikely(isimported(h)))
+        luaC_unimport(G(L), h);
 #endif
       hres = luaH_pset(h, key, val);
       if (hres == HOK) {
@@ -1294,6 +1310,206 @@ void luaV_finishOp (lua_State *L) {
 #define vmdispatch(o)	switch(o)
 #define vmcase(l)	case l:
 #define vmbreak		break
+
+
+#if defined(GRIT_POWER_IMPORT)
+static int resolveimport (lua_State *L, Proto *p, Import *im, const TValue *env, StkId ra) {
+  global_State *g = G(L);
+  Table *chain[3];
+  TValue v;
+  const TValue *t = env;
+  int i;
+  for (i = 0; i < im->n; i++) {
+    Table *h;
+    if (!ttistable(t))
+      return 0;
+    h = hvalue(t);
+    if (h->metatable != NULL && gfasttm(g, h->metatable, TM_MODE) != NULL)
+      return 0;
+    if (tagisempty(luaH_getshortstr(h, tsvalue(&p->k[im->k[i]]), &v)))
+      return 0;
+    chain[i] = h;
+    t = &v;
+  }
+  for (i = 0; i < im->n; i++) {
+    l_setbit(chain[i]->marked, IMPORTBIT);
+    if (chain[i]->metatable != NULL)
+      l_setbit(chain[i]->metatable->marked, IMPORTBIT);
+  }
+  im->env = hvalue(env);
+  im->epoch = g->importepoch;
+  setobj(L, &im->value, &v);
+  luaC_objbarrier(L, p, im->env);
+  if (iscollectable(&v))
+    luaC_objbarrier(L, p, gcvalue(&v));
+  setobj2s(L, ra, &v);
+  return 1;
+}
+#endif
+
+
+#if defined(GRIT_POWER_FASTCALL)
+static size_t fastendpos (lua_Integer pos, size_t len) {
+  if (pos > (lua_Integer)len)
+    return len;
+  else if (pos >= 0)
+    return (size_t)pos;
+  else if (pos < -(lua_Integer)len)
+    return 0;
+  else
+    return len + (size_t)pos + 1;
+}
+
+
+static size_t fastposrelat (lua_Integer pos, size_t len) {
+  if (pos > 0)
+    return (size_t)pos;
+  else if (pos == 0)
+    return 1;
+  else if (pos < -(lua_Integer)len)
+    return 1;
+  else
+    return len + (size_t)pos + 1;
+}
+
+
+static int fastcall (lua_State *L, int id, StkId ra, int nargs) {
+  TValue *a = s2v(ra + 1);
+  TValue *b = s2v(ra + 2);
+  int i;
+  int pick;
+  switch (id) {
+    case LUA_FASTABS: {
+      if (nargs < 1)
+        return -1;
+      if (ttisinteger(a)) {
+        lua_Integer n = ivalue(a);
+        if (n < 0)
+          n = l_castU2S(0u - l_castS2U(n));
+        setivalue(s2v(ra), n);
+      }
+      else if (ttisfloat(a)) {
+        setfltvalue(s2v(ra), l_mathop(fabs)(fltvalue(a)));
+      }
+      else
+        return -1;
+      return 1;
+    }
+    case LUA_FASTFLOOR:
+    case LUA_FASTCEIL: {
+      lua_Number d;
+      lua_Integer n;
+      if (nargs < 1)
+        return -1;
+      if (ttisinteger(a)) {
+        setobj2s(L, ra, a);
+        return 1;
+      }
+      if (!ttisfloat(a))
+        return -1;
+      d = (id == LUA_FASTFLOOR) ? l_mathop(floor)(fltvalue(a)) : l_mathop(ceil)(fltvalue(a));
+      if (lua_numbertointeger(d, &n)) {
+        setivalue(s2v(ra), n);
+      }
+      else {
+        setfltvalue(s2v(ra), d);
+      }
+      return 1;
+    }
+    case LUA_FASTSQRT:
+    case LUA_FASTSIN:
+    case LUA_FASTCOS: {
+      lua_Number x;
+      if (nargs < 1 || !ttisnumber(a))
+        return -1;
+      x = nvalue(a);
+      if (id == LUA_FASTSQRT)
+        x = l_mathop(sqrt)(x);
+      else if (id == LUA_FASTSIN)
+        x = l_mathop(sin)(x);
+      else
+        x = l_mathop(cos)(x);
+      setfltvalue(s2v(ra), x);
+      return 1;
+    }
+    case LUA_FASTMIN:
+    case LUA_FASTMAX: {
+      if (nargs < 1)
+        return -1;
+      for (i = 0; i < nargs; i++) {
+        if (!ttisnumber(s2v(ra + 1 + i)))
+          return -1;
+      }
+      pick = 1;
+      for (i = 2; i <= nargs; i++) {
+        if (id == LUA_FASTMIN ? LTnum(s2v(ra + i), s2v(ra + pick)) : LTnum(s2v(ra + pick), s2v(ra + i)))
+          pick = i;
+      }
+      setobjs2s(L, ra, ra + pick);
+      return 1;
+    }
+    case LUA_FASTCLAMP: {
+      if (nargs < 3 || !ttisnumber(a) || !ttisnumber(b) || !ttisnumber(s2v(ra + 3)))
+        return -1;
+      setfltvalue(s2v(ra), l_mathop(fmin)(l_mathop(fmax)(nvalue(a), nvalue(b)), nvalue(s2v(ra + 3))));
+      return 1;
+    }
+    case LUA_FASTTYPE: {
+      if (nargs < 1 || ttisvector(a) || ttismatrix(a))
+        return -1;
+      setsvalue2s(L, ra, luaS_new(L, ttypename(ttype(a))));
+      return 1;
+    }
+    case LUA_FASTRAWEQUAL: {
+      if (nargs < 2)
+        return -1;
+      if (luaV_rawequalobj(a, b)) {
+        setbtvalue(s2v(ra));
+      }
+      else {
+        setbfvalue(s2v(ra));
+      }
+      return 1;
+    }
+    case LUA_FASTRAWGET: {
+      if (nargs < 2 || !ttistable(a))
+        return -1;
+      if (tagisempty(luaH_get(hvalue(a), b, s2v(ra)))) {
+        setnilvalue(s2v(ra));
+      }
+      return 1;
+    }
+    case LUA_FASTSTRLEN: {
+      if (nargs < 1 || !(ttisshrstring(a) || ttislngstring(a)))
+        return -1;
+      setivalue(s2v(ra), cast_st2S(tsslen(tsvalue(a))));
+      return 1;
+    }
+    case LUA_FASTSTRBYTE: {
+      lua_Integer pi = 1;
+      size_t l;
+      size_t posi;
+      size_t pose;
+      if (nargs < 1 || nargs > 2 || !(ttisshrstring(a) || ttislngstring(a)))
+        return -1;
+      if (nargs == 2) {
+        if (!ttisinteger(b))
+          return -1;
+        pi = ivalue(b);
+      }
+      l = tsslen(tsvalue(a));
+      posi = fastposrelat(pi, l);
+      pose = fastendpos(pi, l);
+      if (posi > pose)
+        return 0;
+      setivalue(s2v(ra), cast_uchar(getstr(tsvalue(a))[posi - 1]));
+      return 1;
+    }
+    default:
+      return luaglm_fastcall(L, id, ra, nargs);
+  }
+}
+#endif
 
 
 LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
@@ -2212,6 +2428,51 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         updatebase(ci);  /* function has new base after adjustment */
         vmbreak;
       }
+#if defined(GRIT_POWER_IMPORT)
+      vmcase(OP_GETIMPORT) {
+        StkId ra = RA(i);
+        Import *im = &cl->p->imports[GETARG_Bx(i)];
+        const TValue *env = cl->upvals[im->up]->v.p;
+        if (ttistable(env) && im->env == hvalue(env) && im->epoch == G(L)->importepoch) {
+          setobj2s(L, ra, &im->value);
+          pc += im->n;
+        }
+        else if (resolveimport(L, cl->p, im, env, ra))
+          pc += im->n;
+        vmbreak;
+      }
+#endif
+#if defined(GRIT_POWER_FASTCALL)
+      vmcase(OP_FASTCALL) {
+        StkId ra = RA(i);
+        Instruction call = *pc;
+        int id = GETARG_B(i);
+        int nargs = GETARG_B(call) - 1;
+        if (GET_OPCODE(call) == OP_CALL && nargs >= 0 && !L->hookmask && id < LUA_NUMFAST && ttislcf(s2v(ra)) && fvalue(s2v(ra)) == G(L)->fastfn[id]
+#if defined(GRIT_POWER_BUDGET)
+            && G(L)->budget > 1
+#endif
+           ) {
+          int n;
+          savestate(L, ci);
+          n = fastcall(L, id, ra, nargs);
+          if (n >= 0) {
+            int nres = GETARG_C(call) - 1;
+#if defined(GRIT_POWER_BUDGET)
+            G(L)->budget--;
+#endif
+            if (nres < 0)
+              L->top.p = ra + n;
+            else {
+              for (; n < nres; n++)
+                setnilvalue(s2v(ra + n));
+            }
+            pc++;
+          }
+        }
+        vmbreak;
+      }
+#endif
       vmcase(OP_EXTRAARG) {
         lua_assert(0);
         vmbreak;

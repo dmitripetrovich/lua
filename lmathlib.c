@@ -933,5 +933,16 @@ LUAMOD_API int luaopen_math (lua_State *L) {
   lua_pushnumber(L, (lua_Number)FLT_EPSILON); lua_setfield(L, -2, "feps");
 #endif
   setrandfunc(L);
+#if defined(GRIT_POWER_FASTCALL)
+  lua_setfastcall(L, LUA_FASTABS, math_abs);
+  lua_setfastcall(L, LUA_FASTFLOOR, math_floor);
+  lua_setfastcall(L, LUA_FASTCEIL, math_ceil);
+  lua_setfastcall(L, LUA_FASTSQRT, math_sqrt);
+  lua_setfastcall(L, LUA_FASTMIN, math_min);
+  lua_setfastcall(L, LUA_FASTMAX, math_max);
+  lua_setfastcall(L, LUA_FASTSIN, math_sin);
+  lua_setfastcall(L, LUA_FASTCOS, math_cos);
+  lua_setfastcall(L, LUA_FASTCLAMP, math_clamp);
+#endif
   return 1;
 }

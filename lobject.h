@@ -568,6 +568,18 @@ typedef struct Udata0 {
 typedef l_uint32 Instruction;
 
 
+#if defined(GRIT_POWER_IMPORT)
+typedef struct Import {
+  struct Table *env;
+  lua_Unsigned epoch;
+  TValue value;
+  short k[3];
+  lu_byte up;
+  lu_byte n;
+} Import;
+#endif
+
+
 /*
 ** Description of an upvalue for function prototypes
 */
@@ -643,6 +655,10 @@ typedef struct Proto {
   Instruction *code;  /* opcodes */
   struct Proto **p;  /* functions defined inside the function */
   Upvaldesc *upvalues;  /* upvalue information */
+#if defined(GRIT_POWER_IMPORT)
+  Import *imports;
+  int sizeimports;
+#endif
   ls_byte *lineinfo;  /* information about source lines (debug information) */
   AbsLineInfo *abslineinfo;  /* idem */
   LocVar *locvars;  /* information about local variables (debug information) */

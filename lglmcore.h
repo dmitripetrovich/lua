@@ -120,6 +120,9 @@ LUAI_FUNC int lglm_trybinTM (lua_State *L, const TValue *p1, const TValue *p2, S
 LUAI_FUNC int lglm_ADDI (lua_State *L, StkId ra, TValue *rb, int imm);
 LUAI_FUNC int lglm_SHRI (lua_State *L, StkId ra, TValue *rb, int imm);
 LUAI_FUNC int lglm_SHLI (lua_State *L, StkId ra, TValue *rb, int imm);
+#if defined(GRIT_POWER_FASTCALL)
+LUAI_FUNC int luaglm_fastcall (lua_State *L, int id, StkId ra, int nargs);
+#endif
 
 /* }================================================================== */
 
