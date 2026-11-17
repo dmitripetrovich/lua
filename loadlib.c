@@ -694,6 +694,7 @@ static const luaL_Reg pk_funcs[] = {
   {"path", NULL},
   {"searchers", NULL},
   {"loaded", NULL},
+  {"config", NULL},
   {NULL, NULL}
 };
 
