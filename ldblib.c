@@ -41,7 +41,7 @@ static void checkstack (lua_State *L, lua_State *L1, int n) {
 
 
 #if !defined(LUA_SANDBOX)
-static int db_getregistry(lua_State *L) {
+static int db_getregistry (lua_State *L) {
   lua_pushvalue(L, LUA_REGISTRYINDEX);
   return 1;
 }
@@ -305,6 +305,7 @@ static int db_setupvalue (lua_State *L) {
   return auxupvalue(L, 0);
 }
 
+
 /*
 ** Check whether a given upvalue from a given closure exists and
 ** returns its index
@@ -442,6 +443,7 @@ static int db_gethook (lua_State *L) {
   lua_pushinteger(L, lua_gethookcount(L1));  /* 3rd result = count */
   return 3;
 }
+
 
 static int db_debug (lua_State *L) {
   for (;;) {

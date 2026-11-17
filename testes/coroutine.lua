@@ -299,7 +299,8 @@ do
   local st, res1, res2 = coroutine.resume(co)   -- continue
   assert(coroutine.status(co) == "dead")
   assert(st and not res1 and res2 == 20)   -- last error (20)
-  assert(track[1] == false and track[2] == 2 and track[3] == 10 and track[4] == 10)
+  assert(track[1] == false and track[2] == 2 and track[3] == 10 and
+         track[4] == 10)
 end
 
 

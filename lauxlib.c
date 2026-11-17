@@ -125,7 +125,8 @@ static int lastlevel (lua_State *L) {
 }
 
 
-LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1, const char *msg, int level) {
+LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1,
+                                const char *msg, int level) {
   luaL_Buffer b;
   lua_Debug ar;
   int last = lastlevel(L1);
@@ -181,14 +182,16 @@ LUALIB_API int luaL_argerror (lua_State *L, int arg, const char *extramsg) {
     if (strcmp(ar.namewhat, "method") == 0) {  /* colon syntax? */
       arg--;  /* do not count (extra) self argument */
       if (arg == 0)  /* error in self argument? */
-        return luaL_error(L, "calling '%s' on bad self (%s)", ar.name, extramsg);
+        return luaL_error(L, "calling '%s' on bad self (%s)",
+                               ar.name, extramsg);
       /* else go through; error in a regular argument */
     }
     argword = "argument";
   }
   if (ar.name == NULL)
     ar.name = (pushglobalfuncname(L, &ar)) ? lua_tostring(L, -1) : "?";
-  return luaL_error(L, "bad %s #%d to '%s' (%s)", argword, arg, ar.name, extramsg);
+  return luaL_error(L, "bad %s #%d to '%s' (%s)",
+                       argword, arg, ar.name, extramsg);
 }
 
 
@@ -434,13 +437,16 @@ LUALIB_API void *luaL_checkudata (lua_State *L, int ud, const char *tname) {
 ** =======================================================
 */
 
-LUALIB_API int luaL_checkoption (lua_State *L, int arg, const char *def, const char *const lst[]) {
-  const char *name = (def) ? luaL_optstring(L, arg, def) : luaL_checkstring(L, arg);
+LUALIB_API int luaL_checkoption (lua_State *L, int arg, const char *def,
+                                 const char *const lst[]) {
+  const char *name = (def) ? luaL_optstring(L, arg, def) :
+                             luaL_checkstring(L, arg);
   int i;
   for (i=0; lst[i]; i++)
     if (strcmp(lst[i], name) == 0)
       return i;
-  return luaL_argerror(L, arg, lua_pushfstring(L, "invalid option '%s'", name));
+  return luaL_argerror(L, arg,
+                       lua_pushfstring(L, "invalid option '%s'", name));
 }
 
 
@@ -480,7 +486,8 @@ LUALIB_API const char *luaL_checklstring (lua_State *L, int arg, size_t *len) {
 }
 
 
-LUALIB_API const char *luaL_optlstring (lua_State *L, int arg, const char *def, size_t *len) {
+LUALIB_API const char *luaL_optlstring (lua_State *L, int arg,
+                                        const char *def, size_t *len) {
   if (lua_isnoneornil(L, arg)) {
     if (len)
       *len = (def ? strlen(def) : 0);
@@ -522,7 +529,8 @@ LUALIB_API lua_Integer luaL_checkinteger (lua_State *L, int arg) {
 }
 
 
-LUALIB_API lua_Integer luaL_optinteger (lua_State *L, int arg, lua_Integer def) {
+LUALIB_API lua_Integer luaL_optinteger (lua_State *L, int arg,
+                                                      lua_Integer def) {
   return luaL_opt(L, luaL_checkinteger, arg, def);
 }
 
@@ -1325,3 +1333,4 @@ LUALIB_API void luaL_checkversion_ (lua_State *L, lua_Number ver, size_t sz) {
     luaL_error(L, "version mismatch: app. needs %f, Lua core provides %f",
                   (LUAI_UACNUMBER)ver, (LUAI_UACNUMBER)v);
 }
+

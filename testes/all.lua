@@ -9,7 +9,8 @@ global T
 
 local version = "LuaGLM 5.5"
 if _VERSION ~= version then
-  io.stderr:write("This test suite is for ", version, ", not for ", _VERSION, "\nExiting tests")
+  io.stderr:write("This test suite is for ", version,
+                  ", not for ", _VERSION, "\nExiting tests")
   return
 end
 
@@ -83,7 +84,8 @@ end
 
 assert(os.setlocale"C")
 
-local T,print,format,write,assert,type,unpack,floor = T,print,string.format,io.write,assert,type,table.unpack,math.floor
+local T,print,format,write,assert,type,unpack,floor =
+      T,print,string.format,io.write,assert,type,table.unpack,math.floor
 
 -- use K for 1000 and M for 1000000 (not 2^10 -- 2^20)
 local function F (m)
@@ -227,7 +229,8 @@ assert(debug == nil)
 
 local debug = require "debug"
 
-print(string.format("%d-bit integers, %d-bit floats", string.packsize("j") * 8, string.packsize("n") * 8))
+print(string.format("%d-bit integers, %d-bit floats",
+        string.packsize("j") * 8, string.packsize("n") * 8))
 
 debug.sethook(function (a) assert(type(a) == 'string') end, "cr")
 
@@ -240,7 +243,10 @@ assert(Cstack == Cstacklevel(),
 
 end   --)
 
-local _G, showmem, print, format, clock, time, difftime, assert, open, warn = _G, showmem, print, string.format, os.clock, os.time, os.difftime, assert, io.open, warn
+local _G, showmem, print, format, clock, time, difftime,
+      assert, open, warn =
+      _G, showmem, print, string.format, os.clock, os.time, os.difftime,
+      assert, io.open, warn
 
 -- file with time of last performed test
 local fname = T and "time-debug.txt" or "time.txt"
@@ -284,9 +290,11 @@ if not usertests then
   local diff = (clocktime - lasttime) / lasttime
   local tolerance = 0.05    -- 5%
   if (diff >= tolerance or diff <= -tolerance) then
-    warn(format("#time difference from previous test: %+.1f%%", diff * 100))
+    warn(format("#time difference from previous test: %+.1f%%",
+                  diff * 100))
   end
   assert(open(fname, "w")):write(clocktime):close()
 end
 
 print("final OK !!!")
+

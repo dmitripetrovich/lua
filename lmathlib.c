@@ -946,3 +946,4 @@ LUAMOD_API int luaopen_math (lua_State *L) {
 #endif
   return 1;
 }
+

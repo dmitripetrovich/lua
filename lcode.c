@@ -287,7 +287,8 @@ static void removevalues (FuncState *fs, int list) {
 ** registers: tests producing values jump to 'vtarget' (and put their
 ** values in 'reg'), other tests jump to 'dtarget'.
 */
-static void patchlistaux (FuncState *fs, int list, int vtarget, int reg, int dtarget) {
+static void patchlistaux (FuncState *fs, int list, int vtarget, int reg,
+                          int dtarget) {
   while (list != NO_JUMP) {
     int next = getjump(fs, list);
     if (patchtestreg(fs, list, reg))
@@ -331,13 +332,15 @@ static void savelineinfo (FuncState *fs, Proto *f, int line) {
   int linedif = line - fs->previousline;
   int pc = fs->pc - 1;  /* last instruction coded */
   if (abs(linedif) >= LIMLINEDIFF || fs->iwthabs++ >= MAXIWTHABS) {
-    luaM_growvector(fs->ls->L, f->abslineinfo, fs->nabslineinfo, f->sizeabslineinfo, AbsLineInfo, INT_MAX, "lines");
+    luaM_growvector(fs->ls->L, f->abslineinfo, fs->nabslineinfo,
+                    f->sizeabslineinfo, AbsLineInfo, INT_MAX, "lines");
     f->abslineinfo[fs->nabslineinfo].pc = pc;
     f->abslineinfo[fs->nabslineinfo++].line = line;
     linedif = ABSLINEINFO;  /* signal that there is absolute information */
     fs->iwthabs = 1;  /* restart counter */
   }
-  luaM_growvector(fs->ls->L, f->lineinfo, pc, f->sizelineinfo, ls_byte, INT_MAX, "opcodes");
+  luaM_growvector(fs->ls->L, f->lineinfo, pc, f->sizelineinfo, ls_byte,
+                  INT_MAX, "opcodes");
   f->lineinfo[pc] = cast(ls_byte, linedif);
   fs->previousline = line;  /* last line saved */
 }
@@ -381,7 +384,8 @@ static void removelastinstruction (FuncState *fs) {
 int luaK_code (FuncState *fs, Instruction i) {
   Proto *f = fs->f;
   /* put new instruction in code array */
-  luaM_growvector(fs->ls->L, f->code, fs->pc, f->sizecode, Instruction, INT_MAX, "opcodes");
+  luaM_growvector(fs->ls->L, f->code, fs->pc, f->sizecode, Instruction,
+                  INT_MAX, "opcodes");
   f->code[fs->pc++] = i;
   savelineinfo(fs, f, fs->ls->lastline);
   return fs->pc - 1;  /* index of new instruction */
@@ -394,14 +398,16 @@ int luaK_code (FuncState *fs, Instruction i) {
 */
 int luaK_codeABCk (FuncState *fs, OpCode o, int A, int B, int C, int k) {
   lua_assert(getOpMode(o) == iABC);
-  lua_assert(A <= MAXARG_A && B <= MAXARG_B && C <= MAXARG_C && (k & ~1) == 0);
+  lua_assert(A <= MAXARG_A && B <= MAXARG_B &&
+             C <= MAXARG_C && (k & ~1) == 0);
   return luaK_code(fs, CREATE_ABCk(o, A, B, C, k));
 }
 
 
 int luaK_codevABCk (FuncState *fs, OpCode o, int A, int B, int C, int k) {
   lua_assert(getOpMode(o) == ivABC);
-  lua_assert(A <= MAXARG_A && B <= MAXARG_vB && C <= MAXARG_vC && (k & ~1) == 0);
+  lua_assert(A <= MAXARG_A && B <= MAXARG_vB &&
+             C <= MAXARG_vC && (k & ~1) == 0);
   return luaK_code(fs, CREATE_vABCk(o, A, B, C, k));
 }
 
@@ -1191,7 +1197,8 @@ void luaK_storevar (FuncState *fs, expdesc *var, expdesc *ex) {
 */
 static void negatecondition (FuncState *fs, expdesc *e) {
   Instruction *pc = getjumpcontrol(fs, e->u.info);
-  lua_assert(testTMode(GET_OPCODE(*pc)) && GET_OPCODE(*pc) != OP_TESTSET && GET_OPCODE(*pc) != OP_TEST);
+  lua_assert(testTMode(GET_OPCODE(*pc)) && GET_OPCODE(*pc) != OP_TESTSET &&
+                                           GET_OPCODE(*pc) != OP_TEST);
   SETARG_k(*pc, (GETARG_k(*pc) ^ 1));
 }
 
@@ -1308,7 +1315,8 @@ static void codenot (FuncState *fs, expdesc *e) {
 ** Check whether expression 'e' is a short literal string
 */
 static int isKstr (FuncState *fs, expdesc *e) {
-  return (e->k == VK && !hasjumps(e) && e->u.info <= MAXINDEXRK && ttisshrstring(&fs->f->k[e->u.info]));
+  return (e->k == VK && !hasjumps(e) && e->u.info <= MAXINDEXRK &&
+          ttisshrstring(&fs->f->k[e->u.info]));
 }
 
 /*
@@ -1458,7 +1466,9 @@ void luaK_indexed (FuncState *fs, expdesc *t, expdesc *k) {
   int keystr = -1;
   if (k->k == VKSTR)
     keystr = str2K(fs, k);
-  lua_assert(!hasjumps(t) && (t->k == VLOCAL || t->k == VVARGVAR || t->k == VNONRELOC || t->k == VUPVAL));
+  lua_assert(!hasjumps(t) &&
+             (t->k == VLOCAL || t->k == VVARGVAR ||
+              t->k == VNONRELOC || t->k == VUPVAL));
   if (t->k == VUPVAL && !isKstr(fs, k))  /* upvalue indexed by non 'Kstr'? */
     luaK_exp2anyreg(fs, t);  /* put it in a register */
   if (t->k == VUPVAL) {
@@ -1500,7 +1510,8 @@ static int validop (int op, TValue *v1, TValue *v2) {
     case LUA_OPBAND: case LUA_OPBOR: case LUA_OPBXOR:
     case LUA_OPSHL: case LUA_OPSHR: case LUA_OPBNOT: {  /* conversion errors */
       lua_Integer i;
-      return (luaV_tointegerns(v1, &i, LUA_FLOORN2I) && luaV_tointegerns(v2, &i, LUA_FLOORN2I));
+      return (luaV_tointegerns(v1, &i, LUA_FLOORN2I) &&
+              luaV_tointegerns(v2, &i, LUA_FLOORN2I));
     }
     case LUA_OPDIV: case LUA_OPIDIV: case LUA_OPMOD:  /* division by 0 */
       return (nvalue(v2) != 0);
@@ -1513,7 +1524,8 @@ static int validop (int op, TValue *v1, TValue *v2) {
 ** Try to "constant-fold" an operation; return 1 iff successful.
 ** (In this case, 'e1' has the final result.)
 */
-static int constfolding (FuncState *fs, int op, expdesc *e1, const expdesc *e2) {
+static int constfolding (FuncState *fs, int op, expdesc *e1,
+                                        const expdesc *e2) {
   TValue v1, v2, res;
   if (!tonumeral(e1, &v1) || !tonumeral(e2, &v2) || !validop(op, &v1, &v2))
     return 0;  /* non-numeric operands or not safe to fold */
@@ -1537,7 +1549,9 @@ static int constfolding (FuncState *fs, int op, expdesc *e1, const expdesc *e2) 
 ** Convert a BinOpr to an OpCode  (ORDER OPR - ORDER OP)
 */
 l_sinline OpCode binopr2op (BinOpr opr, BinOpr baser, OpCode base) {
-  lua_assert(baser <= opr && ((baser == OPR_ADD && opr <= OPR_SHR) || (baser == OPR_LT && opr <= OPR_LE)));
+  lua_assert(baser <= opr &&
+            ((baser == OPR_ADD && opr <= OPR_SHR) ||
+             (baser == OPR_LT && opr <= OPR_LE)));
   return cast(OpCode, (cast_int(opr) - cast_int(baser)) + cast_int(base));
 }
 
@@ -1546,7 +1560,8 @@ l_sinline OpCode binopr2op (BinOpr opr, BinOpr baser, OpCode base) {
 ** Convert a UnOpr to an OpCode  (ORDER OPR - ORDER OP)
 */
 l_sinline OpCode unopr2op (UnOpr opr) {
-  return cast(OpCode, (cast_int(opr) - cast_int(OPR_MINUS)) + cast_int(OP_UNM));
+  return cast(OpCode, (cast_int(opr) - cast_int(OPR_MINUS)) +
+                                       cast_int(OP_UNM));
 }
 
 
@@ -1579,7 +1594,9 @@ static void codeunexpval (FuncState *fs, OpCode op, expdesc *e, int line) {
 ** operators).
 ** Expression to produce final result will be encoded in 'e1'.
 */
-static void finishbinexpval (FuncState *fs, expdesc *e1, expdesc *e2, OpCode op, int v2, int flip, int line, OpCode mmop, TMS event) {
+static void finishbinexpval (FuncState *fs, expdesc *e1, expdesc *e2,
+                             OpCode op, int v2, int flip, int line,
+                             OpCode mmop, TMS event) {
   int v1 = luaK_exp2anyreg(fs, e1);
   int pc = luaK_codeABCk(fs, op, 0, v1, v2, 0);
   freeexps(fs, e1, e2);
@@ -1595,11 +1612,13 @@ static void finishbinexpval (FuncState *fs, expdesc *e1, expdesc *e2, OpCode op,
 ** Emit code for binary expressions that "produce values" over
 ** two registers.
 */
-static void codebinexpval (FuncState *fs, BinOpr opr, expdesc *e1, expdesc *e2, int line) {
+static void codebinexpval (FuncState *fs, BinOpr opr,
+                           expdesc *e1, expdesc *e2, int line) {
   OpCode op = binopr2op(opr, OPR_ADD, OP_ADD);
   int v2 = luaK_exp2anyreg(fs, e2);  /* make sure 'e2' is in a register */
   /* 'e1' must be already in a register or it is a constant */
-  lua_assert((VNIL <= e1->k && e1->k <= VKSTR) || e1->k == VNONRELOC || e1->k == VRELOC);
+  lua_assert((VNIL <= e1->k && e1->k <= VKSTR) ||
+             e1->k == VNONRELOC || e1->k == VRELOC);
   lua_assert(OP_ADD <= op && op <= OP_SHR);
   finishbinexpval(fs, e1, e2, op, v2, 0, line, OP_MMBIN, binopr2TM(opr));
 }
@@ -1608,7 +1627,9 @@ static void codebinexpval (FuncState *fs, BinOpr opr, expdesc *e1, expdesc *e2, 
 /*
 ** Code binary operators with immediate operands.
 */
-static void codebini (FuncState *fs, OpCode op, expdesc *e1, expdesc *e2, int flip, int line, TMS event) {
+static void codebini (FuncState *fs, OpCode op,
+                       expdesc *e1, expdesc *e2, int flip, int line,
+                       TMS event) {
   int v2 = int2sC(cast_int(e2->u.ival));  /* immediate operand */
   lua_assert(e2->k == VKINT);
   finishbinexpval(fs, e1, e2, op, v2, flip, line, OP_MMBINI, event);
@@ -1618,7 +1639,8 @@ static void codebini (FuncState *fs, OpCode op, expdesc *e1, expdesc *e2, int fl
 /*
 ** Code binary operators with K operand.
 */
-static void codebinK (FuncState *fs, BinOpr opr, expdesc *e1, expdesc *e2, int flip, int line) {
+static void codebinK (FuncState *fs, BinOpr opr,
+                      expdesc *e1, expdesc *e2, int flip, int line) {
   TMS event = binopr2TM(opr);
   int v2 = e2->u.info;  /* K index */
   OpCode op = binopr2op(opr, OPR_ADD, OP_ADDK);
@@ -1631,7 +1653,8 @@ static void codebinK (FuncState *fs, BinOpr opr, expdesc *e1, expdesc *e2, int f
 ** As a special case, avoid the optimization for (exp - 0), because
 ** (-0.0 - 0) is -0.0, while (-0.0 + 0) is +0.0.
 */
-static int finishbinexpneg (FuncState *fs, expdesc *e1, expdesc *e2, OpCode op, int line, TMS event) {
+static int finishbinexpneg (FuncState *fs, expdesc *e1, expdesc *e2,
+                            OpCode op, int line, TMS event) {
   if (!isKint(e2))
     return 0;  /* not an integer constant */
   else {
@@ -1659,7 +1682,8 @@ static void swapexps (expdesc *e1, expdesc *e2) {
 /*
 ** Code binary operators with no constant operand.
 */
-static void codebinNoK (FuncState *fs, BinOpr opr, expdesc *e1, expdesc *e2, int flip, int line) {
+static void codebinNoK (FuncState *fs, BinOpr opr,
+                        expdesc *e1, expdesc *e2, int flip, int line) {
   if (flip)
     swapexps(e1, e2);  /* back to original order */
   codebinexpval(fs, opr, e1, e2, line);  /* use standard operators */
@@ -1670,7 +1694,8 @@ static void codebinNoK (FuncState *fs, BinOpr opr, expdesc *e1, expdesc *e2, int
 ** Code arithmetic operators ('+', '-', ...). If second operand is a
 ** constant in the proper range, use variant opcodes with K operands.
 */
-static void codearith (FuncState *fs, BinOpr opr, expdesc *e1, expdesc *e2, int flip, int line) {
+static void codearith (FuncState *fs, BinOpr opr,
+                       expdesc *e1, expdesc *e2, int flip, int line) {
   if (tonumeral(e2, NULL) && luaK_exp2K(fs, e2))  /* K operand? */
     codebinK(fs, opr, e1, e2, flip, line);
   else  /* 'e2' is neither an immediate nor a K operand */
@@ -1683,7 +1708,8 @@ static void codearith (FuncState *fs, BinOpr opr, expdesc *e1, expdesc *e2, int 
 ** numeric constant, change order of operands to try to use an
 ** immediate or K operator.
 */
-static void codecommutative (FuncState *fs, BinOpr op, expdesc *e1, expdesc *e2, int line) {
+static void codecommutative (FuncState *fs, BinOpr op,
+                             expdesc *e1, expdesc *e2, int line) {
   int flip = 0;
   if (tonumeral(e1, NULL)) {  /* is first operand a numeric constant? */
     swapexps(e1, e2);  /* change order */
@@ -1700,7 +1726,8 @@ static void codecommutative (FuncState *fs, BinOpr op, expdesc *e1, expdesc *e2,
 ** Code bitwise operations; they are all commutative, so the function
 ** tries to put an integer constant as the 2nd operand (a K operand).
 */
-static void codebitwise (FuncState *fs, BinOpr opr, expdesc *e1, expdesc *e2, int line) {
+static void codebitwise (FuncState *fs, BinOpr opr,
+                         expdesc *e1, expdesc *e2, int line) {
   int flip = 0;
   if (e1->k == VKINT) {
     swapexps(e1, e2);  /* 'e2' will be the constant operand */
@@ -1870,7 +1897,8 @@ static void codeconcat (FuncState *fs, expdesc *e1, expdesc *e2, int line) {
 /*
 ** Finalize code for binary operation, after reading 2nd operand.
 */
-void luaK_posfix (FuncState *fs, BinOpr opr, expdesc *e1, expdesc *e2, int line) {
+void luaK_posfix (FuncState *fs, BinOpr opr,
+                  expdesc *e1, expdesc *e2, int line) {
   luaK_dischargevars(fs, e2);
   if (foldbinop(opr) && constfolding(fs, cast_int(opr + LUA_OPADD), e1, e2))
     return;  /* done by folding */

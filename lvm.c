@@ -102,7 +102,6 @@
 */
 static int l_strton (const TValue *obj, TValue *result) {
   lua_assert(obj != result);
-  setivalue(result, 0);
   if (!cvt2num(obj))  /* is object not a string? */
     return 0;
   else {

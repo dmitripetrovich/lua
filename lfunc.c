@@ -160,7 +160,8 @@ static void calldefermethod (lua_State *L, TValue *func, TValue *err) {
 ** the 'level' of the upvalue being closed, as everything after that
 ** won't be used again.
 */
-static void prepcallclosemth (lua_State *L, StkId level, TStatus status, int yy) {
+static void prepcallclosemth (lua_State *L, StkId level, TStatus status,
+                                            int yy) {
   TValue *uv = s2v(level);  /* value being closed */
   TValue *errobj;
   switch (status) {
@@ -313,7 +314,11 @@ Proto *luaF_newproto (lua_State *L) {
 
 
 lu_mem luaF_protosize (Proto *p) {
-  lu_mem sz = cast(lu_mem, sizeof(Proto)) + cast_uint(p->sizep) * sizeof(Proto*) + cast_uint(p->sizek) * sizeof(TValue) + cast_uint(p->sizelocvars) * sizeof(LocVar) + cast_uint(p->sizeupvalues) * sizeof(Upvaldesc);
+  lu_mem sz = cast(lu_mem, sizeof(Proto))
+            + cast_uint(p->sizep) * sizeof(Proto*)
+            + cast_uint(p->sizek) * sizeof(TValue)
+            + cast_uint(p->sizelocvars) * sizeof(LocVar)
+            + cast_uint(p->sizeupvalues) * sizeof(Upvaldesc);
 #if defined(GRIT_POWER_IMPORT)
   sz += cast_uint(p->sizeimports) * sizeof(Import);
 #endif
@@ -358,3 +363,4 @@ const char *luaF_getlocalname (const Proto *f, unsigned local_number, int pc) {
   }
   return NULL;  /* not found */
 }
+

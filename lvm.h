@@ -137,10 +137,13 @@ LUAI_FUNC int luaV_lessthan (lua_State *L, const TValue *l, const TValue *r);
 LUAI_FUNC int luaV_lessequal (lua_State *L, const TValue *l, const TValue *r);
 LUAI_FUNC int luaV_tonumber_ (const TValue *obj, lua_Number *n);
 LUAI_FUNC int luaV_tointeger (const TValue *obj, lua_Integer *p, F2Imod mode);
-LUAI_FUNC int luaV_tointegerns (const TValue *obj, lua_Integer *p, F2Imod mode);
+LUAI_FUNC int luaV_tointegerns (const TValue *obj, lua_Integer *p,
+                                F2Imod mode);
 LUAI_FUNC int luaV_flttointeger (lua_Number n, lua_Integer *p, F2Imod mode);
-LUAI_FUNC lu_byte luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val, lu_byte tag);
-LUAI_FUNC void luaV_finishset (lua_State *L, const TValue *t, TValue *key, TValue *val, int aux);
+LUAI_FUNC lu_byte luaV_finishget (lua_State *L, const TValue *t, TValue *key,
+                                                StkId val, lu_byte tag);
+LUAI_FUNC void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
+                                             TValue *val, int aux);
 LUAI_FUNC void luaV_finishOp (lua_State *L);
 LUAI_FUNC void luaV_execute (lua_State *L, CallInfo *ci);
 LUAI_FUNC void luaV_concat (lua_State *L, int total);

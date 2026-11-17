@@ -56,15 +56,15 @@
 */
 #if !defined(LUA_NUMTIME)	/* { */
 
-#define l_timet          lua_Integer
-#define l_pushtime(L,t)  lua_pushinteger(L, (lua_Integer)(t))
-#define l_gettime(L,arg) luaL_checkinteger(L, arg)
+#define l_timet			lua_Integer
+#define l_pushtime(L,t)		lua_pushinteger(L,(lua_Integer)(t))
+#define l_gettime(L,arg)	luaL_checkinteger(L, arg)
 
 #else				/* }{ */
 
-#define l_timet          lua_Number
-#define l_pushtime(L,t)  lua_pushnumber(L, (lua_Number)(t))
-#define l_gettime(L,arg) luaL_checknumber(L, arg)
+#define l_timet			lua_Number
+#define l_pushtime(L,t)		lua_pushnumber(L,(lua_Number)(t))
+#define l_gettime(L,arg)	luaL_checknumber(L, arg)
 
 #endif				/* } */
 

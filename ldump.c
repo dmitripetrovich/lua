@@ -136,7 +136,8 @@ static void dumpNumber (DumpState *D, lua_Number x) {
 ** (0 => 0; -1 => 1; 1 => 2; -2 => 3; 2 => 4; ...)
 */
 static void dumpInteger (DumpState *D, lua_Integer x) {
-  lua_Unsigned cx = (x >= 0) ? 2u * l_castS2U(x) : (2u * ~l_castS2U(x)) + 1;
+  lua_Unsigned cx = (x >= 0) ? 2u * l_castS2U(x)
+                             : (2u * ~l_castS2U(x)) + 1;
   dumpVarint(D, cx);
 }
 
@@ -319,7 +320,8 @@ static void dumpHeader (DumpState *D) {
 /*
 ** dump Lua function as precompiled chunk
 */
-int luaU_dump (lua_State *L, const Proto *f, lua_Writer w, void *data, int strip) {
+int luaU_dump (lua_State *L, const Proto *f, lua_Writer w, void *data,
+               int strip) {
   DumpState D;
   D.h = luaH_new(L);  /* aux. table to keep strings already dumped */
   sethvalue2s(L, L->top.p, D.h);  /* anchor it */

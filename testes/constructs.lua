@@ -66,7 +66,9 @@ do   -- testing operators with different kinds of constants
   --  * constant doesn't fit in register
   --  * floats with integral values
   local operand = {3, 100, 5.0, -10, -5.0, 10000, -10000}
-  local operator = {"+", "-", "*", "/", "//", "%", "^", "&", "|", "^", "<<", ">>", "==", "~=", "<", ">", "<=", ">=",}
+  local operator = {"+", "-", "*", "/", "//", "%", "^",
+                    "&", "|", "^", "<<", ">>",
+                    "==", "~=", "<", ">", "<=", ">=",}
   for _, op in ipairs(operator) do
     local f = assert(load(string.format([[return function (x,y)
                 return x %s y
@@ -239,7 +241,8 @@ do   -- testing constants
   local prog <const> = [[local x <XXX> = 10]]
   checkload(prog, "unknown attribute 'XXX'")
 
-  checkload([[local xxx <const> = 20; xxx = 10]], ":1: attempt to assign to const variable 'xxx'")
+  checkload([[local xxx <const> = 20; xxx = 10]],
+             ":1: attempt to assign to const variable 'xxx'")
 
   checkload([[
     local xx;
@@ -282,9 +285,12 @@ assert(f(1,2,'a')
 ~=          -- force SETLINE before nil
 nil, "")
 assert(f(1,2,'a') == 'a' and g(1,2,'a') == 1 and h(1,2,'a') == 1)
-assert(f(1,2,nil,1,'x') == 'x' and g(1,2,nil,1,'x') == 1 and h(1,2,nil,1,'x') == 1)
-assert(f(1,2,nil,nil,'x') == nil and g(1,2,nil,nil,'x') == 0 and h(1,2,nil,nil,'x') == 0)
-assert(f(1,2,nil,1,nil) == nil and g(1,2,nil,1,nil) == 0 and h(1,2,nil,1,nil) == 0)
+assert(f(1,2,nil,1,'x') == 'x' and g(1,2,nil,1,'x') == 1 and
+                                   h(1,2,nil,1,'x') == 1)
+assert(f(1,2,nil,nil,'x') == nil and g(1,2,nil,nil,'x') == 0 and
+                                     h(1,2,nil,nil,'x') == 0)
+assert(f(1,2,nil,1,nil) == nil and g(1,2,nil,1,nil) == 0 and
+                                   h(1,2,nil,1,nil) == 0)
 
 assert(1 and 2<3 == true and 2<3 and 'a'<'b' == true)
 x = 2<3 and not 3; assert(x==false)

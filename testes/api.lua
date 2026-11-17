@@ -50,7 +50,7 @@ assert(a == 2 and b == 3 and not c)
 -- test that all trues are equal
 a,b,c = T.testC("pushbool 1; pushbool 2; pushbool 0; return 3")
 assert(a == b and a == true and c == false)
-a,b,c = T.testC"pushbool 0; pushbool 10; pushnil; \
+a,b,c = T.testC"pushbool 0; pushbool 10; pushnil;\
                       tobool -3; tobool -3; tobool -3; return 3"
 assert(a==false and b==true and c==false)
 
@@ -156,7 +156,8 @@ tcheck(t, {n=6,1,2,3,4,"alo", "joao"})
 do  -- test returning more results than fit in the caller stack
   local a = {}
   for i=1,1000 do a[i] = true end; a[999] = 10
-  local b = T.testC([[pcall 1 -1 0; pop 1; tostring -1; return 1]], table.unpack, a)
+  local b = T.testC([[pcall 1 -1 0; pop 1; tostring -1; return 1]],
+                    table.unpack, a)
   assert(b == "10")
 end
 
@@ -223,7 +224,8 @@ a,b,c = setmetatable({4}, mt),
 local x,y,z = T.testC("arith +; return 2", 10, a, b)
 assert(x == 10 and y[1] == 12 and z == nil)
 assert(T.testC("arith %; return 1", a, c)[1] == 4%-3)
-assert(T.testC("arith _; arith +; arith %; return 1", b, a, c)[1] == 8 % (4 + (-3)*2))
+assert(T.testC("arith _; arith +; arith %; return 1", b, a, c)[1] ==
+               8 % (4 + (-3)*2))
 
 -- errors in arithmetic
 checkerr("divide by zero", T.testC, "arith \\", 10, 0)
@@ -1411,3 +1413,4 @@ do
 end
 
 print'OK'
+

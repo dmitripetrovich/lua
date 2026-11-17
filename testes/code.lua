@@ -124,11 +124,13 @@ end
 -- some basic instructions
 check(function ()   -- function does not create upvalues
   (function () end){f()}
-end, 'CLOSURE', 'NEWTABLE', 'EXTRAARG', 'GETTABUP', 'CALL', 'SETLIST', 'CALL', 'RETURN0')
+end, 'CLOSURE', 'NEWTABLE', 'EXTRAARG', 'GETTABUP', 'CALL',
+     'SETLIST', 'CALL', 'RETURN0')
 
 check(function (x)   -- function creates upvalues
   (function () return x end){f()}
-end, 'CLOSURE', 'NEWTABLE', 'EXTRAARG', 'GETTABUP', 'CALL', 'SETLIST', 'CALL', 'RETURN')
+end, 'CLOSURE', 'NEWTABLE', 'EXTRAARG', 'GETTABUP', 'CALL',
+     'SETLIST', 'CALL', 'RETURN')
 
 
 -- sequence of LOADNILs
@@ -157,15 +159,19 @@ check (function (a,b,c) return a end, 'RETURN1')
 
 
 -- infinite loops
-check(function () while kTrue do local a = -1 end end, 'LOADI', 'JMP', 'RETURN0')
+check(function () while kTrue do local a = -1 end end,
+'LOADI', 'JMP', 'RETURN0')
 
-check(function () while 1 do local a = -1 end end, 'LOADI', 'JMP', 'RETURN0')
+check(function () while 1 do local a = -1 end end,
+'LOADI', 'JMP', 'RETURN0')
 
-check(function () repeat local x = 1 until true end, 'LOADI', 'RETURN0')
+check(function () repeat local x = 1 until true end,
+'LOADI', 'RETURN0')
 
 
 -- concat optimization
-check(function (a,b,c,d) return a..b..c..d end, 'MOVE', 'MOVE', 'MOVE', 'MOVE', 'CONCAT', 'RETURN1')
+check(function (a,b,c,d) return a..b..c..d end,
+  'MOVE', 'MOVE', 'MOVE', 'MOVE', 'CONCAT', 'RETURN1')
 
 -- not
 check(function () return not not nil end, 'LOADFALSE', 'RETURN1')
@@ -178,7 +184,11 @@ check(function ()
   local a,b,c,d
   a = b*a
   c.x, a[b] = -((a + d/b - a[b]) ^ a.x), b
-end, 'LOADNIL', 'MUL', 'MMBIN', 'DIV', 'MMBIN', 'ADD', 'MMBIN', 'GETTABLE', 'SUB', 'MMBIN', 'GETFIELD', 'POW', 'MMBIN', 'UNM', 'SETTABLE', 'SETFIELD', 'RETURN0')
+end,
+  'LOADNIL',
+  'MUL', 'MMBIN',
+  'DIV', 'MMBIN', 'ADD', 'MMBIN', 'GETTABLE', 'SUB', 'MMBIN',
+  'GETFIELD', 'POW', 'MMBIN', 'UNM', 'SETTABLE', 'SETFIELD', 'RETURN0')
 
 
 -- direct access to constants
@@ -188,7 +198,8 @@ check(function ()
   a[kx] = 3.2
   a.x = b
   a[b] = 'x'
-end, 'LOADNIL', 'SETFIELD', 'SETFIELD', 'SETTABLE', 'RETURN0')
+end,
+  'LOADNIL', 'SETFIELD', 'SETFIELD', 'SETTABLE', 'RETURN0')
 
 -- "get/set table" with numeric indices
 check(function (a)
@@ -196,49 +207,67 @@ check(function (a)
   a[1] = a[100]
   a[k255] = a[256]
   a[256] = 5
-end, 'GETI', 'SETI', 'LOADI', 'GETTABLE', 'SETI', 'LOADI', 'SETTABLE',  'RETURN0')
+end,
+  'GETI', 'SETI',
+  'LOADI', 'GETTABLE', 'SETI',
+  'LOADI', 'SETTABLE',  'RETURN0')
 
 check(function ()
   local a,b
   a = a - a
   b = a/a
   b = 5-4
-end, 'LOADNIL', 'SUB', 'MMBIN', 'DIV', 'MMBIN', 'LOADI', 'RETURN0')
+end,
+  'LOADNIL', 'SUB', 'MMBIN', 'DIV', 'MMBIN', 'LOADI', 'RETURN0')
 
 check(function ()
   local a,b
   a[kTrue] = false
-end, 'LOADNIL', 'LOADTRUE', 'SETTABLE', 'RETURN0')
+end,
+  'LOADNIL', 'LOADTRUE', 'SETTABLE', 'RETURN0')
 
 
 -- equalities
-checkR(function (a) if a == 1 then return 2 end end, 1, 2, 'EQI', 'JMP', 'LOADI', 'RETURN1')
+checkR(function (a) if a == 1 then return 2 end end, 1, 2,
+  'EQI', 'JMP', 'LOADI', 'RETURN1')
 
-checkR(function (a) if -4.0 == a then return 2 end end, -4, 2, 'EQI', 'JMP', 'LOADI', 'RETURN1')
+checkR(function (a) if -4.0 == a then return 2 end end, -4, 2,
+  'EQI', 'JMP', 'LOADI', 'RETURN1')
 
-checkR(function (a) if a == "hi" then return 2 end end, 10, nil, 'EQK', 'JMP', 'LOADI', 'RETURN1')
+checkR(function (a) if a == "hi" then return 2 end end, 10, nil,
+  'EQK', 'JMP', 'LOADI', 'RETURN1')
 
-checkR(function (a) if a == 10000 then return 2 end end, 1, nil, 'EQK', 'JMP', 'LOADI', 'RETURN1')   -- number too large
+checkR(function (a) if a == 10000 then return 2 end end, 1, nil,
+  'EQK', 'JMP', 'LOADI', 'RETURN1')   -- number too large
 
-checkR(function (a) if -10000 == a then return 2 end end, -10000, 2, 'EQK', 'JMP', 'LOADI', 'RETURN1')   -- number too large
+checkR(function (a) if -10000 == a then return 2 end end, -10000, 2,
+  'EQK', 'JMP', 'LOADI', 'RETURN1')   -- number too large
 
 -- comparisons
 
-checkR(function (a) if -10 <= a then return 2 end end, -10, 2, 'GEI', 'JMP', 'LOADI', 'RETURN1')
+checkR(function (a) if -10 <= a then return 2 end end, -10, 2,
+  'GEI', 'JMP', 'LOADI', 'RETURN1')
 
-checkR(function (a) if 128.0 > a then return 2 end end, 129, nil, 'LTI', 'JMP', 'LOADI', 'RETURN1')
+checkR(function (a) if 128.0 > a then return 2 end end, 129, nil,
+  'LTI', 'JMP', 'LOADI', 'RETURN1')
 
-checkR(function (a) if -127.0 < a then return 2 end end, -127, nil, 'GTI', 'JMP', 'LOADI', 'RETURN1')
+checkR(function (a) if -127.0 < a then return 2 end end, -127, nil,
+  'GTI', 'JMP', 'LOADI', 'RETURN1')
 
-checkR(function (a) if 10 < a then return 2 end end, 11, 2, 'GTI', 'JMP', 'LOADI', 'RETURN1')
+checkR(function (a) if 10 < a then return 2 end end, 11, 2,
+  'GTI', 'JMP', 'LOADI', 'RETURN1')
 
-checkR(function (a) if 129 < a then return 2 end end, 130, 2, 'LOADI', 'LT', 'JMP', 'LOADI', 'RETURN1')
+checkR(function (a) if 129 < a then return 2 end end, 130, 2,
+  'LOADI', 'LT', 'JMP', 'LOADI', 'RETURN1')
 
-checkR(function (a) if a >= 23.0 then return 2 end end, 25, 2, 'GEI', 'JMP', 'LOADI', 'RETURN1')
+checkR(function (a) if a >= 23.0 then return 2 end end, 25, 2,
+  'GEI', 'JMP', 'LOADI', 'RETURN1')
 
-checkR(function (a) if a >= 23.1 then return 2 end end, 0, nil, 'LOADK', 'LE', 'JMP', 'LOADI', 'RETURN1')
+checkR(function (a) if a >= 23.1 then return 2 end end, 0, nil,
+  'LOADK', 'LE', 'JMP', 'LOADI', 'RETURN1')
 
-checkR(function (a) if a > 2300.0 then return 2 end end, 0, nil, 'LOADF', 'LT', 'JMP', 'LOADI', 'RETURN1')
+checkR(function (a) if a > 2300.0 then return 2 end end, 0, nil,
+  'LOADF', 'LT', 'JMP', 'LOADI', 'RETURN1')
 
 
 -- constant folding
@@ -296,13 +325,17 @@ checkK(function () return -(border + 1) end, -(sbx + 1.0))
 -- immediate operands
 checkR(function (x) return x + k1 end, 10, 11, 'ADDI', 'MMBINI', 'RETURN1')
 checkR(function (x) return x - 127 end, 10, -117, 'ADDI', 'MMBINI', 'RETURN1')
-checkR(function (x) return 128 + x end, 0.0, 128.0, 'ADDI', 'MMBINI', 'RETURN1')
-checkR(function (x) return x * -127 end, -1.0, 127.0, 'MULK', 'MMBINK', 'RETURN1')
+checkR(function (x) return 128 + x end, 0.0, 128.0,
+         'ADDI', 'MMBINI', 'RETURN1')
+checkR(function (x) return x * -127 end, -1.0, 127.0,
+         'MULK', 'MMBINK', 'RETURN1')
 checkR(function (x) return 20 * x end, 2, 40, 'MULK', 'MMBINK', 'RETURN1')
 checkR(function (x) return x ^ -2 end, 2, 0.25, 'POWK', 'MMBINK', 'RETURN1')
 checkR(function (x) return x / 40 end, 40, 1.0, 'DIVK', 'MMBINK', 'RETURN1')
-checkR(function (x) return x // 1 end, 10.0, 10.0, 'IDIVK', 'MMBINK', 'RETURN1')
-checkR(function (x) return x % (100 - 10) end, 91, 1, 'MODK', 'MMBINK', 'RETURN1')
+checkR(function (x) return x // 1 end, 10.0, 10.0,
+         'IDIVK', 'MMBINK', 'RETURN1')
+checkR(function (x) return x % (100 - 10) end, 91, 1,
+         'MODK', 'MMBINK', 'RETURN1')
 checkR(function (x) return k1 << x end, 3, 8, 'SHLI', 'MMBINI', 'RETURN1')
 checkR(function (x) return x << 127 end, 10, 0, 'SHRI', 'MMBINI', 'RETURN1')
 checkR(function (x) return x << -127 end, 10, 0, 'SHRI', 'MMBINI', 'RETURN1')
@@ -315,12 +348,15 @@ checkR(function (x) return -10 ~ x end, -1, 9, 'BXORK', 'MMBINK', 'RETURN1')
 -- K operands in arithmetic operations
 checkR(function (x) return x + 0.0 end, 1, 1.0, 'ADDK', 'MMBINK', 'RETURN1')
 --  check(function (x) return 128 + x end, 'ADDK', 'MMBINK', 'RETURN1')
-checkR(function (x) return x * -10000 end, 2, -20000, 'MULK', 'MMBINK', 'RETURN1')
+checkR(function (x) return x * -10000 end, 2, -20000,
+         'MULK', 'MMBINK', 'RETURN1')
 --  check(function (x) return 20 * x end, 'MULK', 'MMBINK', 'RETURN1')
 checkR(function (x) return x ^ 0.5 end, 4, 2.0, 'POWK', 'MMBINK', 'RETURN1')
 checkR(function (x) return x / 2.0 end, 4, 2.0, 'DIVK', 'MMBINK', 'RETURN1')
-checkR(function (x) return x // 10000 end, 10000, 1, 'IDIVK', 'MMBINK', 'RETURN1')
-checkR(function (x) return x % (100.0 - 10) end, 91, 1.0, 'MODK', 'MMBINK', 'RETURN1')
+checkR(function (x) return x // 10000 end, 10000, 1,
+         'IDIVK', 'MMBINK', 'RETURN1')
+checkR(function (x) return x % (100.0 - 10) end, 91, 1.0,
+         'MODK', 'MMBINK', 'RETURN1')
 
 -- no foldings (and immediate operands)
 check(function () return -0.0 end, 'LOADF', 'UNM', 'RETURN1')
@@ -332,8 +368,10 @@ check(function (x) return x << 128 end, 'LOADI', 'SHL', 'MMBIN', 'RETURN1')
 check(function (x) return x & 2.0 end, 'LOADF', 'BAND', 'MMBIN', 'RETURN1')
 
 -- basic 'for' loops
-check(function () for i = -10, 10.5 do end end, 'LOADI', 'LOADK', 'LOADI', 'FORPREP', 'FORLOOP', 'RETURN0')
-check(function () for i = 0xfffffff, 10.0, 1 do end end, 'LOADK', 'LOADF', 'LOADI', 'FORPREP', 'FORLOOP', 'RETURN0')
+check(function () for i = -10, 10.5 do end end,
+'LOADI', 'LOADK', 'LOADI', 'FORPREP', 'FORLOOP', 'RETURN0')
+check(function () for i = 0xfffffff, 10.0, 1 do end end,
+'LOADK', 'LOADF', 'LOADI', 'FORPREP', 'FORLOOP', 'RETURN0')
 
 -- bug in constant folding for 5.1
 check(function () return -nil end, 'LOADNIL', 'UNM', 'RETURN1')
@@ -370,9 +408,11 @@ do   -- tests for table access in upvalues
 end
 
 -- de morgan
-checkequal(function () local a, b; if not (a or b) then b=a end end, function () local a, b; if (not a and not b) then b=a end end)
+checkequal(function () local a, b; if not (a or b) then b=a end end,
+           function () local a, b; if (not a and not b) then b=a end end)
 
-checkequal(function (l) local a; return 0 <= a and a <= l end, function (l) local a; return not (not(a >= 0) or not(a <= l)) end)
+checkequal(function (l) local a; return 0 <= a and a <= l end,
+           function (l) local a; return not (not(a >= 0) or not(a <= l)) end)
 
 
 check(function (a, b)
@@ -389,11 +429,14 @@ check(function ()
           goto exit   -- must close
         end
         ::exit::
-      end, 'JMP', 'CLOSE', 'LOADNIL', 'TBC', 'CLOSE', 'JMP', 'CLOSE', 'RETURN')
+      end, 'JMP', 'CLOSE', 'LOADNIL', 'TBC',
+           'CLOSE', 'JMP', 'CLOSE', 'RETURN')
 
-checkequal(function () return 6 or true or nil end, function () return k6 or kTrue or kNil end)
+checkequal(function () return 6 or true or nil end,
+           function () return k6 or kTrue or kNil end)
 
-checkequal(function () return 6 and true or nil end, function () return k6 and kTrue or kNil end)
+checkequal(function () return 6 and true or nil end,
+           function () return k6 and kTrue or kNil end)
 
 
 do   -- string constants
@@ -443,7 +486,8 @@ end
 
 do   print("testing code for integer limits")
   local function checkints (n)
-    local source = string.format("local a = {[true] = 0X%x}; return a[true]", n)
+    local source = string.format(
+      "local a = {[true] = 0X%x}; return a[true]", n)
     local f = assert(load(source))
     checkKlist(f, {n})
     assert(f() == n)
@@ -458,3 +502,4 @@ do   print("testing code for integer limits")
 end
 
 print 'OK'
+

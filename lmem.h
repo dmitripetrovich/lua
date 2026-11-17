@@ -80,14 +80,20 @@
 LUAI_FUNC l_noret luaM_toobig (lua_State *L);
 
 /* not to be called directly */
-LUAI_FUNC void *luaM_realloc_ (lua_State *L, void *block, size_t oldsize, size_t size);
-LUAI_FUNC void *luaM_saferealloc_ (lua_State *L, void *block, size_t oldsize, size_t size);
+LUAI_FUNC void *luaM_realloc_ (lua_State *L, void *block, size_t oldsize,
+                                                          size_t size);
+LUAI_FUNC void *luaM_saferealloc_ (lua_State *L, void *block, size_t oldsize,
+                                                              size_t size);
 LUAI_FUNC void luaM_free_ (lua_State *L, void *block, size_t osize);
-LUAI_FUNC void *luaM_growaux_ (lua_State *L, void *block, int nelems, int *size, unsigned size_elem, int limit, const char *what);
-LUAI_FUNC void *luaM_shrinkvector_ (lua_State *L, void *block, int *nelem, int final_n, unsigned size_elem);
+LUAI_FUNC void *luaM_growaux_ (lua_State *L, void *block, int nelems,
+                               int *size, unsigned size_elem, int limit,
+                               const char *what);
+LUAI_FUNC void *luaM_shrinkvector_ (lua_State *L, void *block, int *nelem,
+                                    int final_n, unsigned size_elem);
 LUAI_FUNC void *luaM_malloc_ (lua_State *L, size_t size, int tag);
 #if defined(GRIT_POWER_ALLOWANCE)
 LUAI_FUNC int luaM_allows (lua_State *L, size_t size);
 #endif
 
 #endif
+

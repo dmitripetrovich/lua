@@ -94,8 +94,10 @@ static int utflen (lua_State *L) {
   lua_Integer posi = u_posrelat(luaL_optinteger(L, 2, 1), len);
   lua_Integer posj = u_posrelat(luaL_optinteger(L, 3, -1), len);
   int lax = lua_toboolean(L, 4);
-  luaL_argcheck(L, 1 <= posi && --posi <= (lua_Integer)len, 2, "initial position out of bounds");
-  luaL_argcheck(L, --posj < (lua_Integer)len, 3, "final position out of bounds");
+  luaL_argcheck(L, 1 <= posi && --posi <= (lua_Integer)len, 2,
+                   "initial position out of bounds");
+  luaL_argcheck(L, --posj < (lua_Integer)len, 3,
+                   "final position out of bounds");
   while (posi <= posj) {
     const char *s1 = utf8_decode(s + posi, NULL, !lax);
     if (s1 == NULL) {  /* conversion error? */
@@ -186,7 +188,8 @@ static int byteoffset (lua_State *L) {
   lua_Integer posi = (n >= 0) ? 1 : cast_st2S(len) + 1;
   lua_Integer start;
   posi = u_posrelat(luaL_optinteger(L, 3, posi), len);
-  luaL_argcheck(L, 1 <= posi && --posi <= (lua_Integer)len, 3, "position out of bounds");
+  luaL_argcheck(L, 1 <= posi && --posi <= (lua_Integer)len, 3,
+                   "position out of bounds");
   start = posi;
   if (n == 0) {
     /* find beginning of current byte sequence */
@@ -414,3 +417,4 @@ LUAMOD_API int luaopen_utf8 (lua_State *L) {
   lua_setfield(L, -2, "charpattern");
   return 1;
 }
+

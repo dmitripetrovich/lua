@@ -2249,3 +2249,4 @@ LUAMOD_API int luaopen_string (lua_State *L) {
 #endif
   return 1;
 }
+
