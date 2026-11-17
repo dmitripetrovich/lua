@@ -312,7 +312,7 @@ LUA_API int   (lua_setiuservalue) (lua_State *L, int idx, int n);
 #define LUA_TTHASH  2
 #define LUA_TTMIXED 3
 
-LUA_API void  (lua_wipetable) (lua_State *L, int idx);
+LUA_API lua_Unsigned (lua_wipetable) (lua_State *L, int idx);
 LUA_API void  (lua_clonetable) (lua_State *L, int fromidx, int toidx);
 LUA_API void  (lua_filltable) (lua_State *L, int narr, int fillidx);
 LUA_API void  (lua_compacttable) (lua_State *L, int idx);

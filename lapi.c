@@ -951,14 +951,16 @@ LUA_API int lua_tabletype (lua_State *L, int idx) {
   return luaH_type(hvalue(o));
 }
 
-LUA_API void lua_wipetable (lua_State *L, int idx) {
+LUA_API lua_Unsigned lua_wipetable (lua_State *L, int idx) {
   const TValue *o;
+  lua_Unsigned slots;
   lua_lock(L);
   o = index2value(L, idx);
   api_check(L, ttistable(o), "table expected");
   api_checkwritable(L, hvalue(o));
-  luaH_wipetable(hvalue(o));
+  slots = luaH_wipetable(hvalue(o));
   lua_unlock(L);
+  return slots;
 }
 
 LUA_API void lua_clonetable (lua_State *L, int fromidx, int toidx) {

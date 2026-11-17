@@ -1401,9 +1401,10 @@ int luaH_type (const Table *t) {
   return isdummy(t) ? LUA_TTARRAY : LUA_TTMIXED;
 }
 
-void luaH_wipetable (Table *t) {
+lua_Unsigned luaH_wipetable (Table *t) {
   unsigned int asize = t->asize;
   unsigned int i = 0;
+  lua_Unsigned slots = asize;
   for (; i < asize; i++)  /* array part */
     *getArrTag(t, i) = LUA_VNIL;
 
@@ -1411,9 +1412,11 @@ void luaH_wipetable (Table *t) {
     Node *n, *limit = gnode(t, cast_sizet(sizenode(t)));
     for (n = gnode(t, 0); n < limit; n++)
       setnilvalue(gval(n));
+    slots += cast(lua_Unsigned, sizenode(t));
   }
 
   /* luaC_barrierback_ not required: all added values are nil/not-collectible */
+  return slots;
 }
 
 void luaH_clonetable (lua_State *L, const Table *from, Table *to) {

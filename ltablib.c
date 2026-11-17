@@ -72,12 +72,18 @@ static void checktab (lua_State *L, int arg, int what) {
 }
 
 
+static void chargeslots (lua_State *L, lua_Unsigned slots) {
+  lua_checkhook(L, (slots > cast_uint(INT_MAX)) ? INT_MAX : cast_int(slots));
+}
+
+
 static int tcreate (lua_State *L) {
   lua_Unsigned sizeseq = (lua_Unsigned)luaL_checkinteger(L, 1);
   lua_Unsigned sizerest = (lua_Unsigned)luaL_optinteger(L, 2, 0);
   luaL_argcheck(L, sizeseq <= cast_uint(INT_MAX), 1, "out of range");
   luaL_argcheck(L, sizerest <= cast_uint(INT_MAX), 2, "out of range");
   lua_createtable(L, cast_int(sizeseq), cast_int(sizerest));
+  chargeslots(L, sizeseq + sizerest);
   return 1;
 }
 
@@ -442,8 +448,7 @@ static int type (lua_State *L) {
 static int treset (lua_State *L) {
   luaL_checktype(L, 1, LUA_TTABLE);
   checkwritable(L, 1);
-  lua_wipetable(L, 1);
-
+  chargeslots(L, lua_wipetable(L, 1));
   lua_pushvalue(L, 1);
   return 1;
 }

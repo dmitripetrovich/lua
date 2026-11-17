@@ -182,7 +182,7 @@ LUAI_FUNC unsigned int luaH_rawnext (lua_State *L, Table *t, StkId v, unsigned i
 LUAI_FUNC lua_Unsigned luaH_getn (lua_State *L, Table *t);
 #if defined(GRIT_POWER_WOW)
 LUAI_FUNC int luaH_type (const Table *t);
-LUAI_FUNC void luaH_wipetable (Table *t);
+LUAI_FUNC lua_Unsigned luaH_wipetable (Table *t);
 LUAI_FUNC void luaH_clonetable (lua_State *L, const Table *t, Table *t2);
 LUAI_FUNC void luaH_compact (lua_State *L, Table *t);
 #endif
