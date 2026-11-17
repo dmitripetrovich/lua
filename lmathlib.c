@@ -167,6 +167,7 @@ static int math_sqrt (lua_State *L) {
 }
 
 
+#if defined(GRIT_COMPAT_GLM)
 /* grit-lua compatibility: numbers clamp to a float */
 static int math_clamp (lua_State *L) {
   if (lua_type(L, 1) == LUA_TNUMBER && lua_type(L, 2) == LUA_TNUMBER && lua_type(L, 3) == LUA_TNUMBER) {
@@ -178,6 +179,7 @@ static int math_clamp (lua_State *L) {
   }
   return luaglm_clamp(L);
 }
+#endif
 
 
 static int math_ult (lua_State *L) {
@@ -902,8 +904,10 @@ static const luaL_Reg mathlib[] = {
   { "trunc", math_trunc },
 #endif
 #endif
-  /* grit-lua compatbility */
+#if defined(GRIT_COMPAT_GLM)
+  /* grit-lua compatibility */
   { "clamp", math_clamp },
+#endif
   /* placeholders */
   {"random", NULL},
   {"randomseed", NULL},
@@ -942,7 +946,9 @@ LUAMOD_API int luaopen_math (lua_State *L) {
   lua_setfastcall(L, LUA_FASTMAX, math_max);
   lua_setfastcall(L, LUA_FASTSIN, math_sin);
   lua_setfastcall(L, LUA_FASTCOS, math_cos);
+#if defined(GRIT_COMPAT_GLM)
   lua_setfastcall(L, LUA_FASTCLAMP, math_clamp);
+#endif
 #endif
   return 1;
 }

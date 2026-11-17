@@ -291,10 +291,12 @@ static int luaB_type (lua_State *L) {
 /* the iteration functions an optimized 'for' loop recognizes (lvm.c) */
 #if defined(LUA_EXT_ITERATION)
 #define LUAB_ITERFUNC	LUAI_FUNC
+#if !defined(lvm_h)  /* else 'lvm.h' (as in 'onelua.c') declared them */
 LUAB_ITERFUNC int luaB_next (lua_State *L);
 LUAB_ITERFUNC int luaB_ipairsaux (lua_State *L);
 #if defined(GRIT_COMPAT_IPAIRS)
 LUAB_ITERFUNC int luaB_ipairsaux_raw (lua_State *L);
+#endif
 #endif
 #else
 #define LUAB_ITERFUNC	static

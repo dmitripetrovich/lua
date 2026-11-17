@@ -211,9 +211,13 @@ static int str_rep (lua_State *L) {
     return luaL_error(L, "resulting string too large");
   else {
     size_t totallen = (cast_sizet(n) * (len + lsep)) - lsep;
+#if defined(GRIT_POWER_BUDGET)
     size_t filled = len;
+#endif
     luaL_Buffer b;
     char *p = luaL_buffinitsize(L, &b, totallen);
+#if defined(GRIT_POWER_BUDGET)
+    /* copy by doubling: a few large copies instead of 'n' small ones */
     memcpy(p, s, len * sizeof(char));
     if (filled < totallen) {
       memcpy(p + filled, sep, lsep * sizeof(char));
@@ -224,6 +228,15 @@ static int str_rep (lua_State *L) {
       memcpy(p + filled, p, chunk * sizeof(char));
       filled += chunk;
     }
+#else
+    while (n-- > 1) {  /* first n-1 copies (followed by separator) */
+      memcpy(p, s, len * sizeof(char)); p += len;
+      if (lsep > 0) {  /* empty 'memcpy' is not that cheap */
+        memcpy(p, sep, lsep * sizeof(char)); p += lsep;
+      }
+    }
+    memcpy(p, s, len * sizeof(char));  /* last copy without separator */
+#endif
     luaL_pushresultsize(&b, totallen);
     luaL_checkhook(L, totallen);
   }
@@ -235,6 +248,7 @@ static int str_rep (lua_State *L) {
 ** Charge 'n' steps of a long loop to the count hook ('lua_checkhook')
 ** once every HOOKSTEPS of them; '*steps' accumulates them.
 */
+#if defined(GRIT_POWER_CHECKHOOK) || defined(GRIT_POWER_BUDGET)
 #define HOOKSTEPS	1024
 
 static void hooksteps (lua_State *L, size_t *steps, size_t n) {
@@ -243,6 +257,9 @@ static void hooksteps (lua_State *L, size_t *steps, size_t n) {
     *steps = 0;
   }
 }
+#else
+#define hooksteps(L,steps,n)	((void)(L), (void)(steps), (void)(n))
+#endif
 
 
 #if defined(GRIT_POWER_WOW)
@@ -908,7 +925,8 @@ static const char *match (MatchState *ms, const char *s, const char *p) {
 
 
 
-static const char *lmemfind (lua_State *L, const char *s1, size_t l1, const char *s2, size_t l2) {
+static const char *lmemfind (lua_State *L, const char *s1, size_t l1,
+                               const char *s2, size_t l2) {
   if (l2 == 0) return s1;  /* empty strings are everywhere */
   else if (l2 > l1) return NULL;  /* avoids a negative 'l1' */
   else {

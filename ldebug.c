@@ -167,8 +167,10 @@ LUA_API int lua_gethookcount (lua_State *L) {
 ** of its work; so, in a thread that can yield, the hook is left for
 ** the next Lua instruction, where it runs (and yields) as usual.
 */
+#if defined(GRIT_POWER_CHECKHOOK) || defined(GRIT_POWER_BUDGET)
 LUA_API void lua_checkhook (lua_State *L, int steps) {
   lua_lock(L);
+#if defined(GRIT_POWER_CHECKHOOK)
   if ((L->hookmask & LUA_MASKCOUNT) && L->basehookcount > 0 && (L->hookcount -= steps) <= 0) {
     if (yieldable(L))
       L->hookcount = 1;  /* call it at the next instruction */
@@ -177,12 +179,14 @@ LUA_API void lua_checkhook (lua_State *L, int steps) {
       luaD_hook(L, LUA_HOOKCOUNT, -1, 0, 0);
     }
   }
+#endif
 #if defined(GRIT_POWER_BUDGET)
   if ((G(L)->budget -= steps) <= 0)
     luaD_budget(L);
 #endif
   lua_unlock(L);
 }
+#endif
 
 
 LUA_API int lua_getstack (lua_State *L, int level, lua_Debug *ar) {

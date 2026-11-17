@@ -1195,8 +1195,10 @@ LUA_API int lua_resume (lua_State *L, lua_State *from, int nargs,
   L->nCcalls++;
   luai_userstateresume(L, nargs);
   api_checkpop(L, (L->status == LUA_OK) ? nargs + 1 : nargs);
+#if defined(GRIT_POWER_COHOOK)
   if (l_unlikely(L->hookmask & LUA_MASKCOENTER))
     luaD_hook(L, LUA_HOOKCOENTER, -1, 0, 0);
+#endif
   status = luaD_rawrunprotected(L, resume, &nargs);
    /* continue running after recoverable errors */
   status = precover(L, status);
@@ -1209,8 +1211,10 @@ LUA_API int lua_resume (lua_State *L, lua_State *from, int nargs,
   }
   *nresults = (status == LUA_YIELD) ? L->ci->u2.nyield
                                     : cast_int(L->top.p - (L->ci->func.p + 1));
+#if defined(GRIT_POWER_COHOOK)
   if (l_unlikely(L->hookmask & LUA_MASKCOEXIT))
     luaD_hook(L, LUA_HOOKCOEXIT, -1, 0, 0);
+#endif
   lua_unlock(L);
   return APIstatus(status);
 }

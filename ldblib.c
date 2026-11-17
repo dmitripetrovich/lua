@@ -476,24 +476,30 @@ static int db_traceback (lua_State *L) {
 
 
 static const luaL_Reg dblib[] = {
-  {"getinfo", db_getinfo},
-  {"getmetatable", db_getmetatable},
-  {"setmetatable", db_setmetatable},
-  {"getupvalue", db_getupvalue},
-  {"traceback", db_traceback},
 #if !defined(LUA_SANDBOX)
   {"debug", db_debug},
   {"getuservalue", db_getuservalue},
   {"gethook", db_gethook},
+#endif
+  {"getinfo", db_getinfo},
+#if !defined(LUA_SANDBOX)
   {"getlocal", db_getlocal},
   {"getregistry", db_getregistry},
+#endif
+  {"getmetatable", db_getmetatable},
+  {"getupvalue", db_getupvalue},
+#if !defined(LUA_SANDBOX)
   {"upvaluejoin", db_upvaluejoin},
   {"upvalueid", db_upvalueid},
   {"setuservalue", db_setuservalue},
   {"sethook", db_sethook},
   {"setlocal", db_setlocal},
+#endif
+  {"setmetatable", db_setmetatable},
+#if !defined(LUA_SANDBOX)
   {"setupvalue", db_setupvalue},
 #endif
+  {"traceback", db_traceback},
   {NULL, NULL}
 };
 

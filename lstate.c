@@ -391,7 +391,9 @@ LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud, unsigned seed) {
   g->basebudget = g->budget = MAX_LMEM;
 #endif
   g->seed = seed;
+#if defined(LUA_SANDBOX)
   g->opaqueid = 0;
+#endif
   g->gcstp = GCSTPGC;  /* no GC while building state */
   g->strt.size = g->strt.nuse = 0;
   g->strt.hash = NULL;

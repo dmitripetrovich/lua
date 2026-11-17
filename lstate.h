@@ -335,7 +335,9 @@ typedef struct GAME_SD global_State {
   TValue l_registry;
   TValue nilvalue;  /* a nil value */
   unsigned int seed;  /* randomized seed for hashes */
+#if defined(LUA_SANDBOX)
   lua_Unsigned opaqueid;  /* last identifier given by 'lua_opaqueid' */
+#endif
   lu_byte gcparams[LUA_GCPN];
   lu_byte currentwhite;
   lu_byte gcstate;  /* state of garbage collector */

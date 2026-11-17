@@ -1045,11 +1045,13 @@ LUAI_FUNC lua_Integer luaO_HashString (const char *string, size_t length,
                                        int ignore_case);
 LUAI_FUNC int lglm_tostr (const TValue *obj, char *buff, size_t len);
 
+#if defined(GRIT_POWER_GAMELUA)
 /*
 ** GameLua: scriptHandler
 */
 
 LUA_API const TValue *lua_getvalue (lua_State* L, int idx);
+#endif
 
 #endif
 

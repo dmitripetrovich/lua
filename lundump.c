@@ -25,20 +25,13 @@
 #include "lundump.h"
 #include "lzio.h"
 
+#if defined(GRIT_POWER_UNDUMPHOOK)
 /* when set, a binary chunk loads only if this hook accepts it */
 lua_UndumpHook pUndumpHook = NULL;
+#endif
 
-#if defined(LUA_NO_BYTECODE)
-LClosure *luaU_undump(lua_State *L, ZIO *Z, Table *anchor, const char *name,
-                      int fixed) {
-  UNUSED(L);
-  UNUSED(Z);
-  UNUSED(anchor);
-  UNUSED(name);
-  UNUSED(fixed);
-  return NULL;
-}
-#else
+/* (with LUA_NO_BYTECODE, 'luaD_protectedparser' never loads binary chunks) */
+#if !defined(LUA_NO_BYTECODE)
 
 #if !defined(luai_verifycode)
 #define luai_verifycode(L,f)  /* empty */
@@ -449,8 +442,10 @@ LClosure *luaU_undump (lua_State *L, ZIO *Z, Table *anchor, const char *name,
   S.Z = Z;
   S.fixed = cast_byte(fixed);
   S.offset = 1;  /* fist byte was already read */
+#if defined(GRIT_POWER_UNDUMPHOOK)
   if (pUndumpHook && !pUndumpHook(Z->p, Z->n))
     error(&S, "forbidden");
+#endif
   checkHeader(&S);
   S.h = anchor;
   S.nstr = 0;

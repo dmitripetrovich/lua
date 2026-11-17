@@ -129,7 +129,11 @@ LUALIB_API int (luaL_getsubtable) (lua_State *L, int idx, const char *fname);
 LUALIB_API void (luaL_traceback) (lua_State *L, lua_State *L1,
                                   const char *msg, int level);
 
+#if defined(GRIT_POWER_CHECKHOOK) || defined(GRIT_POWER_BUDGET)
 LUALIB_API void (luaL_checkhook) (lua_State *L, lua_Unsigned steps);
+#else
+#define luaL_checkhook(L,steps)	((void)(L), (void)(steps))
+#endif
 
 LUALIB_API void (luaL_requiref) (lua_State *L, const char *modname,
                                  lua_CFunction openf, int glb);

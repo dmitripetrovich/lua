@@ -47,6 +47,7 @@ void luaZ_init (lua_State *L, ZIO *z, lua_Reader reader, void *data) {
 
 /* --------------------------------------------------------------- read --- */
 
+#if !defined(LUA_NO_BYTECODE)  /* only binary chunks read blocks */
 static int checkbuffer (ZIO *z) {
   if (z->n == 0) {  /* no bytes in buffer? */
     if (luaZ_fill(z) == EOZ)  /* try to read more */
@@ -87,3 +88,4 @@ const void *luaZ_getaddr (ZIO* z, size_t n) {
   z->p += n;
   return res;
 }
+#endif

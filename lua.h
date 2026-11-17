@@ -59,7 +59,9 @@
 
 typedef struct lua_State lua_State;
 
+#if defined(GRIT_POWER_UNDUMPHOOK)
 typedef int (*lua_UndumpHook) (const char* p, size_t n);
+#endif
 
 
 /*
@@ -539,8 +541,10 @@ LUA_API void (lua_closeslot) (lua_State *L, int idx);
 #define LUA_HOOKLINE	2
 #define LUA_HOOKCOUNT	3
 #define LUA_HOOKTAILCALL 4
+#if defined(GRIT_POWER_COHOOK)
 #define LUA_HOOKCOENTER 5
 #define LUA_HOOKCOEXIT 6
+#endif
 
 
 /*
@@ -550,8 +554,10 @@ LUA_API void (lua_closeslot) (lua_State *L, int idx);
 #define LUA_MASKRET	(1 << LUA_HOOKRET)
 #define LUA_MASKLINE	(1 << LUA_HOOKLINE)
 #define LUA_MASKCOUNT	(1 << LUA_HOOKCOUNT)
+#if defined(GRIT_POWER_COHOOK)
 #define LUA_MASKCOENTER	(1 << LUA_HOOKCOENTER)
 #define LUA_MASKCOEXIT	(1 << LUA_HOOKCOEXIT)
+#endif
 
 
 LUA_API int (lua_getstack) (lua_State *L, int level, lua_Debug *ar);
@@ -569,7 +575,11 @@ LUA_API void (lua_sethook) (lua_State *L, lua_Hook func, int mask, int count);
 LUA_API lua_Hook (lua_gethook) (lua_State *L);
 LUA_API int (lua_gethookmask) (lua_State *L);
 LUA_API int (lua_gethookcount) (lua_State *L);
+#if defined(GRIT_POWER_CHECKHOOK) || defined(GRIT_POWER_BUDGET)
 LUA_API void (lua_checkhook) (lua_State *L, int steps);
+#else
+#define lua_checkhook(L,steps)	((void)(L), (void)(steps))
+#endif
 
 
 struct lua_Debug {
@@ -594,16 +604,20 @@ struct lua_Debug {
   struct CallInfo *i_ci;  /* active function */
 };
 
+#if defined(GRIT_POWER_GAMELUA)
 /*
 ** GameLua: internal dbg
 */
 
 LUA_API int lua_toprotos (lua_State* L, int idx);
+#endif
 
+#if defined(LUA_SANDBOX)
 #define LUA_OPAQUEID_FMT "%016" LUA_INTEGER_FRMLEN "x"
 
 /* get or create a unique identifier for the value at the given index */
 LUA_API lua_Integer lua_opaqueid(lua_State *L, int idx);
+#endif
 
 /* }====================================================================== */
 

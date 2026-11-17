@@ -16,7 +16,9 @@
 
 #include "lua.h"
 
+#if defined(GRIT_POWER_GAMELUA)
 #include "lauxlib.h"
+#endif
 
 #include "lapi.h"
 #include "ldebug.h"
@@ -1809,6 +1811,7 @@ LUA_API void lua_upvaluejoin (lua_State *L, int fidx1, int n1,
 }
 
 
+#if defined(GRIT_POWER_GAMELUA)
 /*
 ** GameLua: scriptHandler
 */
@@ -1844,8 +1847,10 @@ LUA_API int lua_toprotos (lua_State* L, int idx) {
 LUA_API const TValue *lua_getvalue (lua_State* L, int idx) {
   return index2value(L, idx);
 }
+#endif
 
 
+#if defined(LUA_SANDBOX)
 static lua_Integer g_opaqueIdCounter = 0;
 
 /* get or create a unique identifier for the value at the given index */
@@ -1889,3 +1894,4 @@ LUA_API lua_Integer lua_opaqueid(lua_State *L, int idx) {
   lua_pop(L, 2);  // pop id + idTable
   return id;
 }
+#endif

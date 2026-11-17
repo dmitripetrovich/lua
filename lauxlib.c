@@ -1048,9 +1048,11 @@ LUALIB_API const char *luaL_tolstring (lua_State *L, int idx, size_t *len) {
       case LUA_TNIL:
         lua_pushliteral(L, "nil");
         break;
-      case LUA_TLIGHTUSERDATA:
+#if defined(LUA_SANDBOX)
+      case LUA_TLIGHTUSERDATA:  /* (no opaque id for a bare pointer) */
         lua_pushliteral(L, "userdata");
         break;
+#endif
       default: {
         int tt = luaL_getmetafield(L, idx, "__name");  /* try name */
         const char *kind = (tt == LUA_TSTRING) ? lua_tostring(L, -1) :
@@ -1320,9 +1322,11 @@ LUALIB_API lua_State *(luaL_newstate) (void) {
 }
 
 
+#if defined(GRIT_POWER_CHECKHOOK) || defined(GRIT_POWER_BUDGET)
 LUALIB_API void luaL_checkhook (lua_State *L, lua_Unsigned steps) {
   lua_checkhook(L, (steps > (lua_Unsigned)INT_MAX) ? INT_MAX : (int)steps);
 }
+#endif
 
 
 LUALIB_API void luaL_checkversion_ (lua_State *L, lua_Number ver, size_t sz) {
