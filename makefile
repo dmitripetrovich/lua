@@ -115,7 +115,7 @@ LUA_PATCHES = -DLUA_C99_MATHLIB  \
 		-DGRIT_POWER_FINDSPLIT \
 		-DGRIT_POWER_READLINE_HISTORY \
 
-CGLM_DIR ?= ../cglm
+CGLM_DIR ?= cglm
 
 # To enable Linux goodies, -DLUA_USE_LINUX
 # For C89, "-std=c89 -DLUA_USE_C89"

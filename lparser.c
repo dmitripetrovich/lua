@@ -2328,6 +2328,7 @@ static void localstat (LexState *ls) {
     int regs = fs->freereg;
     int vars = fs->nactvar;
     int fromvar;
+    UNUSED(regs);
     luaK_reserveregs(fs, nvars);
     suffixedexp(ls, &e);
     adjustlocalvars(ls, nvars);
