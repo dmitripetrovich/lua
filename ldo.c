@@ -611,24 +611,51 @@ void luaD_hook (lua_State *L, int event, int line,
 }
 
 #if defined(GRIT_POWER_BUDGET)
+static void callbudget (lua_State *L, void *ud) {
+  global_State *g = G(L);
+  UNUSED(ud);
+  (*g->budgetf)(L, g->ud_budget);
+}
+
+
+/*
+** Call the budget function. It runs protected and without the message
+** handler, so an error it raises (the usual way to stop a script) finds
+** this thread as it was; the error is then raised again from here, where
+** the message handler runs under the budget like any other code.
+** 'inbudget' (not 'allowhook', which finalizers clear) stops the budget
+** function from being re-entered, so finalizers are budgeted too.
+*/
 void luaD_budget (lua_State *L) {
   global_State *g = G(L);
   g->budget = g->basebudget;
-  if (g->budgetf && L->allowhook) {
+  if (g->budgetf && !g->inbudget) {
     CallInfo *ci = L->ci;
     ptrdiff_t top = savestack(L, L->top.p);
     ptrdiff_t ci_top = savestack(L, ci->top.p);
+    ptrdiff_t old_errfunc = L->errfunc;
+    TStatus status;
     if (isLua(ci) && L->top.p < ci->top.p)
       L->top.p = ci->top.p;
     luaD_checkstack(L, LUA_MINSTACK);
     if (ci->top.p < L->top.p + LUA_MINSTACK)
       ci->top.p = L->top.p + LUA_MINSTACK;
-    L->allowhook = 0;
+    g->inbudget = 1;
+    L->errfunc = 0;
     lua_unlock(L);
-    (*g->budgetf)(L, g->ud_budget);
+    status = luaD_rawrunprotected(L, callbudget, NULL);
     lua_lock(L);
-    L->allowhook = 1;
+    L->errfunc = old_errfunc;
+    g->inbudget = 0;
     ci->top.p = restorestack(L, ci_top);
+    if (l_unlikely(status != LUA_OK)) {
+      StkId oldtop = restorestack(L, top);
+      setobjs2s(L, oldtop, L->top.p - 1);  /* move error object */
+      L->top.p = oldtop + 1;
+      if (status == LUA_ERRRUN)
+        luaG_errormsg(L);  /* call message handler, then raise */
+      luaD_throw(L, status);
+    }
     L->top.p = restorestack(L, top);
   }
 }

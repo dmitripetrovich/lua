@@ -382,6 +382,7 @@ typedef struct GAME_SD global_State {
   l_mem basebudget;
   lua_Budget budgetf;
   void *ud_budget;
+  lu_byte inbudget;  /* true while 'budgetf' runs */
 #endif
   LX mainth;  /* main thread of this state */
 } global_State;

@@ -54,7 +54,8 @@
 
 
 #if defined(GRIT_POWER_BUDGET)
-#define luaD_checkbudgetp(L,p)	{ if (l_unlikely(--G(L)->budget <= 0)) { ptrdiff_t b__ = savestack(L, p); luaD_budget(L); p = restorestack(L, b__); } }
+/* a finalizer is always called; its body is still budgeted */
+#define luaD_checkbudgetp(L,p)	{ if (l_unlikely(--G(L)->budget <= 0) && !(L->ci->callstatus & CIST_FIN)) { ptrdiff_t b__ = savestack(L, p); luaD_budget(L); p = restorestack(L, b__); } }
 #else
 #define luaD_checkbudgetp(L,p)	((void)0)
 #endif
