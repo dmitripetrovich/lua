@@ -365,7 +365,7 @@ LUAB_ITERFUNC int luaB_ipairsaux (lua_State *L) {
 */
 LUAB_ITERFUNC int luaB_ipairsaux_raw (lua_State *L) {
   int t = lua_rawtype(L, 1);
-  lua_Integer i = luaL_checkinteger(L, 2) + 1;
+  lua_Integer i = luaL_intop(+, luaL_checkinteger(L, 2), 1);
   if (!luaB_hasnext(t))
     luaL_typeerror(L, 1, lua_typename(L, LUA_TTABLE));
   lua_pushinteger(L, i);
@@ -379,8 +379,12 @@ LUAB_ITERFUNC int luaB_ipairsaux_raw (lua_State *L) {
 ** that can affect the traversal.
 */
 static int luaB_ipairs (lua_State *L) {
-  lua_CFunction iter = (luaL_getmetafield(L, 1, "__index") != LUA_TNIL) ? luaB_ipairsaux : luaB_ipairsaux_raw;
+  lua_CFunction iter = luaB_ipairsaux_raw;
   luaL_checkany(L, 1);
+  if (luaL_getmetafield(L, 1, "__index") != LUA_TNIL) {
+    lua_pop(L, 1);  /* remove '__index' */
+    iter = luaB_ipairsaux;
+  }
   if (luaL_getmetafield(L, 1, "__ipairs") == LUA_TNIL) {  /* no metamethod? */
     lua_pushcfunction(L, iter);  /* iteration function */
     lua_pushvalue(L, 1);  /* state */

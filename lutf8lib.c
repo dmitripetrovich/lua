@@ -276,7 +276,7 @@ static lua_Integer utf8_to_utf16_length(const char *u8str, size_t u8len) {
 
     u16measuredLen++;
     u8charLen = utf8_codepointlen(*u8cur);
-    if ((u8cur + u8charLen - 1 >= u8end))
+    if (u8charLen > (size_t)(u8end - u8cur))
       return -1;  /* Malformed UTF8 */
     else {
       const l_uint32 codepoint = utf8_to_utf32(u8cur, u8charLen);
@@ -338,8 +338,9 @@ static int utf16len (lua_State *L) {
   luaL_argcheck(L, 1 <= posi && --posi <= (lua_Integer)len, 2, "initial position out of bounds");
   luaL_argcheck(L, --posj < (lua_Integer)len, 3, "final position out of bounds");
 
-  lua_pushinteger(L, utf8_to_utf16_length(s + posi, (size_t)(posj - posi + 1)));
-  luaL_checkhook(L, l_castS2U(posj - posi + 1));
+  len = (posi <= posj) ? (size_t)(posj - posi + 1) : 0;  /* empty if j < i */
+  lua_pushinteger(L, utf8_to_utf16_length(s + posi, len));
+  luaL_checkhook(L, len);
   return 1;
 }
 #endif

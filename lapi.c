@@ -1876,7 +1876,7 @@ LUA_API lua_Integer lua_opaqueid(lua_State *L, int idx) {
     id = lua_tointeger(L, -1);
   }
   else {
-    id = (++g_opaqueIdCounter * 0x4F1BBCDCBFA53E09) & 0x7FFFFFFFFFFFFFFF;
+    id = l_castU2S((++G(L)->opaqueid * 0x4F1BBCDCBFA53E09u) & 0x7FFFFFFFFFFFFFFFu);
     lua_pushvalue(L, idx);  // push the object
     lua_pushinteger(L, id);
     lua_rawset(L, -4);

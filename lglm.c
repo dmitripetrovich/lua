@@ -1782,7 +1782,7 @@ int luaglm_fastcall (lua_State *L, int id, StkId ra, int nargs) {
         setfltvalue(s2v(ra), cast_num(dot));
       }
       else if (ttisinteger(o1) && ttisinteger(o2)) {
-        setivalue(s2v(ra), ivalue(o1) * ivalue(o2));
+        setivalue(s2v(ra), luaL_intop(*, ivalue(o1), ivalue(o2)));
       }
       else if (ttisnumber(o1) && ttisnumber(o2)) {
         setfltvalue(s2v(ra), nvalue(o1) * nvalue(o2));
@@ -1816,7 +1816,7 @@ int luaglm_dot(lua_State *L) {
     glm_pushnumber(L, cast_num(dot));
   }
   else if (ttisinteger(o1) && ttisinteger(o2))
-    glm_pushinteger(L, ivalue(o1) * ivalue(o2));
+    glm_pushinteger(L, luaL_intop(*, ivalue(o1), ivalue(o2)));
   else if (ttisnumber(o1) && ttisnumber(o2)) /* integer coercion */
     glm_pushnumber(L, nvalue(o1) * nvalue(o2));
   else
@@ -2159,7 +2159,7 @@ int luaglm_bitfieldExtract(lua_State *L) {
 #define T lua_Unsigned
   lua_Unsigned mask = bits >= cast(T, LUAI_DIGITS) ? ~(T)(0) : ((T)(1) << bits) - (T)(1);
 #undef T
-  base = (base >> offset) & mask;
+  base = (offset >= cast(lua_Unsigned, LUAI_DIGITS)) ? 0 : (base >> offset) & mask;
   glm_pushinteger(L, l_castU2S(base));
   return 1;
 }
@@ -2172,8 +2172,10 @@ int luaglm_bitfieldInsert(lua_State *L) {
 #define T lua_Unsigned
   lua_Unsigned mask = bits >= cast(T, LUAI_DIGITS) ? ~(T)(0) : ((T)(1) << bits) - (T)(1);
 #undef T
-  mask <<= offset;
-  base = (base & ~mask) | ((insert << offset) & mask);
+  if (offset < cast(lua_Unsigned, LUAI_DIGITS)) {  /* else nothing is inserted */
+    mask <<= offset;
+    base = (base & ~mask) | ((insert << offset) & mask);
+  }
   glm_pushinteger(L, l_castU2S(base));
   return 1;
 }

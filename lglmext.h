@@ -2259,11 +2259,18 @@ CGLM_INLINE void glm_ivec4_broadcast(int val, ivec4 d) {
 #endif
 }
 
+/* float to int, saturating at the int range (NaN gives 0): a plain cast is UB */
+CGLM_INLINE int glm_f2i(float f) {
+  if (f >= -2147483648.0f && f < 2147483648.0f)
+    return (int)f;
+  return (f > 0.0f) ? 2147483647 : (f < 0.0f) ? (-2147483647 - 1) : 0;
+}
+
 CGLM_INLINE void glm_ivec4f(vec4 v, ivec4 dest) {
-  dest[0] = (int)v[0];
-  dest[1] = (int)v[1];
-  dest[2] = (int)v[2];
-  dest[3] = (int)v[3];
+  dest[0] = glm_f2i(v[0]);
+  dest[1] = glm_f2i(v[1]);
+  dest[2] = glm_f2i(v[2]);
+  dest[3] = glm_f2i(v[3]);
 }
 
 CGLM_INLINE void glm_vec4i(ivec4 v, vec4 dest) {
