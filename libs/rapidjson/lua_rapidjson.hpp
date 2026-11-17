@@ -299,7 +299,7 @@ static inline int parseVector (lua_State *L, int idx, lua_Float4 *f) {
 #define JSON_DEFAULT (JSON_LUA_NULL | JSON_ARRAY_EMPTY | JSON_ARRAY_WITH_HOLES | JSON_NAN_AND_INF | JSON_DEFAULT_BIT32)
 
 namespace LuaSAX {
-  struct Key : std::unary_function<LuaSAX::Key, bool> {
+  struct Key {
     bool is_number, is_integer;
     union Data {
       lua_Number n;

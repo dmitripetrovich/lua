@@ -282,7 +282,7 @@ TString *luaS_newblob (lua_State *L, const char* str, size_t l) {
   else {
     memset(getlngstr(ts), 0, l * sizeof(char));
   }
-  ts->contents[l] = ' ';  /* ending 0 */
+  ts->contents[l] = '\0';  /* ending 0 */
   return ts;
 }
 #endif
