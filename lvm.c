@@ -773,6 +773,12 @@ void luaV_concat (lua_State *L, int total) {
         ts = luaS_newlstr(L, buff, tl);
       }
       else {  /* long string; copy strings directly to final result */
+#if defined(GRIT_POWER_ALLOWANCE)
+        if (l_unlikely(!luaM_allows(L, tl))) {
+          L->top.p = top - total;
+          luaG_runerror(L, "string length overflow");
+        }
+#endif
         ts = luaS_createlngstrobj(L, tl);
         copy2buff(top, n, getlngstr(ts));
       }

@@ -255,6 +255,9 @@
 LUAI_FUNC void luaC_fix (lua_State *L, GCObject *o);
 LUAI_FUNC void luaC_freeallobjects (lua_State *L);
 LUAI_FUNC void luaC_step (lua_State *L);
+#if defined(GRIT_POWER_GCPACE)
+LUAI_FUNC int luaC_pace (lua_State *L, lua_GCPace done, void *ud);
+#endif
 LUAI_FUNC void luaC_runtilstate (lua_State *L, int state, int fast);
 LUAI_FUNC void luaC_fullgc (lua_State *L, int isemergency);
 LUAI_FUNC GCObject *luaC_newobj (lua_State *L, lu_byte tt, size_t sz);

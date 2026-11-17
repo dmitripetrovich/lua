@@ -1533,7 +1533,11 @@ static void entersweep (lua_State *L) {
   global_State *g = G(L);
   g->gcstate = GCSswpallgc;
   lua_assert(g->sweepgc == NULL);
+#if defined(GRIT_POWER_GCPACE)
+  g->sweepgc = &g->allgc;
+#else
   g->sweepgc = sweeptolive(L, &g->allgc);
+#endif
 }
 
 
@@ -1786,6 +1790,52 @@ void luaC_step (lua_State *L) {
     luai_tracegc(L, 0);  /* for internal debugging */
   }
 }
+
+
+#if defined(GRIT_POWER_GCPACE)
+int luaC_pace (lua_State *L, lua_GCPace done, void *ud) {
+  global_State *g = G(L);
+  l_mem stepsize = applygcparam(g, STEPSIZE, 100);
+  l_mem work2do = applygcparam(g, STEPMUL, stepsize / cast_int(sizeof(void*)));
+  l_mem work = 0;
+  l_mem paced = 0;
+  l_mem stres;
+  if (!gcrunning(g))
+    return 0;
+  if (g->gckind == KGC_GENMINOR) {
+    if (g->GCdebt > 0)
+      return 0;
+    youngcollection(L, g);
+    setminordebt(g);
+    return 1;
+  }
+  if (g->gcstate == GCSpause && g->GCdebt > 0)
+    return 0;
+  if (work2do <= 0)
+    work2do = 1;
+  for (;;) {
+    stres = singlestep(L, 0);
+    if (stres == step2minor)
+      return 1;
+    if (stres == step2pause)
+      break;
+    if (stres > 0)
+      work += stres;
+    if (work >= work2do || stres == atomicstep) {
+      paced += work;
+      work = 0;
+      if ((*done)(ud))
+        break;
+    }
+  }
+  if (g->gcstate == GCSpause) {
+    setpause(g);
+    return 1;
+  }
+  luaE_setdebt(g, ((g->GCdebt > 0) ? g->GCdebt : 0) + (paced + work) / work2do * stepsize);
+  return 0;
+}
+#endif
 
 
 /*

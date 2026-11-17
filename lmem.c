@@ -159,6 +159,26 @@ void luaM_free_ (lua_State *L, void *block, size_t osize) {
 ** In case of allocation fail, this function will do an emergency
 ** collection to free some memory and then try the allocation again.
 */
+#if defined(GRIT_POWER_ALLOWANCE)
+#define ALLOWMARGIN	256
+
+static int fitsallowance (global_State *g, size_t size) {
+  size_t allowed = (*g->allowf)(g->ud);
+  return allowed >= ALLOWMARGIN && size <= allowed - ALLOWMARGIN;
+}
+
+
+int luaM_allows (lua_State *L, size_t size) {
+  global_State *g = G(L);
+  if (g->allowf == NULL || fitsallowance(g, size))
+    return 1;
+  if (cantryagain(g))
+    luaC_fullgc(L, 1);
+  return fitsallowance(g, size);
+}
+#endif
+
+
 static void *tryagain (lua_State *L, void *block,
                        size_t osize, size_t nsize) {
   global_State *g = G(L);

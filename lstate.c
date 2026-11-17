@@ -374,6 +374,9 @@ LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud, unsigned seed) {
   g->ud = ud;
   g->warnf = NULL;
   g->ud_warn = NULL;
+#if defined(GRIT_POWER_ALLOWANCE)
+  g->allowf = NULL;
+#endif
 #if defined(GRIT_POWER_BUDGET)
   g->budgetf = NULL;
   g->ud_budget = NULL;

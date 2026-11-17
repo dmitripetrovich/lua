@@ -110,6 +110,7 @@ int mp_table_is_an_array (lua_State *L, int idx, lua_Integer flags, size_t *arra
   lua_pushnil(L);
   while (lua_next(L, i_idx)) {
     lua_Integer n;
+    lua_checkhook(L, 1);
 #if !defined(LUA_MSGPACK_COMPAT)
     size_t strlen = 0;
     const char *key = mp_nullptr;
@@ -120,11 +121,7 @@ int mp_table_is_an_array (lua_State *L, int idx, lua_Integer flags, size_t *arra
       max = mp_cast(size_t, n) > max ? mp_cast(size_t, n) : max;
     }
 #if !defined(LUA_MSGPACK_COMPAT)
-    else if (lua_type(L, -2) == LUA_TSTRING
-             && mp_isinteger(L, -1)
-             && (n = lua_tointeger(L, -1), (n >= 1 && mp_cast(size_t, n) <= MP_MAX_LUAINDEX))
-             && (key = lua_tolstring(L, -2, &strlen), key != mp_nullptr)
-             && strlen == 1 && key[0] == 'n') {
+    else if (lua_type(L, -2) == LUA_TSTRING && mp_isinteger(L, -1) && (n = lua_tointeger(L, -1), (n >= 1 && mp_cast(size_t, n) <= MP_MAX_LUAINDEX)) && (key = lua_tolstring(L, -2, &strlen), key != mp_nullptr) && strlen == 1 && key[0] == 'n') {
       arraylen = mp_cast(size_t, n);
       max = arraylen > max ? arraylen : max;
     }
@@ -176,12 +173,14 @@ void mp_encode_lua_table_as_map (lua_State *L, lua_msgpack *ud, int idx, int lev
   lua_pushnil(L);
   while (lua_next(L, i_idx)) {
     len++;
+    lua_checkhook(L, 1);
     lua_pop(L, 1);
   }
 
   msgpack_pack_map(mp_get_packer(L, ud), len);
   lua_pushnil(L);
   while (lua_next(L, i_idx)) {
+    lua_checkhook(L, 1);
     lua_msgpack_encode(L, ud, -2, level + 1);
     lua_msgpack_encode(L, ud, -1, level + 1);
     lua_pop(L, 1);
@@ -283,6 +282,7 @@ static int mp_decode_to_lua_type (lua_State *L, msgpack_object *obj, lua_Integer
       lua_createtable(L, (array.size <= INT_MAX) ? mp_cast(int, array.size) : 0, 0);
       mp_checkstack(L, 2);
       for (i = 0; i < array.size; ++i) {
+        lua_checkhook(L, 1);
 #if LUA_VERSION_NUM >= 503
         if (mp_decode_to_lua_type(L, &(array.ptr[i]), flags)) {
           if (flags & MP_USE_SENTINEL)
@@ -311,6 +311,7 @@ static int mp_decode_to_lua_type (lua_State *L, msgpack_object *obj, lua_Integer
       lua_newtable(L);
       mp_checkstack(L, 5);
       for (i = 0; i < map.size; ++i) {
+        lua_checkhook(L, 1);
         if (mp_decode_to_lua_type(L, &(map.ptr[i].key), flags)) {
           if (flags & MP_USE_SENTINEL)
             mp_replace_null(L);

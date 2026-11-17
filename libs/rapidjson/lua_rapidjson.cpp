@@ -155,11 +155,7 @@ bool table_is_json_array (lua_State *L, int idx, lua_Integer flags, size_t *arra
       count++;
     }
 #if defined(LUA_RAPIDJSON_COMPAT)
-    else if (lua_type(L, -2) == LUA_TSTRING
-             && json_isinteger(L, -1)
-             && (n = lua_tointeger(L, -1), (n >= 1 && static_cast<size_t>(n) <= JSON_MAX_LUAINDEX))
-             && (key = lua_tolstring(L, -2, &strlen)) != nullptr
-             && strlen == 1 && key[0] == 'n') {
+    else if (lua_type(L, -2) == LUA_TSTRING && json_isinteger(L, -1) && (n = lua_tointeger(L, -1), (n >= 1 && static_cast<size_t>(n) <= JSON_MAX_LUAINDEX)) && (key = lua_tolstring(L, -2, &strlen)) != nullptr && strlen == 1 && key[0] == 'n') {
       arraylen = static_cast<size_t>(n);
       max = arraylen > max ? arraylen : max;
     }
@@ -627,6 +623,7 @@ LUALIB_API int rapidjson_encode (lua_State *L) {
     return luaL_error(L, "invalid encoder parameters");
 
   bool has_error_string = false;
+  int results = -1;
   try {
     RAPIDJSON_ALLOCATOR_INIT(L, _allocator);
 #if defined(LUA_RAPIDJSON_ANCHOR)
@@ -649,15 +646,15 @@ LUALIB_API int rapidjson_encode (lua_State *L) {
 
     if (encoder.flags & JSON_PRETTY_PRINT) {
       if (encoder.flags & JSON_NAN_AND_INF)
-        return encoder.Encode<EncoderData::PrettyInf<>>(L, 1, error_handler_idx, userdata_idx);
+        results = encoder.Encode<EncoderData::PrettyInf<>>(L, 1, error_handler_idx, userdata_idx);
       else
-        return encoder.Encode<EncoderData::Pretty<>>(L, 1, error_handler_idx, userdata_idx);
+        results = encoder.Encode<EncoderData::Pretty<>>(L, 1, error_handler_idx, userdata_idx);
     }
     else {
       if (encoder.flags & JSON_NAN_AND_INF)
-        return encoder.Encode<EncoderData::BasicInf<>>(L, 1, error_handler_idx, userdata_idx);
+        results = encoder.Encode<EncoderData::BasicInf<>>(L, 1, error_handler_idx, userdata_idx);
       else
-        return encoder.Encode<EncoderData::Basic<>>(L, 1, error_handler_idx, userdata_idx);
+        results = encoder.Encode<EncoderData::Basic<>>(L, 1, error_handler_idx, userdata_idx);
     }
   }
   catch (const rapidjson::LuaCallException &e) {
@@ -674,6 +671,10 @@ LUALIB_API int rapidjson_encode (lua_State *L) {
     lua_settop(L, top);
   }
 
+  if (results >= 0) {
+    luaL_checkhook(L, lua_rawlen(L, -1));
+    return results;
+  }
   if (!has_error_string)
     lua_pushstring(L, "Unexpected exception");
   return lua_error(L);
@@ -732,6 +733,7 @@ LUALIB_API int rapidjson_decode (lua_State *L) {
 #endif
 
   bool has_error_string = false;
+  bool decoded = false;
   try {
     RAPIDJSON_ALLOCATOR_INIT(L, _allocator);
 #if defined(LUA_RAPIDJSON_ANCHOR)
@@ -756,7 +758,7 @@ LUALIB_API int rapidjson_decode (lua_State *L) {
     }
     else {
       lua_pushinteger(L, 1 + static_cast<lua_Integer>(position));
-      return 2;
+      decoded = true;
     }
   }
   catch (const rapidjson::LuaCallException &e) {
@@ -781,6 +783,10 @@ LUALIB_API int rapidjson_decode (lua_State *L) {
     lua_settop(L, top);
   }
 
+  if (decoded) {
+    luaL_checkhook(L, len);
+    return 2;
+  }
   if (!has_error_string)
     lua_pushstring(L, "Unexpected exception");
   return lua_error(L);

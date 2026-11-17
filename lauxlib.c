@@ -622,6 +622,18 @@ static void newbox (lua_State *L) {
 ** Compute new size for buffer 'B', enough to accommodate extra 'sz'
 ** bytes plus one for a terminating zero.
 */
+#if defined(GRIT_POWER_ALLOWANCE)
+static size_t allowedbuffsize (luaL_Buffer *B, size_t newsize, size_t needed) {
+  size_t had = buffonstack(B) ? B->size : 0;
+  if (lua_allows(B->L, newsize - had))
+    return newsize;
+  if (!lua_allows(B->L, needed - had))
+    return cast_sizet(luaL_error(B->L, "resulting string too large"));
+  return needed;
+}
+#endif
+
+
 static size_t newbuffsize (luaL_Buffer *B, size_t sz) {
   size_t newsize = B->size;
   if (l_unlikely(sz >= MAX_SIZE - B->n))
@@ -631,6 +643,9 @@ static size_t newbuffsize (luaL_Buffer *B, size_t sz) {
     newsize += (newsize >> 1);  /* new size *= 1.5 */
   if (newsize < B->n + sz + 1)  /* not big enough? */
     newsize = B->n + sz + 1;
+#if defined(GRIT_POWER_ALLOWANCE)
+  newsize = allowedbuffsize(B, newsize, B->n + sz + 1);
+#endif
   return newsize;
 }
 
@@ -1294,6 +1309,11 @@ LUALIB_API lua_State *(luaL_newstate) (void) {
     lua_setwarnf(L, warnfon, L);
   }
   return L;
+}
+
+
+LUALIB_API void luaL_checkhook (lua_State *L, lua_Unsigned steps) {
+  lua_checkhook(L, (steps > (lua_Unsigned)INT_MAX) ? INT_MAX : (int)steps);
 }
 
 

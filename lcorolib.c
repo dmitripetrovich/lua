@@ -122,8 +122,7 @@ static int luaB_yield (lua_State *L) {
 #define COS_NORM	3
 
 
-static const char *const statname[] =
-  {"running", "dead", "suspended", "normal"};
+static const char *const statname[] = { "running", "dead", "suspended", "normal" };
 
 
 static int auxstatus (lua_State *L, lua_State *co) {
@@ -223,4 +222,3 @@ LUAMOD_API int luaopen_coroutine (lua_State *L) {
   luaL_newlib(L, co_funcs);
   return 1;
 }
-

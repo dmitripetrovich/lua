@@ -313,9 +313,9 @@ LUA_API int   (lua_setiuservalue) (lua_State *L, int idx, int n);
 #define LUA_TTMIXED 3
 
 LUA_API lua_Unsigned (lua_wipetable) (lua_State *L, int idx);
-LUA_API void  (lua_clonetable) (lua_State *L, int fromidx, int toidx);
+LUA_API lua_Unsigned (lua_clonetable) (lua_State *L, int fromidx, int toidx);
 LUA_API void  (lua_filltable) (lua_State *L, int narr, int fillidx);
-LUA_API void  (lua_compacttable) (lua_State *L, int idx);
+LUA_API lua_Unsigned (lua_compacttable) (lua_State *L, int idx);
 LUA_API int   (lua_tabletype) (lua_State *L, int idx);
 #endif
 
@@ -328,6 +328,19 @@ LUA_API void  (lua_setreadonly) (lua_State *L, int idx, int value);
 typedef void (*lua_Budget) (lua_State *L, void *ud);
 
 LUA_API void  (lua_setbudget) (lua_State *L, lua_Budget f, void *ud, int steps);
+#endif
+
+#if defined(GRIT_POWER_GCPACE)
+typedef int (*lua_GCPace) (void *ud);
+
+LUA_API int   (lua_gcpace) (lua_State *L, lua_GCPace done, void *ud);
+#endif
+
+#if defined(GRIT_POWER_ALLOWANCE)
+typedef size_t (*lua_Allowance) (void *ud);
+
+LUA_API void  (lua_setallowance) (lua_State *L, lua_Allowance f);
+LUA_API int   (lua_allows) (lua_State *L, size_t size);
 #endif
 
 /*

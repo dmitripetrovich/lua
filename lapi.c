@@ -963,8 +963,9 @@ LUA_API lua_Unsigned lua_wipetable (lua_State *L, int idx) {
   return slots;
 }
 
-LUA_API void lua_clonetable (lua_State *L, int fromidx, int toidx) {
+LUA_API lua_Unsigned lua_clonetable (lua_State *L, int fromidx, int toidx) {
   const TValue *from, *to;
+  lua_Unsigned slots;
   lua_lock(L);
   from = index2value(L, fromidx);
   to = index2value(L, toidx);
@@ -972,8 +973,9 @@ LUA_API void lua_clonetable (lua_State *L, int fromidx, int toidx) {
   api_check(L, ttistable(to), "table expected");
   if (hvalue(from) != hvalue(to))
     api_checkwritable(L, hvalue(to));
-  luaH_clonetable(L, hvalue(from), hvalue(to));
+  slots = luaH_clonetable(L, hvalue(from), hvalue(to));
   lua_unlock(L);
+  return slots;
 }
 
 /*
@@ -1000,14 +1002,16 @@ LUA_API void lua_filltable (lua_State *L, int narr, int fillidx) {
   lua_unlock(L);
 }
 
-LUA_API void lua_compacttable (lua_State *L, int idx) {
+LUA_API lua_Unsigned lua_compacttable (lua_State *L, int idx) {
   const TValue *o;
+  lua_Unsigned slots;
   lua_lock(L);
   o = index2value(L, idx);
   api_check(L, ttistable(o), "table expected");
   api_checkwritable(L, hvalue(o));
-  luaH_compact(L, hvalue(o));
+  slots = luaH_compact(L, hvalue(o));
   lua_unlock(L);
+  return slots;
 }
 #endif
 
@@ -1607,6 +1611,35 @@ void lua_setwarnf (lua_State *L, lua_WarnFunction f, void *ud) {
   G(L)->warnf = f;
   lua_unlock(L);
 }
+
+
+#if defined(GRIT_POWER_ALLOWANCE)
+LUA_API void lua_setallowance (lua_State *L, lua_Allowance f) {
+  lua_lock(L);
+  G(L)->allowf = f;
+  lua_unlock(L);
+}
+
+
+LUA_API int lua_allows (lua_State *L, size_t size) {
+  int res;
+  lua_lock(L);
+  res = luaM_allows(L, size);
+  lua_unlock(L);
+  return res;
+}
+#endif
+
+
+#if defined(GRIT_POWER_GCPACE)
+LUA_API int lua_gcpace (lua_State *L, lua_GCPace done, void *ud) {
+  int res;
+  lua_lock(L);
+  res = luaC_pace(L, done, ud);
+  lua_unlock(L);
+  return res;
+}
+#endif
 
 
 #if defined(GRIT_POWER_BUDGET)

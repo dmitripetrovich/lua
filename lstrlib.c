@@ -87,8 +87,10 @@ static int str_sub (lua_State *L) {
   const char *s = luaL_checklstring(L, 1, &l);
   size_t start = posrelatI(luaL_checkinteger(L, 2), l);
   size_t end = getendpos(L, 3, -1, l);
-  if (start <= end)
+  if (start <= end) {
     lua_pushlstring(L, s + start - 1, (end - start) + 1);
+    luaL_checkhook(L, (end - start) + 1);
+  }
   else lua_pushliteral(L, "");
   return 1;
 }
@@ -102,6 +104,7 @@ static int str_reverse (lua_State *L) {
   for (i = 0; i < l; i++)
     p[i] = s[l - i - 1];
   luaL_pushresultsize(&b, l);
+  luaL_checkhook(L, l);
   return 1;
 }
 
@@ -115,6 +118,7 @@ static int str_lower (lua_State *L) {
   for (i=0; i<l; i++)
     p[i] = cast_char(tolower(cast_uchar(s[i])));
   luaL_pushresultsize(&b, l);
+  luaL_checkhook(L, l);
   return 1;
 }
 
@@ -128,6 +132,7 @@ static int str_upper (lua_State *L) {
   for (i=0; i<l; i++)
     p[i] = cast_char(toupper(cast_uchar(s[i])));
   luaL_pushresultsize(&b, l);
+  luaL_checkhook(L, l);
   return 1;
 }
 
@@ -148,16 +153,21 @@ static int str_rep (lua_State *L) {
     return luaL_error(L, "resulting string too large");
   else {
     size_t totallen = (cast_sizet(n) * (len + lsep)) - lsep;
+    size_t filled = len;
     luaL_Buffer b;
     char *p = luaL_buffinitsize(L, &b, totallen);
-    while (n-- > 1) {  /* first n-1 copies (followed by separator) */
-      memcpy(p, s, len * sizeof(char)); p += len;
-      if (lsep > 0) {  /* empty 'memcpy' is not that cheap */
-        memcpy(p, sep, lsep * sizeof(char)); p += lsep;
-      }
+    memcpy(p, s, len * sizeof(char));
+    if (filled < totallen) {
+      memcpy(p + filled, sep, lsep * sizeof(char));
+      filled += lsep;
     }
-    memcpy(p, s, len * sizeof(char));  /* last copy without separator */
+    while (filled < totallen) {
+      size_t chunk = (filled < totallen - filled) ? filled : totallen - filled;
+      memcpy(p + filled, p, chunk * sizeof(char));
+      filled += chunk;
+    }
     luaL_pushresultsize(&b, totallen);
+    luaL_checkhook(L, totallen);
   }
   return 1;
 }
@@ -266,6 +276,7 @@ static int str_join (lua_State *L) {
       if (i < top)
         luaL_addlstring(&b, delimiter, delimiter_length);
     }
+    luaL_checkhook(L, luaL_bufflen(&b));
     luaL_pushresult(&b);
   }
   return 1;
@@ -273,6 +284,7 @@ static int str_join (lua_State *L) {
 
 static int str_concat (lua_State *L) {
   lua_concat(L, lua_gettop(L));
+  luaL_checkhook(L, lua_rawlen(L, -1));
   return 1;
 }
 
@@ -283,6 +295,7 @@ static int str_tostringall (lua_State *L) {
     luaL_tolstring(L, i, NULL);
     lua_replace(L, i);
   }
+  luaL_checkhook(L, (lua_Unsigned)top);
   return top;
 }
 #endif
@@ -298,6 +311,7 @@ static int str_blob (lua_State *L) {
     else if ((size_t)n > MAX_SIZE)
       return luaL_error(L, "resulting string too large");
     lua_pushblob(L, (size_t)n);
+    luaL_checkhook(L, (lua_Unsigned)n);
     return 1;
   }
   else if (type == LUA_TSTRING) {  /* Convert the string into a externalizable blob */
@@ -329,6 +343,7 @@ static int str_byte (lua_State *L) {
   luaL_checkstack(L, n, "string slice too long");
   for (i=0; i<n; i++)
     lua_pushinteger(L, cast_uchar(s[posi + cast_uint(i) - 1]));
+  luaL_checkhook(L, (lua_Unsigned)n);
   return n;
 }
 
@@ -344,6 +359,7 @@ static int str_char (lua_State *L) {
     p[i - 1] = cast_char(cast_uchar(c));
   }
   luaL_pushresultsize(&b, cast_uint(n));
+  luaL_checkhook(L, (lua_Unsigned)n);
   return 1;
 }
 
@@ -1045,6 +1061,7 @@ static void add_s (MatchState *ms, luaL_Buffer *b, const char *s,
   size_t l;
   lua_State *L = ms->L;
   const char *news = lua_tolstring(L, 3, &l);
+  size_t whole = l;
   const char *p;
   while ((p = (char *)memchr(news, L_ESC, l)) != NULL) {
     luaL_addlstring(b, news, ct_diff2sz(p - news));
@@ -1067,6 +1084,7 @@ static void add_s (MatchState *ms, luaL_Buffer *b, const char *s,
     news = p + 1;
   }
   luaL_addlstring(b, news, l);
+  hooksteps(L, &ms->hooksteps, whole + ct_diff2sz(e - s));
 }
 
 
@@ -1551,6 +1569,7 @@ static int str_format (lua_State *L) {
       luaL_addsize(&b, cast_uint(nb));
     }
   }
+  luaL_checkhook(L, luaL_bufflen(&b));
   luaL_pushresult(&b);
   return 1;
 }
@@ -1879,6 +1898,7 @@ static void shared_pack (lua_State *L, luaL_Buffer *b, const char *fmt,
         break;
     }
   }
+  luaL_checkhook(L, luaL_bufflen(b));
 }
 
 
@@ -2015,6 +2035,7 @@ static int shared_unpack (lua_State *L, const char *fmt, const char *data,
     }
     pos += size;
   }
+  luaL_checkhook(L, pos + cast_uint(n));
   lua_pushinteger(L, cast_st2S(pos) + 1);  /* next position */
   return n + 1;
 }

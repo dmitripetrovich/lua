@@ -534,8 +534,7 @@ static const char *kname (const Proto *p, int index, const char **name) {
 }
 
 
-static const char *basicgetobjname (const Proto *p, int *ppc, int reg,
-                                    const char **name) {
+static const char *basicgetobjname (const Proto *p, int *ppc, int reg, const char **name) {
   int pc = *ppc;
   *name = luaF_getlocalname(p, cast_uint(reg + 1), pc);
   if (*name)  /* is a local? */
@@ -598,8 +597,7 @@ static const char *isEnv (const Proto *p, int pc, Instruction i, int isup) {
 /*
 ** Extend 'basicgetobjname' to handle table accesses
 */
-static const char *getobjname (const Proto *p, int lastpc, int reg,
-                               const char **name) {
+static const char *getobjname (const Proto *p, int lastpc, int reg, const char **name) {
   const char *kind = basicgetobjname(p, &lastpc, reg, name);
   if (kind != NULL)
     return kind;
@@ -644,8 +642,7 @@ static const char *getobjname (const Proto *p, int lastpc, int reg,
 ** Returns what the name is (e.g., "for iterator", "method",
 ** "metamethod") and sets '*name' to point to the name.
 */
-static const char *funcnamefromcode (lua_State *L, const Proto *p,
-                                     int pc, const char **name) {
+static const char *funcnamefromcode (lua_State *L, const Proto *p, int pc, const char **name) {
   TMS tm = (TMS)0;  /* (initial value avoids warnings) */
   Instruction i = p->code[pc];  /* calling instruction */
   switch (GET_OPCODE(i)) {
@@ -688,8 +685,7 @@ static const char *funcnamefromcode (lua_State *L, const Proto *p,
 /*
 ** Try to find a name for a function based on how it was called.
 */
-static const char *funcnamefromcall (lua_State *L, CallInfo *ci,
-                                                   const char **name) {
+static const char *funcnamefromcall (lua_State *L, CallInfo *ci, const char **name) {
   if (ci->callstatus & CIST_HOOKED) {  /* was it called inside a hook? */
     *name = "?";
     return "hook";
@@ -730,8 +726,7 @@ static int instack (CallInfo *ci, const TValue *o) {
 ** with instructions OP_GETTABUP/OP_SETTABUP, which operate directly on
 ** upvalues.)
 */
-static const char *getupvalname (CallInfo *ci, const TValue *o,
-                                 const char **name) {
+static const char *getupvalname (CallInfo *ci, const TValue *o, const char **name) {
   LClosure *c = ci_func(ci);
   int i;
   for (i = 0; i < c->nupvalues; i++) {
@@ -744,8 +739,7 @@ static const char *getupvalname (CallInfo *ci, const TValue *o,
 }
 
 
-static const char *formatvarinfo (lua_State *L, const char *kind,
-                                                const char *name) {
+static const char *formatvarinfo (lua_State *L, const char *kind, const char *name) {
   if (kind == NULL)
     return "";  /* no information */
   else
@@ -775,8 +769,7 @@ static const char *varinfo (lua_State *L, const TValue *o) {
 /*
 ** Raise a type error
 */
-static l_noret typeerror (lua_State *L, const TValue *o, const char *op,
-                          const char *extra) {
+static l_noret typeerror (lua_State *L, const TValue *o, const char *op, const char *extra) {
   const char *t = luaT_objtypename(L, o);
   luaG_runerror(L, "attempt to %s a %s value%s", op, t, extra);
 }
@@ -806,8 +799,7 @@ l_noret luaG_callerror (lua_State *L, const TValue *o) {
 
 
 l_noret luaG_forerror (lua_State *L, const TValue *o, const char *what) {
-  luaG_runerror(L, "bad 'for' %s (number expected, got %s)",
-                   what, luaT_objtypename(L, o));
+  luaG_runerror(L, "bad 'for' %s (number expected, got %s)", what, luaT_objtypename(L, o));
 }
 
 
@@ -817,8 +809,7 @@ l_noret luaG_concaterror (lua_State *L, const TValue *p1, const TValue *p2) {
 }
 
 
-l_noret luaG_opinterror (lua_State *L, const TValue *p1,
-                         const TValue *p2, const char *msg) {
+l_noret luaG_opinterror (lua_State *L, const TValue *p1, const TValue *p2, const char *msg) {
   if (!ttisnumber(p1))  /* first operand is wrong? */
     p2 = p1;  /* now second is wrong */
   luaG_typeerror(L, p2, msg);
@@ -855,8 +846,7 @@ l_noret luaG_errnnil (lua_State *L, LClosure *cl, int k) {
 
 
 /* add src:line information to 'msg' */
-const char *luaG_addinfo (lua_State *L, const char *msg, TString *src,
-                                        int line) {
+const char *luaG_addinfo (lua_State *L, const char *msg, TString *src, int line) {
   if (src == NULL)  /* no debug information? */
     return luaO_pushfstring(L, "?:?: %s", msg);
   else {

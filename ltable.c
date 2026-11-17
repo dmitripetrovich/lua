@@ -1419,12 +1419,12 @@ lua_Unsigned luaH_wipetable (Table *t) {
   return slots;
 }
 
-void luaH_clonetable (lua_State *L, const Table *from, Table *to) {
+lua_Unsigned luaH_clonetable (lua_State *L, const Table *from, Table *to) {
   Table newt;  /* to keep the new hash part */
   unsigned int asize = from->asize;
   Value *newarray = NULL;
   if (from == to)
-    return;
+    return 0;
 
   newt.flags = 0;
   setnodevector(L, &newt, 0);  /* ensure no elements to hash part */
@@ -1457,6 +1457,7 @@ void luaH_clonetable (lua_State *L, const Table *from, Table *to) {
   to->flags = cast_byte((to->flags & NOTBITDUMMY) | (newt.flags & BITDUMMY));
   if (isblack(obj2gco(to)))
     luaC_barrierback_(L, obj2gco(to));
+  return cast(lua_Unsigned, asize) + allocsizenode(to);
 }
 
 /*
@@ -1464,11 +1465,12 @@ void luaH_clonetable (lua_State *L, const Table *from, Table *to) {
 ** (entries after it move to the hash part), and the hash part is sized
 ** for the entries it keeps, without deleted keys.
 */
-void luaH_compact (lua_State *L, Table *t) {
+lua_Unsigned luaH_compact (lua_State *L, Table *t) {
   unsigned asize = t->asize;
   unsigned newasize = asize;
   unsigned nhsize = 0;
   unsigned i;
+  lua_Unsigned slots = cast(lua_Unsigned, asize) + allocsizenode(t);
   if (asize > 0) {
     lua_Unsigned border = luaH_getn(L, t);
     if (border < asize)
@@ -1484,8 +1486,9 @@ void luaH_compact (lua_State *L, Table *t) {
   }
   if (newasize == asize &&
       (nhsize == 0 ? 0u : twoto(luaO_ceillog2(nhsize))) == allocsizenode(t))
-    return;  /* already compact */
+    return slots;  /* already compact */
   luaH_resize(L, t, newasize, nhsize);
+  return slots + newasize + nhsize;
 }
 #endif
 
