@@ -368,6 +368,12 @@ typedef struct GAME_SD global_State {
   TString *strcache[STRCACHE_N][STRCACHE_M];  /* cache for strings in API */
   lua_WarnFunction warnf;  /* warning function */
   void *ud_warn;         /* auxiliary data to 'warnf' */
+#if defined(GRIT_POWER_BUDGET)
+  l_mem budget;
+  l_mem basebudget;
+  lua_Budget budgetf;
+  void *ud_budget;
+#endif
   LX mainth;  /* main thread of this state */
 } global_State;
 

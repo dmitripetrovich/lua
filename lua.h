@@ -324,6 +324,12 @@ LUA_API int   (lua_isreadonly) (lua_State *L, int idx);
 LUA_API void  (lua_setreadonly) (lua_State *L, int idx, int value);
 #endif
 
+#if defined(GRIT_POWER_BUDGET)
+typedef void (*lua_Budget) (lua_State *L, void *ud);
+
+LUA_API void  (lua_setbudget) (lua_State *L, lua_Budget f, void *ud, int steps);
+#endif
+
 /*
 ** string blob API
 */

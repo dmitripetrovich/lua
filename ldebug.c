@@ -169,6 +169,10 @@ LUA_API void lua_checkhook (lua_State *L, int steps) {
     resethookcount(L);
     luaD_hook(L, LUA_HOOKCOUNT, -1, 0, 0);
   }
+#if defined(GRIT_POWER_BUDGET)
+  if ((G(L)->budget -= steps) <= 0)
+    luaD_budget(L);
+#endif
   lua_unlock(L);
 }
 

@@ -1607,6 +1607,25 @@ void lua_setwarnf (lua_State *L, lua_WarnFunction f, void *ud) {
 }
 
 
+#if defined(GRIT_POWER_BUDGET)
+LUA_API void lua_setbudget (lua_State *L, lua_Budget f, void *ud, int steps) {
+  global_State *g = G(L);
+  lua_lock(L);
+  if (f == NULL || steps <= 0) {
+    f = NULL;
+    ud = NULL;
+    g->basebudget = MAX_LMEM;
+  }
+  else
+    g->basebudget = steps;
+  g->budgetf = f;
+  g->ud_budget = ud;
+  g->budget = g->basebudget;
+  lua_unlock(L);
+}
+#endif
+
+
 void lua_warning (lua_State *L, const char *msg, int tocont) {
   lua_lock(L);
   luaE_warning(L, msg, tocont);

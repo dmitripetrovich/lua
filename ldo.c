@@ -610,6 +610,29 @@ void luaD_hook (lua_State *L, int event, int line,
   }
 }
 
+#if defined(GRIT_POWER_BUDGET)
+void luaD_budget (lua_State *L) {
+  global_State *g = G(L);
+  g->budget = g->basebudget;
+  if (g->budgetf && L->allowhook) {
+    CallInfo *ci = L->ci;
+    ptrdiff_t top = savestack(L, L->top.p);
+    ptrdiff_t ci_top = savestack(L, ci->top.p);
+    if (isLua(ci) && L->top.p < ci->top.p)
+      L->top.p = ci->top.p;
+    luaD_checkstack(L, LUA_MINSTACK);
+    if (ci->top.p < L->top.p + LUA_MINSTACK)
+      ci->top.p = L->top.p + LUA_MINSTACK;
+    L->allowhook = 0;
+    lua_unlock(L);
+    (*g->budgetf)(L, g->ud_budget);
+    lua_lock(L);
+    L->allowhook = 1;
+    ci->top.p = restorestack(L, ci_top);
+    L->top.p = restorestack(L, top);
+  }
+}
+#endif
 
 /*
 ** Executes a call hook for Lua functions. This function is called
@@ -619,8 +642,7 @@ void luaD_hook (lua_State *L, int event, int line,
 void luaD_hookcall (lua_State *L, CallInfo *ci) {
   L->oldpc = 0;  /* set 'oldpc' for new function */
   if (L->hookmask & LUA_MASKCALL) {  /* is call hook on? */
-    int event = (ci->callstatus & CIST_TAIL) ? LUA_HOOKTAILCALL
-                                             : LUA_HOOKCALL;
+    int event = (ci->callstatus & CIST_TAIL) ? LUA_HOOKTAILCALL : LUA_HOOKCALL;
     Proto *p = ci_func(ci)->p;
     ci->u.l.savedpc++;  /* hooks assume 'pc' is already incremented */
     luaD_hook(L, event, -1, 1, p->numparams);
@@ -698,8 +720,7 @@ static unsigned tryfuncTM (lua_State *L, StkId func, unsigned status) {
 
 
 /* Generic case for 'moveresult' */
-l_sinline void genmoveresults (lua_State *L, StkId res, int nres,
-                                             int wanted) {
+l_sinline void genmoveresults (lua_State *L, StkId res, int nres, int wanted) {
   StkId firstresult = L->top.p - nres;  /* index of first result */
   int i;
   if (nres > wanted)  /* extra results? */
@@ -719,8 +740,7 @@ l_sinline void genmoveresults (lua_State *L, StkId res, int nres,
 ** parameters) separated. The flag CIST_TBC in 'fwanted', if set,
 ** forces the switch to go to the default case.
 */
-l_sinline void moveresults (lua_State *L, StkId res, int nres,
-                                          l_uint32 fwanted) {
+l_sinline void moveresults (lua_State *L, StkId res, int nres, l_uint32 fwanted) {
   switch (fwanted) {  /* handle typical cases separately */
     case 0 + 1:  /* no values needed */
       L->top.p = res;
@@ -786,8 +806,7 @@ void luaD_poscall (lua_State *L, CallInfo *ci, int nres) {
 ** CIST_C (if it's a C function), and number of extra arguments.
 ** (All these bit-fields fit in 16-bit values.)
 */
-l_sinline CallInfo *prepCallInfo (lua_State *L, StkId func, unsigned status,
-                                                StkId top) {
+l_sinline CallInfo *prepCallInfo (lua_State *L, StkId func, unsigned status, StkId top) {
   CallInfo *ci = L->ci = next_ci(L);  /* new frame */
   ci->func.p = func;
   lua_assert((status & ~(CIST_NRESULTS | CIST_C | MAX_CCMT)) == 0);
@@ -800,10 +819,10 @@ l_sinline CallInfo *prepCallInfo (lua_State *L, StkId func, unsigned status,
 /*
 ** precall for C functions
 */
-l_sinline int precallC (lua_State *L, StkId func, unsigned status,
-                                            lua_CFunction f) {
+l_sinline int precallC (lua_State *L, StkId func, unsigned status, lua_CFunction f) {
   int n;  /* number of returns */
   CallInfo *ci;
+  luaD_checkbudgetp(L, func);
   checkstackp(L, LUA_MINSTACK, func);  /* ensure minimum stack size */
   L->ci = ci = prepCallInfo(L, func, status | CIST_C,
                                L->top.p + LUA_MINSTACK);
@@ -827,8 +846,7 @@ l_sinline int precallC (lua_State *L, StkId func, unsigned status,
 ** (so that it includes the function itself). Return the number of
 ** results, if it was a C function, or -1 for a Lua function.
 */
-int luaD_pretailcall (lua_State *L, CallInfo *ci, StkId func,
-                                    int narg1, int delta) {
+int luaD_pretailcall (lua_State *L, CallInfo *ci, StkId func, int narg1, int delta) {
   unsigned status = LUA_MULTRET + 1;
  retry:
   switch (ttypetag(s2v(func))) {
@@ -841,6 +859,7 @@ int luaD_pretailcall (lua_State *L, CallInfo *ci, StkId func,
       int fsize = p->maxstacksize;  /* frame size */
       int nfixparams = p->numparams;
       int i;
+      luaD_checkbudgetp(L, func);
       checkstackp(L, fsize - delta, func);
       ci->func.p -= delta;  /* restore 'func' (if vararg) */
       for (i = 0; i < narg1; i++)  /* move down function and arguments */
@@ -890,6 +909,7 @@ CallInfo *luaD_precall (lua_State *L, StkId func, int nresults) {
       int narg = cast_int(L->top.p - func) - 1;  /* number of real arguments */
       int nfixparams = p->numparams;
       int fsize = p->maxstacksize;  /* frame size */
+      luaD_checkbudgetp(L, func);
       checkstackp(L, fsize, func);
       L->ci = ci = prepCallInfo(L, func, status, func + 1 + fsize);
       ci->u.l.savedpc = p->code;  /* starting point */
@@ -1124,8 +1144,7 @@ static TStatus precover (lua_State *L, TStatus status) {
 }
 
 
-LUA_API int lua_resume (lua_State *L, lua_State *from, int nargs,
-                                      int *nresults) {
+LUA_API int lua_resume (lua_State *L, lua_State *from, int nargs, int *nresults) {
   TStatus status;
   lua_lock(L);
   if (L->status == LUA_OK) {  /* may be starting a coroutine */
@@ -1154,8 +1173,7 @@ LUA_API int lua_resume (lua_State *L, lua_State *from, int nargs,
     luaD_seterrorobj(L, status, L->top.p);  /* push error message */
     L->ci->top.p = L->top.p;
   }
-  *nresults = (status == LUA_YIELD) ? L->ci->u2.nyield
-                                    : cast_int(L->top.p - (L->ci->func.p + 1));
+  *nresults = (status == LUA_YIELD) ? L->ci->u2.nyield : cast_int(L->top.p - (L->ci->func.p + 1));
   if (l_unlikely(L->hookmask & LUA_MASKCOEXIT))
     luaD_hook(L, LUA_HOOKCOEXIT, -1, 0, 0);
   lua_unlock(L);
@@ -1168,8 +1186,7 @@ LUA_API int lua_isyieldable (lua_State *L) {
 }
 
 
-LUA_API int lua_yieldk (lua_State *L, int nresults, lua_KContext ctx,
-                        lua_KFunction k) {
+LUA_API int lua_yieldk (lua_State *L, int nresults, lua_KContext ctx, lua_KFunction k) {
   CallInfo *ci;
   luai_userstateyield(L, nresults);
   lua_lock(L);
@@ -1243,8 +1260,7 @@ TStatus luaD_closeprotected (lua_State *L, ptrdiff_t level, TStatus status) {
 ** thread information ('allowhook', etc.) and in particular
 ** its stack level in case of errors.
 */
-TStatus luaD_pcall (lua_State *L, Pfunc func, void *u, ptrdiff_t old_top,
-                                  ptrdiff_t ef) {
+TStatus luaD_pcall (lua_State *L, Pfunc func, void *u, ptrdiff_t old_top, ptrdiff_t ef) {
   TStatus status;
   CallInfo *old_ci = L->ci;
   lu_byte old_allowhooks = L->allowhook;
@@ -1338,8 +1354,7 @@ void luaD_anchorobj (lua_State *L, Table *anchor, GCObject *obj) {
 }
 
 
-TStatus luaD_protectedparser (lua_State *L, ZIO *z, const char *name,
-                                            const char *mode) {
+TStatus luaD_protectedparser (lua_State *L, ZIO *z, const char *name, const char *mode) {
   struct SParser p;
   TStatus status;
   incnny(L);  /* cannot yield during parsing */
@@ -1356,5 +1371,3 @@ TStatus luaD_protectedparser (lua_State *L, ZIO *z, const char *name,
   decnny(L);
   return status;
 }
-
-

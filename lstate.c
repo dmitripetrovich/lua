@@ -374,6 +374,11 @@ LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud, unsigned seed) {
   g->ud = ud;
   g->warnf = NULL;
   g->ud_warn = NULL;
+#if defined(GRIT_POWER_BUDGET)
+  g->budgetf = NULL;
+  g->ud_budget = NULL;
+  g->basebudget = g->budget = MAX_LMEM;
+#endif
   g->seed = seed;
   g->gcstp = GCSTPGC;  /* no GC while building state */
   g->strt.size = g->strt.nuse = 0;

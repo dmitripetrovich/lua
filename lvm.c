@@ -1213,7 +1213,13 @@ void luaV_finishOp (lua_State *L) {
 ** Execute a jump instruction. The 'updatetrap' allows signals to stop
 ** tight loops. (Without it, the local copy of 'trap' could never change.)
 */
+#if defined(GRIT_POWER_BUDGET)
+#define budgetstep()	{ if (l_unlikely(--G(L)->budget <= 0)) Protect(luaD_budget(L)); }
+#define dojump(ci,i,e)	{ int j_ = GETARG_sJ(i) + e; pc += j_; if (j_ < 0) budgetstep(); updatetrap(ci); }
+#else
+#define budgetstep()	((void)0)
 #define dojump(ci,i,e)	{ pc += GETARG_sJ(i) + e; updatetrap(ci); }
+#endif
 
 
 /* for test instructions, execute the jump instruction that follows it */
@@ -1994,10 +2000,13 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
             idx = intop(+, idx, step);  /* add step to index */
             chgivalue(s2v(ra + 2), idx);  /* update control variable */
             pc -= GETARG_Bx(i);  /* jump back */
+            budgetstep();
           }
         }
-        else if (floatforloop(L, ra))  /* float loop */
+        else if (floatforloop(L, ra)) {  /* float loop */
           pc -= GETARG_Bx(i);  /* jump back */
+          budgetstep();
+        }
         updatetrap(ci);  /* allows a signal to break the loop */
         vmbreak;
       }
@@ -2077,6 +2086,7 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
             if (idx) {  /* an entry: key in control variable, value after */
               chgitervalue(s2v(ra + 2), idx);
               pc -= GETARG_Bx(i);  /* jump back */
+              budgetstep();
             }
             vmbreak;
           }
@@ -2089,6 +2099,7 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
               i = *(pc++);  /* go to next instruction */
               lua_assert(GET_OPCODE(i) == OP_TFORLOOP && ra == RA(i));
               pc -= GETARG_Bx(i);  /* jump back */
+              budgetstep();
               vmbreak;
             }
             if (ttisipairsraw(s2v(ra + 2)) ||
@@ -2115,8 +2126,10 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
       vmcase(OP_TFORLOOP) {
        l_tforloop: {
         StkId ra = RA(i);
-        if (!ttisnil(s2v(ra + 3)))  /* continue loop? */
+        if (!ttisnil(s2v(ra + 3))) {  /* continue loop? */
           pc -= GETARG_Bx(i);  /* jump back */
+          budgetstep();
+        }
         vmbreak;
       }}
       vmcase(OP_SETLIST) {
