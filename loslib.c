@@ -172,7 +172,7 @@
 
 #if defined(_MSC_VER) && defined(_M_X64)
   #include <intrin.h>
-#elif defined(__GNUC__) && defined(__has_include) && __has_include(<x86intrin.h>)
+#elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
   #include <x86intrin.h>
 #else
   #undef LUA_SYS_RDTSC
