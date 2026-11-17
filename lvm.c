@@ -359,7 +359,7 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
       Table *h = hvalue(t);  /* save 't' table */
 #if defined(GRIT_POWER_IMPORT)
       if (l_unlikely(isimported(h))) {
-        luaC_unimport(G(L), h);
+        luaC_unimportkey(G(L), h, key);
         if (!isreadonly(h)) {
           hres = luaH_pset(h, key, val);
           if (hres == HOK) {
@@ -416,7 +416,7 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
 #endif
 #if defined(GRIT_POWER_IMPORT)
       if (l_unlikely(isimported(h)))
-        luaC_unimport(G(L), h);
+        luaC_unimportkey(G(L), h, key);
 #endif
       hres = luaH_pset(h, key, val);
       if (hres == HOK) {
@@ -1319,6 +1319,7 @@ static int resolveimport (lua_State *L, Proto *p, Import *im, const TValue *env,
   TValue v;
   const TValue *t = env;
   int i;
+  setnilvalue(&v);  /* (an import always has a key; this keeps compilers sure) */
   for (i = 0; i < im->n; i++) {
     Table *h;
     if (!ttistable(t))
@@ -1332,9 +1333,12 @@ static int resolveimport (lua_State *L, Proto *p, Import *im, const TValue *env,
     t = &v;
   }
   for (i = 0; i < im->n; i++) {
-    l_setbit(chain[i]->marked, IMPORTBIT);
-    if (chain[i]->metatable != NULL)
-      l_setbit(chain[i]->metatable->marked, IMPORTBIT);
+    luaC_setimport(chain[i]);
+    luaC_setimportkey(tsvalue(&p->k[im->k[i]]));
+    if (chain[i]->metatable != NULL) {
+      luaC_setimport(chain[i]->metatable);
+      luaC_setimportkey(g->tmname[TM_MODE]);  /* turning weak drops the cache */
+    }
   }
   im->env = hvalue(env);
   im->epoch = g->importepoch;

@@ -579,13 +579,14 @@ do
   assert(f:close())
   print("done")
 
-  -- Lua script in a long unbreakable search
+  -- Lua script in a long search
   local f, pid = runback[[
     print(15); string.find(string.rep('a', 100000), '.*b')]]
   -- wait (so script can reach the loop)
   assert(f:read() == "15")
   assert(os.execute("sleep 1"))
-  -- must send at least two INT signals to stop this Lua script
+  -- the search charges the count hook ('lua_checkhook'), so one INT
+  -- signal stops this Lua script (stock Lua needs a second one)
   local n = 100
   for i = 0, 100 do   -- keep sending signals
     if not kill(pid) then   -- until it fails
@@ -594,7 +595,7 @@ do
     end
   end
   assert(f:close())
-  assert(n >= 2)
+  assert(n >= 1)
   print(string.format("done (with %d kills)", n))
 
 end

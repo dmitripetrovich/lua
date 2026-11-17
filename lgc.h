@@ -84,15 +84,28 @@
 #define TESTBIT		7
 
 #if defined(GRIT_POWER_IMPORT)
-#if defined(LUA_DEBUG)
-#error "GRIT_POWER_IMPORT keeps its table mark in TESTBIT, which LUA_DEBUG uses"
-#endif
 #if !defined(GRIT_POWER_READONLY)
 #error "GRIT_POWER_IMPORT needs the write guards of GRIT_POWER_READONLY"
 #endif
+#if defined(LUA_DEBUG)
+/* the internal tests use TESTBIT, so their builds keep the mark in the table
+   and, with no room for it in strings, take any short string as a key */
+#define isimported(t)	((t)->imported)
+#define luaC_setimport(t)	((t)->imported = 1)
+#define luaC_unimport(g,t)	((t)->imported = 0, (g)->importepoch++)
+#define isimportkey(k)	ttisshrstring(k)
+#define luaC_setimportkey(ts)	((void)(ts))
+#else
 #define IMPORTBIT	TESTBIT
 #define isimported(t)	testbit((t)->marked, IMPORTBIT)
+#define luaC_setimport(t)	l_setbit((t)->marked, IMPORTBIT)
 #define luaC_unimport(g,t)	(resetbit((t)->marked, IMPORTBIT), (g)->importepoch++)
+/* import keys are short strings, which are interned: a write finds the mark */
+#define isimportkey(k)	(ttisshrstring(k) && testbit(tsvalue(k)->marked, IMPORTBIT))
+#define luaC_setimportkey(ts)	l_setbit((ts)->marked, IMPORTBIT)
+#endif
+/* only writing a key that some import looks up can change a cached value */
+#define luaC_unimportkey(g,t,k)	(isimportkey(k) ? (void)luaC_unimport(g,t) : (void)0)
 #endif
 
 

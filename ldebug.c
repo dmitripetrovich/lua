@@ -162,12 +162,19 @@ LUA_API int lua_gethookcount (lua_State *L) {
 ** Charge 'steps' instructions' worth of work done inside a C function
 ** to the count hook, calling the hook when its count runs out, so that
 ** long loops in C can be interrupted the same way as Lua code.
+** A count hook may yield, which a C function cannot do in the middle
+** of its work; so, in a thread that can yield, the hook is left for
+** the next Lua instruction, where it runs (and yields) as usual.
 */
 LUA_API void lua_checkhook (lua_State *L, int steps) {
   lua_lock(L);
   if ((L->hookmask & LUA_MASKCOUNT) && L->basehookcount > 0 && (L->hookcount -= steps) <= 0) {
-    resethookcount(L);
-    luaD_hook(L, LUA_HOOKCOUNT, -1, 0, 0);
+    if (yieldable(L))
+      L->hookcount = 1;  /* call it at the next instruction */
+    else {
+      resethookcount(L);
+      luaD_hook(L, LUA_HOOKCOUNT, -1, 0, 0);
+    }
   }
 #if defined(GRIT_POWER_BUDGET)
   if ((G(L)->budget -= steps) <= 0)

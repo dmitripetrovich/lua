@@ -245,7 +245,7 @@ static l_uint32 utf8_to_utf32(const char *src, size_t length) {
   l_uint32 codepoint = 0;
   switch (length) {
     case 1:
-      return src[0];
+      return cast_uchar(src[0]);
     case 2:
       codepoint = src[0] & 0x1f;
       utf8_shiftmask(&codepoint, src[1]);

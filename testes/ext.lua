@@ -1,5 +1,7 @@
 print("testing language extensions")
 
+local debug = require "debug"
+
 local function check_error (src, pattern)
   local f, msg = load(src)
   assert(f == nil, src)
@@ -25,7 +27,7 @@ assert(line_of("/*/\n*/ error('e')") == 2)
 assert(line_of("--[[\n\n]] /*\n\n*/ -- c\nerror('e')") == 6)
 
 do
-  local f = assert(load("/*\n\n*/\nreturn debug.getinfo(1, 'l').currentline"))
+  local f = assert(load("/*\n\n*/\nreturn require'debug'.getinfo(1, 'l').currentline"))
   assert(f() == 4)
   f = assert(load("/*\n*/ local function g ()\n/*\n\n*/ return 1\nend\nreturn g"))
   local info = debug.getinfo(f(), "S")

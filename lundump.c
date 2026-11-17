@@ -25,6 +25,7 @@
 #include "lundump.h"
 #include "lzio.h"
 
+/* when set, a binary chunk loads only if this hook accepts it */
 lua_UndumpHook pUndumpHook = NULL;
 
 #if defined(LUA_NO_BYTECODE)
@@ -448,7 +449,7 @@ LClosure *luaU_undump (lua_State *L, ZIO *Z, Table *anchor, const char *name,
   S.Z = Z;
   S.fixed = cast_byte(fixed);
   S.offset = 1;  /* fist byte was already read */
-  if (!pUndumpHook || !pUndumpHook(Z->p, Z->n))
+  if (pUndumpHook && !pUndumpHook(Z->p, Z->n))
     error(&S, "forbidden");
   checkHeader(&S);
   S.h = anchor;

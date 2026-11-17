@@ -28,8 +28,7 @@ local function trymt (x, y, mtname)
     end
   end
   -- if any test fails, there is no other metamethod to be called
-  error("attempt to '" .. strsub(mtname, 3) ..
-        "' a " .. type(x) .. " with a " .. type(y), 4)
+  error("attempt to '" .. strsub(mtname, 3) .. "' a " .. type(x) .. " with a " .. type(y), 4)
 end
 
 
@@ -75,4 +74,3 @@ smt.__bnot = function (x)
   local x, y = checkargs(x, x, "__bnot")
   return y and ~x or x
 end
-

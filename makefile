@@ -14,6 +14,7 @@ CWARNSCPP= \
 	-Wdisabled-optimization \
 	-Wdouble-promotion \
 	-Wmissing-declarations \
+	-Wconversion \
         # the next warnings might be useful sometimes,
 	# but usually they generate too much noise
 	# -Wstrict-overflow=2 \
@@ -27,8 +28,6 @@ CWARNSCPP= \
 CWARNGCC= \
 	-Wlogical-op \
 	-Wno-aggressive-loop-optimizations \
-	-Wno-inline \
-	-Wno-ignored-qualifiers \
 
 
 # The next warnings are neither valid nor needed for C++
@@ -216,7 +215,7 @@ linux-one:
 	$(MAKE) linux-readline LUA_O="onelua.o" BASE_O="onelua.o" CORE_O="" LIB_O="" LUAC_T="" MYCFLAGS="$(MYCFLAGS) $(CPERF_FLAGS) -I."
 
 Darwin macos macosx macos-readline:
-	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_MACOSX" SYSLIBS="-lreadline"
+	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_MACOSX" SYSLIBS="-lreadline" CWARNGCC=
 
 mingw:
 	$(MAKE) "LUA_A=lua55.dll" "LUA_T=lua.exe" \

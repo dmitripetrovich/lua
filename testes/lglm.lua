@@ -3,6 +3,8 @@
 
 print("testing vectors, quaternions and matrices")
 
+local debug = require "debug"
+
 local COMPAT = rawget(_G, "vector3") ~= nil
 
 local function check (msg, f, ...)

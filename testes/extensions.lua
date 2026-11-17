@@ -1,5 +1,7 @@
 print("testing continue, imports, fast calls, table.find and string.split")
 
+local debug = require "debug"
+
 local function compiles (src)
   local f, err = load(src)
   return f ~= nil, err
@@ -268,6 +270,29 @@ do
   bump()
   assert(counter == 100)
   counter = nil
+
+  -- writes of keys no import reads keep the cache; writes of import keys
+  -- still reach it, however the key string was made
+  local oldlen = string.len
+  local function len2 () return string.len("ab") end
+  assert(len2() == 2)
+  for i = 1, 10 do unrelated = i; string.unrelated = i end
+  assert(len2() == 2)
+  string[("le") .. ("n")] = function () return "built key" end
+  assert(len2() == "built key")
+  for i = 1, 10 do unrelated = i; string.unrelated = i end
+  rawset(string, "len", function () return "raw" end)
+  assert(len2() == "raw")
+  string.len, string.unrelated, unrelated = oldlen, nil, nil
+  assert(len2() == 2)
+
+  local meta2 = {}
+  local menv2 = setmetatable({lib9 = {v = 1}}, meta2)
+  local mk2 = load("return lib9.v", "m2", "t", menv2)
+  assert(mk2() == 1)
+  rawset(meta2, "__mode", "v")
+  collectgarbage()
+  assert(menv2.lib9 == nil and not pcall(mk2))
 
   local okm, msg = pcall(load("return nosuch.field.deep"))
   assert(not okm and string.find(msg, "global 'nosuch'"))

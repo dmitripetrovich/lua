@@ -845,6 +845,9 @@ Table *luaH_new (lua_State *L) {
   Table *t = gco2t(o);
   t->metatable = NULL;
   t->flags = maskflags;  /* table has no metamethod fields */
+#if defined(GRIT_POWER_IMPORT) && defined(LUA_DEBUG)
+  t->imported = 0;
+#endif
   t->array = NULL;
   t->asize = 0;
   setnodevector(L, t, 0);

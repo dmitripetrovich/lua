@@ -1,5 +1,7 @@
 print("testing read-only tables")
 
+local debug = require "debug"
+
 local RO = "attempting to modify a readonly value"
 local ARG = "table is readonly"
 

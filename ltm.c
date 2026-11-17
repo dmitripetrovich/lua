@@ -157,7 +157,7 @@ void luaT_trybinTM (lua_State *L, const TValue *p1, const TValue *p2,
   if (l_unlikely(callbinTM(L, p1, p2, res, event) < 0)) {
     if (ttisglm(p1) || ttisglm(p2)) {
       const char *t1, *t2, *op;
-      if (lglm_trybinTM(L, p1, p2, res, event))
+      if (lglm_trybinTM(L, p1, p2, res, cast_int(event)))
         return;
       t1 = luaT_objtypename(L, p1);
       t2 = luaT_objtypename(L, p2);

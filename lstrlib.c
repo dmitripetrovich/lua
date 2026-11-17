@@ -252,18 +252,19 @@ static int str_trim (lua_State *L) {
   const char *delimiter = luaL_optstring(L, 2, "\t\n\v\f\r "); /* isspace */
   size_t dlen = strlen(delimiter) + 1;
   size_t steps = 0;
+  size_t i = 0;  /* result is 'str[i .. j-1]' */
+  size_t j = len;
 
-  const char *back = str + len - 1;
-  while (str <= back && strchr(delimiter, *str)) {
+  while (i < j && strchr(delimiter, str[i])) {
     hooksteps(L, &steps, dlen);
-    str++;
+    i++;
   }
-  while (back > str && strchr(delimiter, *back)) {
+  while (j > i && strchr(delimiter, str[j - 1])) {
     hooksteps(L, &steps, dlen);
-    back--;
+    j--;
   }
 
-  lua_pushlstring(L, str, back - str + 1);
+  lua_pushlstring(L, str + i, j - i);
   return 1;
 }
 
@@ -291,7 +292,7 @@ static int str_split (lua_State *L) {
 
       if (split) {
         luaL_checkstack(L, count + 1, "too many results");
-        lua_pushlstring(L, str, (end - str));
+        lua_pushlstring(L, str, cast_sizet(end - str));
 
         ++count;
         str = end + 1;

@@ -832,7 +832,7 @@ static void dischargeimport (FuncState *fs, expdesc *e) {
   for (i = 0; i < 3; i++)
     f->imports[fs->nimports].k[i] = (i < n) ? e->u.imp.k[i] : 0;
   luaK_reserveregs(fs, 1);
-  luaK_codeABx(fs, OP_GETIMPORT, reg, cast_uint(fs->nimports));
+  luaK_codeABx(fs, OP_GETIMPORT, reg, fs->nimports);
   fs->nimports++;
   luaK_codeABC(fs, OP_GETTABUP, reg, e->u.imp.up, e->u.imp.k[0]);
   for (i = 1; i < n; i++)

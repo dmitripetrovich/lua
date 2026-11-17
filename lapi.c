@@ -920,9 +920,12 @@ LUA_API void lua_createtable (lua_State *L, int narray, int nrec) {
 #if defined(GRIT_POWER_IMPORT)
 #define api_checkwritable(L,t)  \
   { if (l_unlikely(isreadonly(t))) luaG_readonlyerror(L); if (l_unlikely(isimported(t))) luaC_unimport(G(L), t); }
+#define api_checkwritablekey(L,t,k)  \
+  { if (l_unlikely(isreadonly(t))) luaG_readonlyerror(L); if (l_unlikely(isimported(t))) luaC_unimportkey(G(L), t, k); }
 #elif defined(GRIT_POWER_READONLY)
 #define api_checkwritable(L,t)  \
   if (l_unlikely(isreadonly(t))) luaG_readonlyerror(L)
+#define api_checkwritablekey(L,t,k)	api_checkwritable(L,t)
 #endif
 #if defined(GRIT_POWER_READONLY)
 
@@ -946,6 +949,7 @@ LUA_API void lua_setreadonly (lua_State *L, int idx, int value) {
 }
 #else
 #define api_checkwritable(L,t)	((void)0)
+#define api_checkwritablekey(L,t,k)	((void)0)
 #endif
 
 
@@ -1166,7 +1170,7 @@ static void aux_rawset (lua_State *L, int idx, TValue *key, int n) {
 #endif
   else {
     Table *t = ensuretable(L, v);
-    api_checkwritable(L, t);
+    api_checkwritablekey(L, t, key);
     luaH_set(L, t, key, s2v(L->top.p - 1));
     invalidateTMcache(t);
     luaC_barrierback(L, obj2gco(t), s2v(L->top.p - 1));

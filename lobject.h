@@ -173,7 +173,7 @@ typedef union StackValue {
 
 
 /* index to stack elements */
-typedef StackValue *LUA_RESTRICT StkId;
+typedef StackValue *StkId;
 
 
 /*
@@ -819,6 +819,9 @@ typedef struct Table {
   CommonHeader;
   lu_byte flags;  /* 1<<p means tagmethod(p) is not present */
   lu_byte lsizenode;  /* log2 of number of slots of 'node' array */
+#if defined(GRIT_POWER_IMPORT) && defined(LUA_DEBUG)
+  lu_byte imported;  /* see 'isimported' */
+#endif
   unsigned int asize;  /* number of slots in 'array' array */
   Value *array;  /* array part */
   Node *node;

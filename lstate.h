@@ -184,7 +184,7 @@ typedef struct GAME_SD stringtable {
 ** - field 'nres' is used only while closing tbc variables when
 ** returning from a function;
 */
-typedef struct GAME_SD CallInfo {
+struct GAME_SD CallInfo {
   StkIdRel func;  /* function index in the stack */
   StkIdRel top;  /* top for this function */
   struct CallInfo *previous, *next;  /* dynamic call link */
@@ -206,7 +206,7 @@ typedef struct GAME_SD CallInfo {
     int nres;  /* number of values returned */
   } u2;
   l_uint32 callstatus;
-} CallInfo;
+};
 
 
 /*
