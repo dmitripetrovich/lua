@@ -842,21 +842,15 @@
 #endif
 
 /*
-** Optimized iteration: a generic 'for' over 'pairs', 'ipairs' or 'next' on a
-** table keeps its position in the loop's unused closing slot, so each step
-** reads the next entry without a call or a key lookup.
+@@ LUA_EXT_ITERATION optimizes iteration: a generic 'for' over 'pairs',
+** 'ipairs' or 'next' on a table keeps its position in the loop's unused
+** closing slot, so each step reads the next entry without a call or a
+** key lookup.
+@@ LUA_EXT_ITOA speeds up integer formatting: 'tostring', '..' and
+** lua_tolstring write integers two digits at a time from a table instead
+** of calling 'snprintf'.
+** (Both change no behaviour; the makefile turns them on.)
 */
-#if !defined(LUA_NO_EXT_ITERATION) && !defined(LUA_EXT_ITERATION)
-#define LUA_EXT_ITERATION
-#endif
-
-/*
-** Integer formatting: 'tostring', '..' and lua_tolstring write integers
-** two digits at a time from a table instead of calling 'snprintf'.
-*/
-#if !defined(LUA_NO_EXT_ITOA) && !defined(LUA_EXT_ITOA)
-#define LUA_EXT_ITOA
-#endif
 
 /* }================================================================== */
 

@@ -1659,12 +1659,33 @@ int luaglm_ldexp(lua_State *L) {
 
 /* 8.4. Floating-Point Pack and Unpack Functions */
 /* 8.5. Geometric Functions */
+/*
+** Set 'res' to |a - b| without wrapping around: an integer when it fits,
+** else a float. (The length of a number 'x' is its distance to 0.)
+*/
+static void glm_intdistance (TValue *res, lua_Integer a, lua_Integer b) {
+  lua_Unsigned d = (a >= b) ? l_castS2U(a) - l_castS2U(b) : l_castS2U(b) - l_castS2U(a);
+  if (d <= l_castS2U(LUA_MAXINTEGER)) {
+    setivalue(res, l_castU2S(d));
+  }
+  else {
+    setfltvalue(res, cast_num(d));
+  }
+}
+
+static void glm_pushintdistance (lua_State *L, lua_Integer a, lua_Integer b) {
+  lua_lock(L);
+  glm_intdistance(s2v(L->top.p), a, b);
+  api_incr_top(L);
+  lua_unlock(L);
+}
+
 int luaglm_length(lua_State *L) {
   TValue *o1 = (TValue *)glm_index2value(L, 1);
   if (ttisinteger(o1))
-    glm_pushinteger(L, 1);
+    glm_pushintdistance(L, ivalue(o1), 0);
   else if (ttisnumber(o1))
-    glm_pushnumber(L, l_mathop(1.0));
+    glm_pushnumber(L, l_mathop(fabs)(nvalue(o1)));
   else {
     lua_lock(L);
     luaV_objlen(L, L->top.p, o1, 0);
@@ -1691,10 +1712,8 @@ int luaglm_distance(lua_State *L) {
     }
     glm_pushnumber(L, cast_num(result));
   }
-  else if (ttisinteger(o1) && ttisinteger(o2)) {
-    lua_Integer i = luaL_intop(-, ivalue(o1), ivalue(o2));
-    glm_pushinteger(L, l_absI(i));
-  }
+  else if (ttisinteger(o1) && ttisinteger(o2))
+    glm_pushintdistance(L, ivalue(o1), ivalue(o2));
   else if (ttisnumber(o1) && ttisnumber(o2)) /* integer coercion */
     glm_pushnumber(L, l_mathop(fabs)(nvalue(o1) - nvalue(o2)));
   else
@@ -1734,11 +1753,10 @@ int luaglm_fastcall (lua_State *L, int id, StkId ra, int nargs) {
     case LUA_FASTLENGTH: {
       if (nargs < 1)
         return -1;
-      if (ttisinteger(o1)) {
-        setivalue(s2v(ra), 1);
-      }
+      if (ttisinteger(o1))
+        glm_intdistance(s2v(ra), ivalue(o1), 0);
       else if (ttisnumber(o1)) {
-        setfltvalue(s2v(ra), l_mathop(1.0));
+        setfltvalue(s2v(ra), l_mathop(fabs)(nvalue(o1)));
       }
       else if (ttisvector(o1))
         lvec_len(o1, ra, 0);
@@ -1758,10 +1776,8 @@ int luaglm_fastcall (lua_State *L, int id, StkId ra, int nargs) {
         }
         setfltvalue(s2v(ra), cast_num(result));
       }
-      else if (ttisinteger(o1) && ttisinteger(o2)) {
-        lua_Integer i = luaL_intop(-, ivalue(o1), ivalue(o2));
-        setivalue(s2v(ra), l_absI(i));
-      }
+      else if (ttisinteger(o1) && ttisinteger(o2))
+        glm_intdistance(s2v(ra), ivalue(o1), ivalue(o2));
       else if (ttisnumber(o1) && ttisnumber(o2)) {
         setfltvalue(s2v(ra), l_mathop(fabs)(nvalue(o1) - nvalue(o2)));
       }

@@ -628,7 +628,8 @@ int lua_msgpack_decode (lua_State *L, lua_msgpack *ud, const char *s, size_t len
         err_msg = "msgpack format data is invalid";
         break;
       case MSGPACK_UNPACK_NOMEM_ERROR:
-        err_msg = "msgpack memory allocation failed";
+        /* msgpack-c also returns NOMEM past its 32-level container stack */
+        err_msg = "msgpack data nests too deeply (over 32 levels) or needs too much memory";
         break;
       default:
         err_res = MSGPACK_UNPACK_PARSE_ERROR;

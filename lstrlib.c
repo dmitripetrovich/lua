@@ -267,17 +267,17 @@ static int str_trim (lua_State *L) {
   size_t len = 0;
   const char *str = luaL_checklstring(L, 1, &len);
   const char *delimiter = luaL_optstring(L, 2, "\t\n\v\f\r "); /* isspace */
-  size_t dlen = strlen(delimiter) + 1;
+  size_t dlen = strlen(delimiter);  /* (memchr: a NUL byte is never a delimiter) */
   size_t steps = 0;
   size_t i = 0;  /* result is 'str[i .. j-1]' */
   size_t j = len;
 
-  while (i < j && strchr(delimiter, str[i])) {
-    hooksteps(L, &steps, dlen);
+  while (i < j && memchr(delimiter, str[i], dlen)) {
+    hooksteps(L, &steps, dlen + 1);
     i++;
   }
-  while (j > i && strchr(delimiter, str[j - 1])) {
-    hooksteps(L, &steps, dlen);
+  while (j > i && memchr(delimiter, str[j - 1], dlen)) {
+    hooksteps(L, &steps, dlen + 1);
     j--;
   }
 

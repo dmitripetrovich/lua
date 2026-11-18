@@ -407,6 +407,16 @@ do
 end
 
 
+print("testing string.strtrim")
+
+do
+  assert(string.strtrim("  x y \t\n") == "x y" and string.strtrim("") == "" and string.strtrim(" \t ") == "")
+  assert(string.strtrim("xxaxx", "x") == "a" and string.strtrim("abc", "") == "abc")
+  -- NUL bytes are content, not delimiters
+  assert(string.strtrim("\0a\0") == "\0a\0" and string.strtrim(" \0 ") == "\0")
+end
+
+
 print("testing table.fill and table.compact")
 
 do

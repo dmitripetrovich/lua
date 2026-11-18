@@ -205,6 +205,20 @@ do
   assert(cross(vec3(1, 0, 0), vec3(0, 1, 0)) == vec3(0, 0, 1))
   assert(approx(normalize(vec3(3, 4, 0)), vec3(0.6, 0.8, 0)))
   assert(length(vec2(3, 4)) == 5 and distance(vec2(0, 0), vec2(3, 4)) == 5)
+  -- numbers: length is |x| and distance |a - b|, as integers when they fit;
+  -- direct calls take the fast path, pcall calls the library function
+  local mini, maxi = math.mininteger, math.maxinteger
+  assert(length(5) == 5 and length(-5) == 5 and math.type(length(-5)) == "integer")
+  assert(length(-2.5) == 2.5 and length(0) == 0)
+  assert(distance(3, 10) == 7 and math.type(distance(10, 3)) == "integer" and distance(1.5, -1) == 2.5)
+  assert(length(mini) == 2.0^63 and math.type(length(mini)) == "float")
+  assert(distance(-1, maxi) == 2.0^63 and distance(mini, maxi) == 2.0^64 - 1)
+  local function call (f, ...) return select(2, pcall(f, ...)) end
+  assert(call(length, 5) == 5 and call(length, -5) == 5 and math.type(call(length, -5)) == "integer")
+  assert(call(length, -2.5) == 2.5 and call(length, 0) == 0)
+  assert(call(distance, 3, 10) == 7 and math.type(call(distance, 10, 3)) == "integer" and call(distance, 1.5, -1) == 2.5)
+  assert(call(length, mini) == 2.0^63 and math.type(call(length, mini)) == "float")
+  assert(call(distance, -1, maxi) == 2.0^63 and call(distance, mini, maxi) == 2.0^64 - 1)
   assert(clamp(vec3(-1, 0.5, 2), 0, 1) == vec3(0, 0.5, 1))
   assert(clamp(5, 0, 3) == 3 and math.type(clamp(5, 0, 3)) == "integer")
   assert(mix(vec3(0), vec3(10), 0.25) == vec3(2.5))
