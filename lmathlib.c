@@ -182,6 +182,35 @@ static int math_clamp (lua_State *L) {
 #endif
 
 
+#if defined(GRIT_POWER_STDEXT)
+/* -1, 0 or 1, an integer for integers; NaN gives 0, as in Luau */
+static int math_sign (lua_State *L) {
+  if (lua_isinteger(L, 1)) {
+    lua_Integer n = lua_tointeger(L, 1);
+    lua_pushinteger(L, (n > 0) - (n < 0));
+  }
+  else {
+    lua_Number x = luaL_checknumber(L, 1);
+    lua_pushnumber(L, (x > 0) ? l_mathop(1.0) : (x < 0) ? l_mathop(-1.0) : l_mathop(0.0));
+  }
+  return 1;
+}
+
+
+/* a + (b - a) * t, exactly b at t == 1 as in Luau; vectors go to LuaGLM's mix */
+static int math_lerp (lua_State *L) {
+  if (lua_type(L, 1) == LUA_TNUMBER && lua_type(L, 2) == LUA_TNUMBER && lua_type(L, 3) == LUA_TNUMBER) {
+    lua_Number a = lua_tonumber(L, 1);
+    lua_Number b = lua_tonumber(L, 2);
+    lua_Number t = lua_tonumber(L, 3);
+    lua_pushnumber(L, (t == l_mathop(1.0)) ? b : a + (b - a) * t);
+    return 1;
+  }
+  return luaglm_mix(L);
+}
+#endif
+
+
 static int math_ult (lua_State *L) {
   lua_Integer a = luaL_checkinteger(L, 1);
   lua_Integer b = luaL_checkinteger(L, 2);
@@ -907,6 +936,10 @@ static const luaL_Reg mathlib[] = {
 #if defined(GRIT_COMPAT_GLM)
   /* grit-lua compatibility */
   { "clamp", math_clamp },
+#endif
+#if defined(GRIT_POWER_STDEXT)
+  {"sign", math_sign},
+  {"lerp", math_lerp},
 #endif
   /* placeholders */
   {"random", NULL},

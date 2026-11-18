@@ -591,4 +591,31 @@ else
   print("\n >>> string.buffer not compiled: skipping its tests <<<\n")
 end
 
+print("testing startswith, endswith, math.sign and math.lerp")
+
+if string.startswith then
+  assert(("hello"):startswith("he") and ("hello"):startswith("hello") and ("hello"):startswith(""))
+  assert(not ("hello"):startswith("hello!") and not ("hello"):startswith("el") and not (""):startswith("a"))
+  assert(("hello"):endswith("lo") and ("hello"):endswith("hello") and ("hello"):endswith(""))
+  assert(not ("hello"):endswith("!hello") and not ("hello"):endswith("ll"))
+  assert(("a\0b"):startswith("a\0") and ("a\0b"):endswith("\0b") and not ("a\0b"):startswith("a\0c"))
+  assert(string.startswith(123, "12") and string.endswith(123, 3))
+  assert(not pcall(string.startswith, "x", {}) and not pcall(string.endswith, nil, "x"))
+
+  assert(math.sign(5) == 1 and math.type(math.sign(5)) == "integer")
+  assert(math.sign(-7) == -1 and math.sign(0) == 0 and math.type(math.sign(0)) == "integer")
+  assert(math.sign(math.mininteger) == -1 and math.sign(math.maxinteger) == 1)
+  assert(math.sign(2.5) == 1.0 and math.type(math.sign(2.5)) == "float")
+  assert(math.sign(-0.1) == -1.0 and math.sign(0.0) == 0.0 and math.sign(-0.0) == 0.0)
+  assert(math.sign(0/0) == 0 and math.sign(math.huge) == 1 and math.sign(-math.huge) == -1)
+  assert(not pcall(math.sign, "x"))
+
+  assert(math.lerp(0, 10, 0.5) == 5.0 and math.lerp(0, 10, 0) == 0 and math.lerp(0, 10, 1) == 10)
+  assert(math.lerp(1e300, -1e300, 1) == -1e300 and math.lerp(0.1, 0.7, 1) == 0.7)
+  assert(math.lerp(0, 10, 2) == 20 and math.lerp(0, 10, -1) == -10)
+  assert(math.lerp(vec3(0, 0, 0), vec3(2, 4, 6), 0.5) == vec3(1, 2, 3))
+else
+  print("\n >>> startswith/endswith/sign/lerp not compiled: skipping their tests <<<\n")
+end
+
 print("OK")

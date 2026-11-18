@@ -2201,6 +2201,28 @@ static int str_blobunpack (lua_State *L) {
 /* }====================================================== */
 
 
+#if defined(GRIT_POWER_STDEXT)
+/* s:startswith(prefix): whether 's' begins with 'prefix' */
+static int str_startswith (lua_State *L) {
+  size_t l, lp;
+  const char *s = luaL_checklstring(L, 1, &l);
+  const char *p = luaL_checklstring(L, 2, &lp);
+  lua_pushboolean(L, lp <= l && memcmp(s, p, lp) == 0);
+  return 1;
+}
+
+
+/* s:endswith(suffix): whether 's' ends with 'suffix' */
+static int str_endswith (lua_State *L) {
+  size_t l, lp;
+  const char *s = luaL_checklstring(L, 1, &l);
+  const char *p = luaL_checklstring(L, 2, &lp);
+  lua_pushboolean(L, lp <= l && memcmp(s + (l - lp), p, lp) == 0);
+  return 1;
+}
+#endif
+
+
 #if defined(GRIT_POWER_STRBUF)
 /*
 ** {======================================================
@@ -2375,6 +2397,10 @@ static const luaL_Reg strlib[] = {
 #endif
 #if defined(GRIT_POWER_STRBUF)
   {"buffer", str_buffer},
+#endif
+#if defined(GRIT_POWER_STDEXT)
+  {"startswith", str_startswith},
+  {"endswith", str_endswith},
 #endif
   {NULL, NULL}
 };
