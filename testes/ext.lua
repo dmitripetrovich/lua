@@ -738,4 +738,66 @@ else
   print("\n >>> default parameter values not compiled: skipping their tests <<<\n")
 end
 
+print("testing switch")
+
+if load("switch 1 end") then
+  local classify = load([[
+    local x = ...
+    switch x
+    case 1, 2, 3 then return "small"
+    case "a" then return "letter"
+    case nil then return "nothing"
+    else return "other"
+    end
+  ]])
+  assert(classify(1) == "small" and classify(3) == "small" and classify(1.0) == "small")
+  assert(classify("a") == "letter" and classify(nil) == "nothing" and classify(9) == "other" and classify("1") == "other")
+
+  local calls = 0
+  local once = load("local f = ... local r switch f() case 1 then r = 'one' case 2 then r = 'two' else r = 'none' end return r")
+  assert(once(function () calls = calls + 1 return 2 end) == "two" and calls == 1)
+  local count = load("local x = ... local t = {} switch x case 1 then t[#t + 1] = 'a' case 2 then t[#t + 1] = 'b' end return #t")
+  assert(count(1) == 1 and count(2) == 1 and count(5) == 0)
+
+  local mt = { __eq = function (a, b) return a.id == b.id end }
+  local A, B = setmetatable({ id = 1 }, mt), setmetatable({ id = 1 }, mt)
+  assert(load("local a, b = ... switch a case b then return true end return false")(A, B) == true)
+  assert(load("local x, k = ... switch x case k + 1 then return 'next' end")(5, 4) == "next")
+
+  local loop = load([[
+    local out = {}
+    for i = 1, 6 do
+      switch i % 3
+      case 0 then
+        local label = "fizz"
+        switch i case 6 then label = label .. "!" end
+        out[#out + 1] = label
+      case 1 then
+        if i > 3 then break end
+        out[#out + 1] = i
+      else
+        out[#out + 1] = "-"
+      end
+    end
+    return table.concat(out, ",")
+  ]])
+  assert(loop() == "1,-,fizz")
+  if load("for i = 1, 1 do continue end") then
+    assert(load("local s = 0 for i = 1, 5 do switch i case 2, 4 then continue end s = s + i end return s")() == 9)
+  end
+  local fns = load("local fs = {} for i = 1, 3 do switch i case 2 then local v = i * 10 fs[#fs + 1] = function () return v end end end return fs")()
+  assert(#fns == 1 and fns[1]() == 20)
+
+  assert(load("switch 1 end return true")())
+  assert(load("local x = 0 switch x else x = 1 end return x")() == 1)
+  assert(not load("switch 1 case then end"))
+  assert(not load("switch 1 case 1 end"))
+  assert(not load("switch 1 else case 1 then end"))
+  assert(not load("switch 1 case 1 then"))
+  assert(not load("case 1 then end"))
+  assert(not load("local case = 1") and not load("local switch = 1"))
+else
+  print("\n >>> switch not compiled: skipping its tests <<<\n")
+end
+
 print("OK")

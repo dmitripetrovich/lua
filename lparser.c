@@ -915,6 +915,9 @@ static int block_follow (LexState *ls, int withuntil) {
   switch (ls->t.token) {
     case TK_ELSE: case TK_ELSEIF:
     case TK_END: case TK_EOS:
+#if defined(GRIT_POWER_SWITCH)
+    case TK_CASE:
+#endif
       return 1;
     case TK_UNTIL: return withuntil;
     default: return 0;
@@ -2399,6 +2402,65 @@ static void test_then_block (LexState *ls, int *escapelist) {
 }
 
 
+#if defined(GRIT_POWER_SWITCH)
+static void casevalue (LexState *ls, int reg, expdesc *cond) {
+  /* cond := (switch value) == expr */
+  int line = ls->linenumber;
+  expdesc v;
+  init_exp(cond, VNONRELOC, reg);
+  luaK_infix(ls->fs, OPR_EQ, cond);
+  expr(ls, &v);
+  luaK_posfix(ls->fs, OPR_EQ, cond, &v, line);
+}
+
+
+static void caseblock (LexState *ls, int reg, int *escapelist) {
+  /* caseblock -> CASE expr {',' expr} THEN block */
+  FuncState *fs = ls->fs;
+  expdesc cond;
+  luaX_next(ls);  /* skip CASE */
+  casevalue(ls, reg, &cond);
+  while (testnext(ls, ',')) {
+    int line = ls->linenumber;
+    expdesc other;
+    luaK_infix(fs, OPR_OR, &cond);
+    casevalue(ls, reg, &other);
+    luaK_posfix(fs, OPR_OR, &cond, &other, line);
+  }
+  checknext(ls, TK_THEN);
+  luaK_goiftrue(fs, &cond);  /* skip the block when no value matches */
+  block(ls);
+  if (ls->t.token == TK_CASE || ls->t.token == TK_ELSE)  /* more to skip? */
+    luaK_concat(fs, escapelist, luaK_jump(fs));
+  luaK_patchtohere(fs, cond.f);
+}
+
+
+static void switchstat (LexState *ls, int line) {
+  /* switchstat -> SWITCH expr {caseblock} [ELSE block] END */
+  FuncState *fs = ls->fs;
+  BlockCnt bl;
+  expdesc e;
+  int escapelist = NO_JUMP;
+  int reg;
+  luaX_next(ls);  /* skip SWITCH */
+  enterblock(fs, &bl, 0);
+  new_localvarliteral(ls, "(switch)");  /* the value, evaluated once */
+  expr(ls, &e);
+  luaK_exp2nextreg(fs, &e);
+  reg = e.u.info;
+  adjustlocalvars(ls, 1);
+  while (ls->t.token == TK_CASE)
+    caseblock(ls, reg, &escapelist);
+  if (testnext(ls, TK_ELSE))
+    block(ls);
+  check_match(ls, TK_END, TK_SWITCH, line);
+  luaK_patchtohere(fs, escapelist);
+  leaveblock(fs);
+}
+#endif
+
+
 static void ifstat (LexState *ls, int line) {
   /* ifstat -> IF cond THEN block {ELSEIF cond THEN block} [ELSE block] END */
   FuncState *fs = ls->fs;
@@ -2834,6 +2896,12 @@ static void statement (LexState *ls) {
       check_match(ls, TK_END, TK_DO, line);
       break;
     }
+#if defined(GRIT_POWER_SWITCH)
+    case TK_SWITCH: {  /* stat -> switchstat */
+      switchstat(ls, line);
+      break;
+    }
+#endif
     case TK_FOR: {  /* stat -> forstat */
       forstat(ls, line);
       break;

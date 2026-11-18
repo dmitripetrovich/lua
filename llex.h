@@ -37,6 +37,9 @@ enum RESERVED {
 #if defined(GRIT_POWER_DEFER)
   TK_DEFER,
 #endif
+#if defined(GRIT_POWER_SWITCH)
+  TK_CASE, TK_SWITCH,
+#endif
   TK_NIL, TK_NOT, TK_OR,
   TK_REPEAT, TK_RETURN, TK_THEN, TK_TRUE, TK_UNTIL, TK_WHILE,
   /* other terminal symbols */

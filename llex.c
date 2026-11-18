@@ -49,6 +49,9 @@ static const char *const luaX_tokens [] = {
 #if defined(GRIT_POWER_DEFER)
     "defer",
 #endif
+#if defined(GRIT_POWER_SWITCH)
+    "case", "switch",
+#endif
     "nil", "not", "or", "repeat",
     "return", "then", "true", "until", "while",
     "//", "..", "...", "==", ">=", "<=", "~=",
