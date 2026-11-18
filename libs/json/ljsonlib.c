@@ -33,6 +33,12 @@ extern "C" {
   #define LUA_JSON_MAX_DEPTH 200
 #endif
 
+#if !defined(LUA_JSON_DECODE_DEPTH)
+  #define LUA_JSON_DECODE_DEPTH 1000
+#endif
+
+#define LUA_JSON_DECODE_DEPTH_MAX 1000000
+
 #if !defined(LUA_JSON_MAX_REPLACEMENTS)
   #define LUA_JSON_MAX_REPLACEMENTS 200
 #endif
@@ -74,6 +80,7 @@ extern "C" {
 #define JSON_ARRAY_SINGLE_LINE 0x10000
 #define JSON_ARRAY_EMPTY 0x20000
 #define JSON_ARRAY_WITH_HOLES 0x40000
+#define JSON_DECODER_MAX_DEPTH 0x1000000
 #define JSON_ENCODER_HANDLER 0x2000000
 #define JSON_DECODER_PRESET 0x4000000
 #define JSON_ENCODER_DECIMALS 0x8000000
@@ -93,6 +100,7 @@ extern "C" {
 #define LUA_JSON_REG_INDENT_AMT 4
 #define LUA_JSON_REG_MAXDEC 5
 #define LUA_JSON_REG_PRESET 6
+#define LUA_JSON_REG_DECODE_DEPTH 7
 
 #define json_checkstack(L, sz) do { if (!lua_checkstack((L), (sz))) throwmsg((L), "Lua Stack Overflow"); } while (0)
 
@@ -213,7 +221,7 @@ static int lua_json_getsubtable (lua_State *L, int idx, const char *key) {
   if (lua_getfield(L, idx, key) == LUA_TTABLE) return 1;
   lua_pop(L, 1);
   idx = lua_absindex(L, idx);
-  lua_createtable(L, LUA_JSON_REG_PRESET + 1, 0);
+  lua_createtable(L, LUA_JSON_REG_DECODE_DEPTH, 0);
   lua_pushvalue(L, -1);
   lua_setfield(L, idx, key);
   return 0;
@@ -898,6 +906,7 @@ static const char *const option_keys[] = {
   "decimal_count",
   "keyorder",
   "exception",
+  "decode_max_depth",
   NULL
 };
 
@@ -923,6 +932,7 @@ static const lua_Integer option_keys_num[] = {
   JSON_ENCODER_DECIMALS,
   JSON_TABLE_KEY_ORDER,
   JSON_ENCODER_HANDLER,
+  JSON_DECODER_MAX_DEPTH,
 };
 
 static const char *const decode_presets[] = { "default", "extended", NULL };
@@ -1052,13 +1062,14 @@ static int json_decode (lua_State *L) {
   Decoder D;
   Anchor anchor;
   ljson_Reader r;
-  lua_Integer flags, parsemode;
+  lua_Integer flags, parsemode, maxdepth;
   const char *contents = NULL;
   size_t len = 0, position, offset = 0;
   int top, error;
   lua_json_getsubtable(L, LUA_REGISTRYINDEX, "lua_json");
   flags = geti(L, -1, LUA_JSON_REG_FLAGS, JSON_DEFAULT);
   parsemode = geti(L, -1, LUA_JSON_REG_PRESET, JSON_DECODE_DEFAULT);
+  maxdepth = geti(L, -1, LUA_JSON_REG_DECODE_DEPTH, LUA_JSON_DECODE_DEPTH);
   lua_pop(L, 1);
   if (lua_type(L, 1) != LUA_TNIL) contents = luaL_checklstring(L, 1, &len);
   position = luaL_optsizet(L, 2, 1);
@@ -1093,7 +1104,7 @@ static int json_decode (lua_State *L) {
 #if defined(LUA_JSON_COMPAT)
   r.flags |= LJSON_PARSE_STOP_WHEN_DONE | LJSON_PARSE_LENIENT;
 #endif
-  r.maxdepth = 0;
+  r.maxdepth = (size_t)maxdepth;
   r.alloc = anchoralloc;
   r.allocud = &anchor;
   error = ljson_parse(&r, contents + (position - 1), len - (position - 1), &decode_handler, &D, &offset);
@@ -1153,6 +1164,11 @@ static int json_setoption (lua_State *L) {
       v = decode_presets_num[luaL_optcheckoption(L, 2, NULL, decode_presets, 0)];
       seti(L, -1, LUA_JSON_REG_PRESET, v);
       break;
+    case JSON_DECODER_MAX_DEPTH:
+      v = luaL_checkinteger(L, 2);
+      luaL_argcheck(L, v > 0 && v <= LUA_JSON_DECODE_DEPTH_MAX, 2, "invalid decoder depth");
+      seti(L, -1, LUA_JSON_REG_DECODE_DEPTH, v);
+      break;
     default:
       break;
   }
@@ -1181,6 +1197,9 @@ static int json_getoption (lua_State *L) {
       break;
     case JSON_ENCODER_DECIMALS:
       lua_pushinteger(L, geti(L, -1, LUA_JSON_REG_MAXDEC, LUA_NUMBER_FMT_LEN));
+      break;
+    case JSON_DECODER_MAX_DEPTH:
+      lua_pushinteger(L, geti(L, -1, LUA_JSON_REG_DECODE_DEPTH, LUA_JSON_DECODE_DEPTH));
       break;
     case JSON_DECODER_PRESET: {
       v = geti(L, -1, LUA_JSON_REG_PRESET, JSON_DECODE_DEFAULT);
