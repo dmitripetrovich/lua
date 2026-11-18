@@ -1847,12 +1847,13 @@ static void getassignkey (LexState *ls, FuncState *fs, expdesc *v,
 
 
 static void intableunpack (LexState *ls, FuncState *fs, struct LHS_assign *lh,
-                           int outreg, expdesc *t, expdesc *e) {
+                           int outreg, lu_byte base, expdesc *t, expdesc *e) {
   expdesc key;
   if (lh->prev) {
-    intableunpack(ls, fs, lh->prev, outreg - 1, t, e);
+    intableunpack(ls, fs, lh->prev, outreg - 1, base, t, e);
     getindexnofree(fs, e);
     setrelocreg(fs, e, outreg);
+    fs->freereg = base;  /* free the key register 'luaK_indexed' may have used */
   }
   getassignkey(ls, fs, &lh->v, &key);
   *e = *t;
@@ -1874,7 +1875,7 @@ static void intable (LexState *ls, struct LHS_assign *lh, int nvars,
   outreg = fs->freereg - 1;
   suffixedexp(ls, &t);
   luaK_exp2anyregup(fs, &t);
-  intableunpack(ls, fs, lh, outreg, &t, e);
+  intableunpack(ls, fs, lh, outreg, fs->freereg, &t, e);
 }
 #endif
 

@@ -307,6 +307,29 @@ check_error("x = |a|", "unexpected symbol")
 check_error("local a = 1 a | 2", "syntax error")
 
 
+print("testing 'in' destructuring")
+
+do
+  local t = {k = 10, c = 20, d = 30}
+  local k, c, d in (t)
+  assert(k == 10 and c == 20 and d == 30)
+  local x in (t)
+  assert(x == nil)
+  k, c, d = 0, 0, 0
+  k, c, d in (t)
+  assert(k == 10 and c == 20 and d == 30)
+  -- with over 256 constants the names no longer fit in an instruction,
+  -- so the earlier targets load them into registers
+  local pad = {}
+  for i = 1, 300 do pad[i] = string.format("%q", "p" .. i) end
+  local src = "local t = ... local pad = {" .. table.concat(pad, ", ") .. "} "
+  for _, body in ipairs{"local k, c, d in (t) return k, c, d", "local k, c, d = 0, 0, 0 k, c, d in (t) return k, c, d", "k, c, d in (t) return k, c, d"} do
+    local a, b, e = assert(load(src .. body, "=in", "t", {}))(t)
+    assert(a == 10 and b == 20 and e == 30, body)
+  end
+end
+
+
 print("testing extended number literals")
 
 do
