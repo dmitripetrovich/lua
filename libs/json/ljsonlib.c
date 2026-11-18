@@ -540,7 +540,7 @@ static int encodeMetafield (lua_State *L, Encoder *E, int idx) {
     if (lua_type(L, -1) == LUA_TSTRING) {
       size_t len;
       const char *s = lua_tolstring(L, -1, &len);
-      ljson_raw(E->w, s, len);
+      ljson_write_raw(E->w, s, len);
     }
     else throwmsg(L, "Invalid __tojson result");
     lua_pop(L, 1);
@@ -553,7 +553,7 @@ static int OrderedKey (Encoder *E, const Key *key) {
   if (key->kind == KEY_INTEGER) {
     char buffer[MAXNUMBER2STR];
     const char *end = ljson_i64toa((int64_t)key->i, buffer);
-    return ljson_key(E->w, buffer, (size_t)(end - buffer));
+    return ljson_write_key(E->w, buffer, (size_t)(end - buffer)) == LJSON_OK;
   }
   else if (key->kind == KEY_NUMBER) {
     const double d = (double)key->n;
@@ -565,29 +565,29 @@ static int OrderedKey (Encoder *E, const Key *key) {
       if (d != d) lit = "NaN";
       else if (d < 0) lit = "-Infinity";
       else lit = "Infinity";
-      return ljson_key(E->w, lit, strlen(lit));
+      return ljson_write_key(E->w, lit, strlen(lit)) == LJSON_OK;
     }
     if (E->flags & JSON_LUA_DTOA) end = lua_dtoa(buffer, MAXNUMBER2STR, d);
     else end = ljson_dtoa((E->flags & JSON_LUA_GRISU) ? lua_grisuRound(d) : d, buffer, E->w->maxdecimals);
-    return ljson_key(E->w, buffer, (size_t)(end - buffer));
+    return ljson_write_key(E->w, buffer, (size_t)(end - buffer)) == LJSON_OK;
   }
-  return ljson_key(E->w, key->s, key->len);
+  return ljson_write_key(E->w, key->s, key->len) == LJSON_OK;
 }
 
 static void encode_array (lua_State *L, Encoder *E, int idx, size_t array_length, int depth) {
   size_t i;
-  ljson_startarray(E->w);
+  ljson_write_start_array(E->w);
   for (i = 1; i <= array_length; ++i) {
     lua_rawgeti(L, idx, (lua_Integer)i);
     encodeValue(L, E, lua_gettop(L), depth);
     lua_pop(L, 1);
   }
-  ljson_endarray(E->w);
+  ljson_write_end_array(E->w);
 }
 
 static void encodeObject (lua_State *L, Encoder *E, int idx, int depth) {
   json_checkstack(L, 3);
-  ljson_startobject(E->w);
+  ljson_write_start_object(E->w);
   lua_pushnil(L);
   while (lua_next(L, idx)) {
     Key key;
@@ -614,7 +614,7 @@ static void encodeObject (lua_State *L, Encoder *E, int idx, int depth) {
     if (OrderedKey(E, &key)) encodeValue(L, E, lua_gettop(L), depth);
     lua_pop(L, 1);
   }
-  ljson_endobject(E->w);
+  ljson_write_end_object(E->w);
 }
 
 static void pushkeyvalue (lua_State *L, const Key *k) {
@@ -626,7 +626,7 @@ static void pushkeyvalue (lua_State *L, const Key *k) {
 static void encodeOrderedObject (lua_State *L, Encoder *E, int idx, int depth, const KeyList *keyorder, const KeyList *unordered) {
   size_t i;
   json_checkstack(L, 2);
-  ljson_startobject(E->w);
+  ljson_write_start_object(E->w);
   for (i = 0; i < keyorder->n; i++) {
     pushkeyvalue(L, &keyorder->k[i]);
     if (lua_gettable(L, idx) != LUA_TNIL && OrderedKey(E, &keyorder->k[i])) encodeValue(L, E, lua_gettop(L), depth);
@@ -637,7 +637,7 @@ static void encodeOrderedObject (lua_State *L, Encoder *E, int idx, int depth, c
     if (lua_gettable(L, idx) != LUA_TNIL && OrderedKey(E, &unordered->k[i])) encodeValue(L, E, lua_gettop(L), depth);
     lua_pop(L, 1);
   }
-  ljson_endobject(E->w);
+  ljson_write_end_object(E->w);
 }
 
 static void encodeTable (lua_State *L, Encoder *E, int idx, int depth) {
@@ -648,7 +648,7 @@ static void encodeTable (lua_State *L, Encoder *E, int idx, int depth) {
     if (r != 1) {
       if (E->flags & JSON_NESTING_NULL) {
         lua_settop(L, top);
-        ljson_null(E->w);
+        ljson_write_null(E->w);
       }
       else if (r == 2) lua_error(L);
       else throwmsg(L, "maximum table nesting depth exceeded");
@@ -686,38 +686,42 @@ static void encodeTable (lua_State *L, Encoder *E, int idx, int depth) {
 
 static void encodeValue (lua_State *L, Encoder *E, int idx, int depth) {
   ljson_Writer *w = E->w;
+  if (lua_type(L, idx) == LUA_TFUNCTION && is_json_null(L, idx)) {
+    ljson_write_null(w);
+    return;
+  }
   switch (lua_type(L, idx)) {
     case LUA_TNIL:
-      ljson_null(w);
+      ljson_write_null(w);
       break;
     case LUA_TBOOLEAN:
-      ljson_bool(w, lua_toboolean(L, idx));
+      ljson_write_bool(w, lua_toboolean(L, idx));
       break;
     case LUA_TNUMBER: {
       if (lua_isinteger(L, idx)) {
         const lua_Integer i = lua_tointeger(L, idx);
         if (E->flags & JSON_ENCODE_INT32) {
-          if (E->flags & JSON_UNSIGNED_INTEGERS) ljson_uint(w, (unsigned)i);
-          else ljson_int(w, (int)i);
+          if (E->flags & JSON_UNSIGNED_INTEGERS) ljson_write_uint(w, (unsigned)i);
+          else ljson_write_int(w, (int)i);
         }
         else {
-          if (E->flags & JSON_UNSIGNED_INTEGERS) ljson_uint(w, (uint64_t)i);
-          else ljson_int(w, (int64_t)i);
+          if (E->flags & JSON_UNSIGNED_INTEGERS) ljson_write_uint(w, (uint64_t)i);
+          else ljson_write_int(w, (int64_t)i);
         }
       }
       else {
         const double d = (double)lua_tonumber(L, idx);
         const int is_inf = isnaninf(d);
 #if defined(LUA_JSON_COMPAT)
-        if (is_inf) ljson_null(w);
+        if (is_inf) ljson_write_null(w);
         else
 #endif
         if ((E->flags & JSON_LUA_DTOA) && !is_inf) {
           char buffer[MAXNUMBER2STR + 2] = { 0 };
           const char *end = lua_dtoa(buffer, MAXNUMBER2STR, d);
-          ljson_raw(w, buffer, (size_t)(end - buffer));
+          ljson_write_raw(w, buffer, (size_t)(end - buffer));
         }
-        else if (!ljson_double(w, ((E->flags & JSON_LUA_GRISU) && !is_inf) ? lua_grisuRound(d) : d)) {
+        else if (ljson_write_double(w, ((E->flags & JSON_LUA_GRISU) && !is_inf) ? lua_grisuRound(d) : d) != LJSON_OK) {
           int r = handle_exception(L, E, idx, depth, "error encoding number");
           if (r == 2) lua_error(L);
           else if (r == 0) throwmsg(L, "error encoding: kWriteNanAndInfFlag");
@@ -729,38 +733,32 @@ static void encodeValue (lua_State *L, Encoder *E, int idx, int depth) {
       lua_Float4 v;
       int args = parseVector(L, idx, &v);
       if (E->flags & JSON_ENCODER_ARRAY_VECTOR) {
-        ljson_startarray(w);
-        if (args) { ljson_double(w, (double)v.x); args--; }
-        if (args) { ljson_double(w, (double)v.y); args--; }
-        if (args) { ljson_double(w, (double)v.z); args--; }
-        if (args) { ljson_double(w, (double)v.w); args--; }
-        ljson_endarray(w);
+        ljson_write_start_array(w);
+        if (args) { ljson_write_double(w, (double)v.x); args--; }
+        if (args) { ljson_write_double(w, (double)v.y); args--; }
+        if (args) { ljson_write_double(w, (double)v.z); args--; }
+        if (args) { ljson_write_double(w, (double)v.w); args--; }
+        ljson_write_end_array(w);
       }
       else {
-        ljson_startobject(w);
-        if (args) { ljson_key(w, "x", 1); ljson_double(w, (double)v.x); args--; }
-        if (args) { ljson_key(w, "y", 1); ljson_double(w, (double)v.y); args--; }
-        if (args) { ljson_key(w, "z", 1); ljson_double(w, (double)v.z); args--; }
-        if (args) { ljson_key(w, "w", 1); ljson_double(w, (double)v.w); args--; }
-        ljson_endobject(w);
+        ljson_write_start_object(w);
+        if (args) { ljson_write_key(w, "x", 1); ljson_write_double(w, (double)v.x); args--; }
+        if (args) { ljson_write_key(w, "y", 1); ljson_write_double(w, (double)v.y); args--; }
+        if (args) { ljson_write_key(w, "z", 1); ljson_write_double(w, (double)v.z); args--; }
+        if (args) { ljson_write_key(w, "w", 1); ljson_write_double(w, (double)v.w); args--; }
+        ljson_write_end_object(w);
       }
       break;
     }
     case LUA_TSTRING: {
       size_t len;
       const char *s = lua_tolstring(L, idx, &len);
-      ljson_string(w, s, len);
+      ljson_write_string(w, s, len);
       break;
     }
     case LUA_TTABLE:
       encodeTable(L, E, idx, depth + 1);
       break;
-    case LUA_TFUNCTION:
-      if (is_json_null(L, idx)) {
-        ljson_null(w);
-        break;
-      }
-
     default: {
       if (!encodeMetafield(L, E, idx)) {
         int r = handle_exception(L, E, idx, depth, "unsupported type");
@@ -957,7 +955,7 @@ static int make_table_type (lua_State *L, int idx, const char *meta, const char 
   return 1;
 }
 
-LUALIB_API int ljson_encode (lua_State *L) {
+static int json_encode (lua_State *L) {
   int key_order_idx = 0, error_handler_idx = 0, depth, decimals;
   lua_Integer flags, indent, indent_amt;
   Encoder E;
@@ -1021,7 +1019,7 @@ LUALIB_API int ljson_encode (lua_State *L) {
   initkeys(L, &order);
   if (key_order_idx > 0) populate_key_vector(L, key_order_idx, &order);
   initanchor(L, &anchor);
-  ljson_writerinit(&w, anchoralloc, &anchor);
+  ljson_writer_init(&w, anchoralloc, &anchor);
   w.flags = 0;
   if (flags & JSON_PRETTY_PRINT) {
     w.flags |= LJSON_WRITE_PRETTY;
@@ -1038,16 +1036,16 @@ LUALIB_API int ljson_encode (lua_State *L) {
   E.order = &order;
   E.w = &w;
   encodeValue(L, &E, 1, 0);
-  result = ljson_result(&w, &len);
+  result = ljson_writer_result(&w, &len);
   if (result == NULL) return luaL_error(L, "not enough memory");
   lua_pushlstring(L, result, len);
-  ljson_writerfree(&w);
+  ljson_writer_free(&w);
   freeanchor(&anchor);
   luaL_checkhook(L, lua_rawlen(L, -1));
   return 1;
 }
 
-LUALIB_API int ljson_decode (lua_State *L) {
+static int json_decode (lua_State *L) {
   Decoder D;
   Anchor anchor;
   ljson_Reader r;
@@ -1110,7 +1108,7 @@ LUALIB_API int ljson_decode (lua_State *L) {
   return 2;
 }
 
-LUALIB_API int ljson_setoption (lua_State *L) {
+static int json_setoption (lua_State *L) {
   lua_Integer v = 0;
   const lua_Integer opt = option_keys_num[luaL_checkoption(L, 1, NULL, option_keys)];
   lua_settop(L, 2);
@@ -1145,7 +1143,7 @@ LUALIB_API int ljson_setoption (lua_State *L) {
   return 0;
 }
 
-LUALIB_API int ljson_getoption (lua_State *L) {
+static int json_getoption (lua_State *L) {
   lua_Integer v = 0;
   const lua_Integer opt = option_keys_num[luaL_checkoption(L, 1, NULL, option_keys)];
   lua_json_getsubtable(L, LUA_REGISTRYINDEX, "lua_json");
@@ -1179,42 +1177,42 @@ LUALIB_API int ljson_getoption (lua_State *L) {
   return 1;
 }
 
-LUALIB_API int ljson_object (lua_State *L) {
+static int json_object (lua_State *L) {
   make_table_type(L, 1, "lua_json_object", "object");
   return 1;
 }
 
-LUALIB_API int ljson_array (lua_State *L) {
+static int json_array (lua_State *L) {
   make_table_type(L, 1, "lua_json_array", "array");
   return 1;
 }
 
-LUALIB_API int ljson_isobject (lua_State *L) {
+static int json_isobject (lua_State *L) {
   int is_array = 0;
   lua_pushboolean(L, has_json_type(L, 1, &is_array) && !is_array);
   return 1;
 }
 
-LUALIB_API int ljson_isarray (lua_State *L) {
+static int json_isarray (lua_State *L) {
   int is_array = 0;
   lua_pushboolean(L, has_json_type(L, 1, &is_array) && is_array);
   return 1;
 }
 
-static int ljson_use_lpeg (lua_State *L) { return luaL_error(L, "use_lpeg has been deprecated!"); }
+static int json_use_lpeg (lua_State *L) { return luaL_error(L, "use_lpeg has been deprecated!"); }
 
 LUAMOD_API int luaopen_json (lua_State *L) {
   static const luaL_Reg luajson_lib[] = {
-    { "decode", ljson_decode },
-    { "encode", ljson_encode },
-    { "setoption", ljson_setoption },
-    { "getoption", ljson_getoption },
+    { "decode", json_decode },
+    { "encode", json_encode },
+    { "setoption", json_setoption },
+    { "getoption", json_getoption },
     { "null", json_null },
-    { "object", ljson_object },
-    { "array", ljson_array },
-    { "isobject", ljson_isobject },
-    { "isarray", ljson_isarray },
-    { "use_lpeg", ljson_use_lpeg },
+    { "object", json_object },
+    { "array", json_array },
+    { "isobject", json_isobject },
+    { "isarray", json_isarray },
+    { "use_lpeg", json_use_lpeg },
     { "_COMPAT", NULL },
     { NULL, NULL }
   };

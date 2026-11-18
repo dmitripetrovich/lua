@@ -30,8 +30,12 @@ enum {
   LJSON_ERROR_TERMINATION,
   LJSON_ERROR_UNSPECIFIC_SYNTAX_ERROR,
   LJSON_ERROR_DEPTH,
-  LJSON_ERROR_MEMORY
+  LJSON_ERROR_MEMORY,
+  LJSON_ERROR_NAN_INF,
+  LJSON_ERROR_UNBALANCED
 };
+
+const char *ljson_errormessage (int error);
 
 #define LJSON_PARSE_COMMENTS 0x01
 #define LJSON_PARSE_TRAILING_COMMAS 0x02
@@ -39,6 +43,39 @@ enum {
 #define LJSON_PARSE_FULL_PRECISION 0x08
 #define LJSON_PARSE_STOP_WHEN_DONE 0x10
 #define LJSON_PARSE_LENIENT 0x20
+#define LJSON_PARSE_SKIP_BOM 0x40
+
+typedef enum ljson_Type {
+  LJSON_NULL,
+  LJSON_BOOLEAN,
+  LJSON_POSITIVE_INTEGER,
+  LJSON_NEGATIVE_INTEGER,
+  LJSON_NUMBER,
+  LJSON_STRING,
+  LJSON_ARRAY,
+  LJSON_OBJECT
+} ljson_Type;
+
+typedef struct ljson_Value ljson_Value;
+typedef struct ljson_Pair ljson_Pair;
+
+struct ljson_Value {
+  ljson_Type type;
+  union {
+    int boolean;
+    uint64_t u64;
+    int64_t i64;
+    double f64;
+    struct { size_t size; const char *ptr; } str;
+    struct { size_t size; ljson_Value *ptr; } array;
+    struct { size_t size; ljson_Pair *ptr; } object;
+  } via;
+};
+
+struct ljson_Pair {
+  ljson_Value key;
+  ljson_Value val;
+};
 
 typedef struct ljson_Handler {
   int (*null) (void *ud);
@@ -63,7 +100,17 @@ typedef struct ljson_Reader {
 
 int ljson_parse (const ljson_Reader *r, const char *s, size_t len, const ljson_Handler *h, void *ud, size_t *offset);
 
-const char *ljson_errormessage (int error);
+typedef struct ljson_Document {
+  ljson_Value root;
+  void *blocks;
+  ljson_Alloc alloc;
+  void *allocud;
+} ljson_Document;
+
+void ljson_document_init (ljson_Document *d, ljson_Alloc alloc, void *allocud);
+void ljson_document_free (ljson_Document *d);
+
+int ljson_decode (ljson_Document *d, const char *s, size_t len, unsigned flags, size_t maxdepth, size_t *offset);
 
 #define LJSON_WRITE_PRETTY 0x01
 #define LJSON_WRITE_NAN_INF 0x02
@@ -93,23 +140,23 @@ typedef struct ljson_Writer {
   ljson_Level initlevels[32];
 } ljson_Writer;
 
-void ljson_writerinit (ljson_Writer *w, ljson_Alloc alloc, void *allocud);
-void ljson_writerfree (ljson_Writer *w);
+void ljson_writer_init (ljson_Writer *w, ljson_Alloc alloc, void *allocud);
+void ljson_writer_free (ljson_Writer *w);
 
-const char *ljson_result (const ljson_Writer *w, size_t *len);
+const char *ljson_writer_result (const ljson_Writer *w, size_t *len);
 
-int ljson_null (ljson_Writer *w);
-int ljson_bool (ljson_Writer *w, int b);
-int ljson_int (ljson_Writer *w, int64_t i);
-int ljson_uint (ljson_Writer *w, uint64_t u);
-int ljson_double (ljson_Writer *w, double d);
-int ljson_string (ljson_Writer *w, const char *s, size_t len);
-int ljson_key (ljson_Writer *w, const char *s, size_t len);
-int ljson_startobject (ljson_Writer *w);
-int ljson_endobject (ljson_Writer *w);
-int ljson_startarray (ljson_Writer *w);
-int ljson_endarray (ljson_Writer *w);
-int ljson_raw (ljson_Writer *w, const char *s, size_t len);
+int ljson_write_null (ljson_Writer *w);
+int ljson_write_bool (ljson_Writer *w, int b);
+int ljson_write_int (ljson_Writer *w, int64_t i);
+int ljson_write_uint (ljson_Writer *w, uint64_t u);
+int ljson_write_double (ljson_Writer *w, double d);
+int ljson_write_string (ljson_Writer *w, const char *s, size_t len);
+int ljson_write_key (ljson_Writer *w, const char *s, size_t len);
+int ljson_write_start_object (ljson_Writer *w);
+int ljson_write_end_object (ljson_Writer *w);
+int ljson_write_start_array (ljson_Writer *w);
+int ljson_write_end_array (ljson_Writer *w);
+int ljson_write_raw (ljson_Writer *w, const char *s, size_t len);
 
 char *ljson_dtoa (double d, char *buff, int maxdecimals);
 char *ljson_i64toa (int64_t i, char *buff);

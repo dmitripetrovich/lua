@@ -1317,6 +1317,11 @@ int ljson_parse (const ljson_Reader *r, const char *s, size_t len, const ljson_H
   P.depth = 0;
   P.nframes = sizeof(P.initframes) / sizeof(P.initframes[0]);
   P.maxdepth = r->maxdepth;
+  if (P.flags & LJSON_PARSE_SKIP_BOM) {
+    consume(&P, (char)0xEF);
+    consume(&P, (char)0xBB);
+    consume(&P, (char)0xBF);
+  }
   if (skipwhitespaceandcomments(&P)) {
     while (peek(&P) != '\0') {
       int d = transit(&P, state, predict[state][tokenize(peek(&P))]);
@@ -1358,11 +1363,225 @@ const char *ljson_errormessage (int error) {
     case LJSON_ERROR_UNSPECIFIC_SYNTAX_ERROR: return "Unspecific syntax error.";
     case LJSON_ERROR_DEPTH: return "Nesting too deep.";
     case LJSON_ERROR_MEMORY: return "Not enough memory.";
+    case LJSON_ERROR_NAN_INF: return "NaN or infinity is not allowed.";
+    case LJSON_ERROR_UNBALANCED: return "End of an object or array that was not started.";
     default: return "Unknown error.";
   }
 }
 
-void ljson_writerinit (ljson_Writer *w, ljson_Alloc alloc, void *allocud) {
+typedef union Align {
+  void *p;
+  double d;
+  int64_t i;
+  size_t s;
+} Align;
+
+typedef struct Block {
+  struct Block *next;
+  size_t size, used;
+} Block;
+
+#define ALIGNED(n) (((n) + sizeof(Align) - 1) / sizeof(Align) * sizeof(Align))
+#define BLOCKHEADER ALIGNED(sizeof(Block))
+#define BLOCKMIN ((size_t)4096)
+#define BLOCKMAX ((size_t)1 << 20)
+
+typedef struct Builder {
+  ljson_Document *d;
+  ljson_Value *stack;
+  size_t n, size;
+  int nomem;
+} Builder;
+
+static void *arena (Builder *B, size_t n) {
+  ljson_Document *d = B->d;
+  Block *head = (Block *)d->blocks;
+  Block *b;
+  size_t size;
+  if (n > (size_t)-1 - sizeof(Align) - BLOCKHEADER) {
+    B->nomem = 1;
+    return NULL;
+  }
+  n = ALIGNED(n);
+  if (head != NULL && head->size - head->used >= n) {
+    head->used += n;
+    return (char *)head + BLOCKHEADER + head->used - n;
+  }
+  size = (head == NULL) ? BLOCKMIN : (head->size < BLOCKMAX) ? head->size * 2 : BLOCKMAX;
+  if (n > size / 2) size = n;
+  if ((b = (Block *)d->alloc(d->allocud, NULL, 0, BLOCKHEADER + size)) == NULL) {
+    B->nomem = 1;
+    return NULL;
+  }
+  b->size = size;
+  b->used = n;
+  if (size == n && head != NULL) {
+    b->next = head->next;
+    head->next = b;
+  }
+  else {
+    b->next = head;
+    d->blocks = b;
+  }
+  return (char *)b + BLOCKHEADER;
+}
+
+static int push (Builder *B, const ljson_Value *v) {
+  if (B->n == B->size) {
+    ljson_Document *d = B->d;
+    size_t nsize = (B->size > 0) ? B->size * 2 : 64;
+    ljson_Value *stack;
+    if (nsize > (size_t)-1 / sizeof(ljson_Value) || (stack = (ljson_Value *)d->alloc(d->allocud, B->stack, B->size * sizeof(ljson_Value), nsize * sizeof(ljson_Value))) == NULL) {
+      B->nomem = 1;
+      return 0;
+    }
+    B->stack = stack;
+    B->size = nsize;
+  }
+  B->stack[B->n++] = *v;
+  return 1;
+}
+
+static int b_null (void *ud) {
+  ljson_Value v;
+  v.type = LJSON_NULL;
+  return push((Builder *)ud, &v);
+}
+
+static int b_boolean (void *ud, int b) {
+  ljson_Value v;
+  v.type = LJSON_BOOLEAN;
+  v.via.boolean = b;
+  return push((Builder *)ud, &v);
+}
+
+static int b_integer (void *ud, int64_t i) {
+  ljson_Value v;
+  if (i >= 0) {
+    v.type = LJSON_POSITIVE_INTEGER;
+    v.via.u64 = (uint64_t)i;
+  }
+  else {
+    v.type = LJSON_NEGATIVE_INTEGER;
+    v.via.i64 = i;
+  }
+  return push((Builder *)ud, &v);
+}
+
+static int b_uinteger (void *ud, uint64_t u) {
+  ljson_Value v;
+  v.type = LJSON_POSITIVE_INTEGER;
+  v.via.u64 = u;
+  return push((Builder *)ud, &v);
+}
+
+static int b_number (void *ud, double d) {
+  ljson_Value v;
+  v.type = LJSON_NUMBER;
+  v.via.f64 = d;
+  return push((Builder *)ud, &v);
+}
+
+static int b_string (void *ud, const char *s, size_t len) {
+  Builder *B = (Builder *)ud;
+  ljson_Value v;
+  char *copy = (char *)arena(B, len + 1);
+  if (copy == NULL) return 0;
+  if (len > 0) memcpy(copy, s, len);
+  copy[len] = '\0';
+  v.type = LJSON_STRING;
+  v.via.str.size = len;
+  v.via.str.ptr = copy;
+  return push(B, &v);
+}
+
+static int b_start (void *ud) {
+  (void)ud;
+  return 1;
+}
+
+static int b_end_object (void *ud, size_t count) {
+  Builder *B = (Builder *)ud;
+  ljson_Value v;
+  v.type = LJSON_OBJECT;
+  v.via.object.size = count;
+  v.via.object.ptr = NULL;
+  if (count > 0) {
+    const ljson_Value *top = B->stack + B->n - 2 * count;
+    size_t i;
+    if (count > (size_t)-1 / sizeof(ljson_Pair)) {
+      B->nomem = 1;
+      return 0;
+    }
+    if ((v.via.object.ptr = (ljson_Pair *)arena(B, count * sizeof(ljson_Pair))) == NULL) return 0;
+    for (i = 0; i < count; i++) {
+      v.via.object.ptr[i].key = top[2 * i];
+      v.via.object.ptr[i].val = top[2 * i + 1];
+    }
+    B->n -= 2 * count;
+  }
+  return push(B, &v);
+}
+
+static int b_end_array (void *ud, size_t count) {
+  Builder *B = (Builder *)ud;
+  ljson_Value v;
+  v.type = LJSON_ARRAY;
+  v.via.array.size = count;
+  v.via.array.ptr = NULL;
+  if (count > 0) {
+    if (count > (size_t)-1 / sizeof(ljson_Value)) {
+      B->nomem = 1;
+      return 0;
+    }
+    if ((v.via.array.ptr = (ljson_Value *)arena(B, count * sizeof(ljson_Value))) == NULL) return 0;
+    memcpy(v.via.array.ptr, B->stack + B->n - count, count * sizeof(ljson_Value));
+    B->n -= count;
+  }
+  return push(B, &v);
+}
+
+void ljson_document_init (ljson_Document *d, ljson_Alloc alloc, void *allocud) {
+  d->root.type = LJSON_NULL;
+  d->blocks = NULL;
+  d->alloc = (alloc != NULL) ? alloc : defaultalloc;
+  d->allocud = allocud;
+}
+
+void ljson_document_free (ljson_Document *d) {
+  Block *b = (Block *)d->blocks;
+  while (b != NULL) {
+    Block *next = b->next;
+    d->alloc(d->allocud, b, BLOCKHEADER + b->size, 0);
+    b = next;
+  }
+  d->blocks = NULL;
+  d->root.type = LJSON_NULL;
+}
+
+int ljson_decode (ljson_Document *d, const char *s, size_t len, unsigned flags, size_t maxdepth, size_t *offset) {
+  static const ljson_Handler builder = { b_null, b_boolean, b_integer, b_uinteger, b_number, b_string, b_string, b_start, b_end_object, b_start, b_end_array };
+  ljson_Reader r;
+  Builder B;
+  int error;
+  ljson_document_free(d);
+  r.flags = flags;
+  r.maxdepth = maxdepth;
+  r.alloc = d->alloc;
+  r.allocud = d->allocud;
+  B.d = d;
+  B.stack = NULL;
+  B.n = B.size = 0;
+  B.nomem = 0;
+  error = ljson_parse(&r, s, len, &builder, &B, offset);
+  if (B.nomem) error = LJSON_ERROR_MEMORY;
+  if (error == LJSON_OK) d->root = B.stack[0];
+  if (B.stack != NULL) d->alloc(d->allocud, B.stack, B.size * sizeof(ljson_Value), 0);
+  if (error != LJSON_OK) ljson_document_free(d);
+  return error;
+}
+
+void ljson_writer_init (ljson_Writer *w, ljson_Alloc alloc, void *allocud) {
   w->flags = 0;
   w->maxdecimals = LJSON_MAXDECIMALS;
   w->indentchar = ' ';
@@ -1379,7 +1598,7 @@ void ljson_writerinit (ljson_Writer *w, ljson_Alloc alloc, void *allocud) {
   w->allocud = allocud;
 }
 
-void ljson_writerfree (ljson_Writer *w) {
+void ljson_writer_free (ljson_Writer *w) {
   freeblock(w->alloc, w->allocud, w->b, w->initb, w->size, 1);
   freeblock(w->alloc, w->allocud, w->levels, w->initlevels, w->nlevels, sizeof(ljson_Level));
   w->b = w->initb;
@@ -1389,7 +1608,7 @@ void ljson_writerfree (ljson_Writer *w) {
   w->n = w->depth = 0;
 }
 
-const char *ljson_result (const ljson_Writer *w, size_t *len) {
+const char *ljson_writer_result (const ljson_Writer *w, size_t *len) {
   *len = w->nomem ? 0 : w->n;
   return w->nomem ? NULL : w->b;
 }
@@ -1457,40 +1676,40 @@ static void prefix (ljson_Writer *w) {
   level->count++;
 }
 
-static int done (ljson_Writer *w) { return !w->nomem; }
+static int done (ljson_Writer *w) { return w->nomem ? LJSON_ERROR_MEMORY : LJSON_OK; }
 
-int ljson_null (ljson_Writer *w) {
+int ljson_write_null (ljson_Writer *w) {
   prefix(w);
   putn(w, "null", 4);
   return done(w);
 }
 
-int ljson_bool (ljson_Writer *w, int b) {
+int ljson_write_bool (ljson_Writer *w, int b) {
   prefix(w);
   if (b) putn(w, "true", 4);
   else putn(w, "false", 5);
   return done(w);
 }
 
-int ljson_int (ljson_Writer *w, int64_t i) {
+int ljson_write_int (ljson_Writer *w, int64_t i) {
   char buff[21];
   prefix(w);
   putn(w, buff, (size_t)(ljson_i64toa(i, buff) - buff));
   return done(w);
 }
 
-int ljson_uint (ljson_Writer *w, uint64_t u) {
+int ljson_write_uint (ljson_Writer *w, uint64_t u) {
   char buff[20];
   prefix(w);
   putn(w, buff, (size_t)(ljson_u64toa(u, buff) - buff));
   return done(w);
 }
 
-int ljson_double (ljson_Writer *w, double d) {
+int ljson_write_double (ljson_Writer *w, double d) {
   uint64_t u = dbits(d);
   prefix(w);
   if ((u & DP_EXPONENT_MASK) == DP_EXPONENT_MASK) {
-    if (!(w->flags & LJSON_WRITE_NAN_INF)) return 0;
+    if (!(w->flags & LJSON_WRITE_NAN_INF)) return LJSON_ERROR_NAN_INF;
     if (u & DP_SIGNIFICAND_MASK) putn(w, "NaN", 3);
     else if (u & DP_SIGN_MASK) putn(w, "-Infinity", 9);
     else putn(w, "Infinity", 8);
@@ -1502,7 +1721,7 @@ int ljson_double (ljson_Writer *w, double d) {
   return done(w);
 }
 
-int ljson_string (ljson_Writer *w, const char *s, size_t len) {
+int ljson_write_string (ljson_Writer *w, const char *s, size_t len) {
   static const char hexdigits[] = "0123456789ABCDEF";
   static const char escape[256] = {
     'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'b', 't', 'n', 'u', 'f', 'r', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u',
@@ -1513,7 +1732,7 @@ int ljson_string (ljson_Writer *w, const char *s, size_t len) {
   prefix(w);
   if (len > ((size_t)-1 - 2) / 6 || !reserve(w, 2 + len * 6)) {
     w->nomem = 1;
-    return 0;
+    return LJSON_ERROR_MEMORY;
   }
   w->b[w->n++] = '"';
   while (i < len) {
@@ -1534,10 +1753,10 @@ int ljson_string (ljson_Writer *w, const char *s, size_t len) {
     }
   }
   w->b[w->n++] = '"';
-  return 1;
+  return LJSON_OK;
 }
 
-int ljson_key (ljson_Writer *w, const char *s, size_t len) { return ljson_string(w, s, len); }
+int ljson_write_key (ljson_Writer *w, const char *s, size_t len) { return ljson_write_string(w, s, len); }
 
 static int startlevel (ljson_Writer *w, int inarray, char c) {
   prefix(w);
@@ -1545,7 +1764,7 @@ static int startlevel (ljson_Writer *w, int inarray, char c) {
     void *block = w->levels;
     if (!growblock(w->alloc, w->allocud, &block, w->initlevels, &w->nlevels, w->depth + 1, sizeof(ljson_Level))) {
       w->nomem = 1;
-      return 0;
+      return LJSON_ERROR_MEMORY;
     }
     w->levels = (ljson_Level *)block;
   }
@@ -1558,7 +1777,7 @@ static int startlevel (ljson_Writer *w, int inarray, char c) {
 
 static int endlevel (ljson_Writer *w, int inarray, char c) {
   int empty;
-  if (w->depth == 0) return 0;
+  if (w->depth == 0) return LJSON_ERROR_UNBALANCED;
   empty = w->levels[--w->depth].count == 0;
   if ((w->flags & LJSON_WRITE_PRETTY) && !empty && (!inarray || !(w->flags & LJSON_WRITE_SINGLE_LINE_ARRAY))) {
     put(w, '\n');
@@ -1568,15 +1787,15 @@ static int endlevel (ljson_Writer *w, int inarray, char c) {
   return done(w);
 }
 
-int ljson_startobject (ljson_Writer *w) { return startlevel(w, 0, '{'); }
+int ljson_write_start_object (ljson_Writer *w) { return startlevel(w, 0, '{'); }
 
-int ljson_endobject (ljson_Writer *w) { return endlevel(w, 0, '}'); }
+int ljson_write_end_object (ljson_Writer *w) { return endlevel(w, 0, '}'); }
 
-int ljson_startarray (ljson_Writer *w) { return startlevel(w, 1, '['); }
+int ljson_write_start_array (ljson_Writer *w) { return startlevel(w, 1, '['); }
 
-int ljson_endarray (ljson_Writer *w) { return endlevel(w, 1, ']'); }
+int ljson_write_end_array (ljson_Writer *w) { return endlevel(w, 1, ']'); }
 
-int ljson_raw (ljson_Writer *w, const char *s, size_t len) {
+int ljson_write_raw (ljson_Writer *w, const char *s, size_t len) {
   prefix(w);
   putn(w, s, len);
   return done(w);

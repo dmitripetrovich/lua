@@ -120,7 +120,7 @@ extern "C++" {
 
 typedef struct lua_msgpack {
   lua_Integer flags;
-  lmsgpack_writer w;
+  lmsgpack_Writer w;
 } lua_msgpack;
 
 #include "lmsgpacklib.h"
@@ -224,18 +224,10 @@ static lua_VecF mp_loadvec (const unsigned char *p) {
   return f;
 }
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
-
-LUALIB_API int mp_null (lua_State *L) {
+static int mp_null (lua_State *L) {
   lua_pushcfunction(L, mp_null);
   return 1;
 }
-
-#if defined(__cplusplus)
-}
-#endif
 
 static int mp_is_null (lua_State *L, int idx) {
   return lua_tocfunction(L, idx) == mp_null;
@@ -250,14 +242,14 @@ static void mp_replace_null (lua_State *L) {
 
 typedef struct mp_encoder {
   lua_State *L;
-  lmsgpack_writer *w;
+  lmsgpack_Writer *w;
   lua_Integer flags;
   int box;
   int ext;
   int fetched;
 } mp_encoder;
 
-static int mp_boxreserve (lmsgpack_writer *w, size_t need) {
+static int mp_boxreserve (lmsgpack_Writer *w, size_t need) {
   mp_encoder *e = mp_pcast(mp_encoder *, w->ud);
   lua_State *L = e->L;
   size_t size = w->cap * 2;
@@ -271,10 +263,10 @@ static int mp_boxreserve (lmsgpack_writer *w, size_t need) {
   lua_replace(L, e->box);
   w->buf = b;
   w->cap = size;
-  return 0;
+  return LMSGPACK_OK;
 }
 
-static int mp_heapreserve (lmsgpack_writer *w, size_t need) {
+static int mp_heapreserve (lmsgpack_Writer *w, size_t need) {
   lua_State *L = mp_pcast(lua_State *, w->ud);
   void *ud;
   lua_Alloc f = lua_getallocf(L, &ud);
@@ -288,10 +280,10 @@ static int mp_heapreserve (lmsgpack_writer *w, size_t need) {
     luaL_error(L, "unable to allocate buffer");
   w->buf = b;
   w->cap = size;
-  return 0;
+  return LMSGPACK_OK;
 }
 
-static void mp_encoder_init (lua_State *L, mp_encoder *e, lmsgpack_writer *w, char *init, size_t size) {
+static void mp_encoder_init (lua_State *L, mp_encoder *e, lmsgpack_Writer *w, char *init, size_t size) {
   e->L = L;
   e->w = w;
   e->flags = mp_getregi(L, LUA_MSGPACK_REG_OPTIONS, MP_DEFAULT) & ~MP_MASK_RUNTIME;
@@ -300,7 +292,7 @@ static void mp_encoder_init (lua_State *L, mp_encoder *e, lmsgpack_writer *w, ch
   e->box = lua_gettop(L);
   lua_pushnil(L);
   e->ext = lua_gettop(L);
-  lmsgpack_writer_init(w, init, size, mp_boxreserve, e);
+  lmsgpack_writer_initbuffer(w, init, size, mp_boxreserve, e);
 }
 
 static void mp_toolarge (lua_State *L) {
@@ -650,7 +642,7 @@ typedef struct mp_decoder {
 
 static void mp_decode (mp_decoder *d);
 
-static void mp_decode_vector (lua_State *L, const lmsgpack_object *o) {
+static void mp_decode_vector (lua_State *L, const lmsgpack_Value *o) {
   const unsigned char *p = mp_pcast(const unsigned char *, o->via.ext.ptr);
   const int count = (o->via.ext.type == MSGPACK_EXT_VECTOR2) ? 2 : (o->via.ext.type == MSGPACK_EXT_VECTOR3) ? 3 : 4;
   lua_Float4 v = { 0, 0, 0, 0 };
@@ -672,7 +664,7 @@ static void mp_decode_vector (lua_State *L, const lmsgpack_object *o) {
   lua_pushfloat4(L, v, variant);
 }
 
-static void mp_decode_ext (lua_State *L, const lmsgpack_object *o) {
+static void mp_decode_ext (lua_State *L, const lmsgpack_Value *o) {
   if (o->via.ext.type >= MSGPACK_EXT_VECTOR2 && o->via.ext.type <= MSGPACK_EXT_QUATERNION) {
     mp_decode_vector(L, o);
     return;
@@ -735,7 +727,7 @@ static void mp_decode_map (mp_decoder *d, uint32_t size) {
 
 static void mp_decode (mp_decoder *d) {
   lua_State *L = d->L;
-  lmsgpack_object o;
+  lmsgpack_Value o;
   lmsgpack_read(d->s, d->len, &d->off, &o);
   switch (o.type) {
     case LMSGPACK_NIL: lua_pushnil(L); break;
@@ -768,10 +760,10 @@ static void mp_decode (mp_decoder *d) {
   }
 }
 
-static int mp_decode_objects (lua_State *L, lua_Integer flags, const char *s, size_t len, size_t *offset, int limit, const char **error, lmsgpack_status *err_code) {
+static int mp_decode_objects (lua_State *L, lua_Integer flags, const char *s, size_t len, size_t *offset, int limit, const char **error, int *err_code) {
   int done = 0;
   int object_count = 0;
-  lmsgpack_status err_res = LMSGPACK_OK;
+  int err_res = LMSGPACK_OK;
   const char *err_msg = mp_nullptr;
   while (err_msg == mp_nullptr && !done) {
     mp_decoder d;
@@ -787,13 +779,13 @@ static int mp_decode_objects (lua_State *L, lua_Integer flags, const char *s, si
         ++object_count;
         done = (*offset == len) || (object_count >= limit && limit > 0);
         break;
-      case LMSGPACK_INCOMPLETE:
+      case LMSGPACK_ERROR_INCOMPLETE:
         err_msg = "msgpack format data is incomplete";
         break;
-      case LMSGPACK_INVALID:
+      case LMSGPACK_ERROR_INVALID:
         err_msg = "msgpack format data is invalid";
         break;
-      case LMSGPACK_TOO_DEEP:
+      case LMSGPACK_ERROR_DEPTH:
         err_msg = "msgpack data nests too deeply (over " MP_STRINGIFY(LMSGPACK_MAX_DEPTH) " levels) or needs too much memory";
         break;
       default:
@@ -809,7 +801,7 @@ static int mp_decode_objects (lua_State *L, lua_Integer flags, const char *s, si
 static lua_msgpack *mp_packer_create (lua_State *L, lua_Integer flags) {
   lua_msgpack *ud = mp_pcast(lua_msgpack *, lua_newuserdatauv(L, sizeof(lua_msgpack), 0));
   ud->flags = 0;
-  lmsgpack_writer_init(&ud->w, mp_nullptr, 0, mp_heapreserve, L);
+  lmsgpack_writer_initbuffer(&ud->w, mp_nullptr, 0, mp_heapreserve, L);
   mp_heapreserve(&ud->w, MP_BUFFER_INITSIZE);
   ud->flags = MP_PACKING | (flags & ~MP_MASK_RUNTIME);
   luaL_setmetatable(L, LUA_MSGPACK_USERDATA);
@@ -903,7 +895,7 @@ static void mp_pack_boolean (mp_encoder *e, int idx) {
   lmsgpack_write_bool(e->w, lua_toboolean(e->L, idx));
 }
 
-static void mp_pack_bytes (mp_encoder *e, int idx, int (*header) (lmsgpack_writer *w, size_t n)) {
+static void mp_pack_bytes (mp_encoder *e, int idx, int (*header) (lmsgpack_Writer *w, size_t n)) {
   size_t len = 0;
   const char *s = lua_tolstring(e->L, idx, &len);
   if (header(e->w, len) != 0)
@@ -1101,7 +1093,7 @@ static const lua_Integer optsnum[] = {
 static int mp_unpacker (lua_State *L, int compat_api, int include_offset) {
   int top = 0, count = 0, limit = 0;
   size_t len = 0, position = 0, offset = 0, end_position = 0;
-  lmsgpack_status err_code = LMSGPACK_OK;
+  int err_code = LMSGPACK_OK;
   const char *err_msg = mp_nullptr;
   const char *s = luaL_checklstring(L, 1, &len);
   if (compat_api) {
@@ -1139,7 +1131,7 @@ static int mp_unpacker (lua_State *L, int compat_api, int include_offset) {
   len = (end_position == 0) ? len : end_position;
   if ((count = mp_decode_objects(L, mp_getregi(L, LUA_MSGPACK_REG_OPTIONS, MP_DEFAULT), s, len, &offset, limit, &err_msg, &err_code)) == 0) {
     lua_settop(L, top);
-    if (include_offset && err_code == LMSGPACK_INCOMPLETE) {
+    if (include_offset && err_code == LMSGPACK_ERROR_INCOMPLETE) {
       lua_pushinteger(L, -(mp_cast(lua_Integer, offset) + 1));
       lua_pushnil(L);
       return 2;
@@ -1183,18 +1175,14 @@ static lua_Integer mp_set_extension_helper (lua_State *L, int idx) {
   return type;
 }
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
-
-LUALIB_API int mp_packer_new (lua_State *L) {
+static int mp_packer_new (lua_State *L) {
   mp_packer_create(L, mp_getregi(L, LUA_MSGPACK_REG_OPTIONS, MP_DEFAULT));
   return 1;
 }
 
-LUALIB_API int mp_pack (lua_State *L) {
+static int mp_pack (lua_State *L) {
   char init[MP_STACK_BUFFERSIZE];
-  lmsgpack_writer w;
+  lmsgpack_Writer w;
   mp_encoder e;
   int i, nargs;
   if ((nargs = lua_gettop(L)) == 0)
@@ -1208,9 +1196,9 @@ LUALIB_API int mp_pack (lua_State *L) {
   return 1;
 }
 
-LUALIB_API int mp_pack_args (lua_State *L) {
+static int mp_pack_args (lua_State *L) {
   char init[MP_STACK_BUFFERSIZE];
-  lmsgpack_writer w;
+  lmsgpack_Writer w;
   mp_encoder e;
   int i, top = lua_gettop(L);
   mp_encoder_init(L, &e, &w, init, sizeof(init));
@@ -1221,13 +1209,15 @@ LUALIB_API int mp_pack_args (lua_State *L) {
   return 1;
 }
 
-LUALIB_API int mp_unpack (lua_State *L) { return mp_unpacker(L, 0, 0); }
+static int mp_unpack (lua_State *L) { return mp_unpacker(L, 0, 0); }
 
-LUALIB_API int mp_unpack_compat (lua_State *L) { return mp_unpacker(L, 1, 0); }
+#if defined(LUA_MSGPACK_COMPAT)
+static int mp_unpack_compat (lua_State *L) { return mp_unpacker(L, 1, 0); }
+#endif
 
-LUALIB_API int mp_unpack_next (lua_State *L) { return mp_unpacker(L, 0, 1); }
+static int mp_unpack_next (lua_State *L) { return mp_unpacker(L, 0, 1); }
 
-LUALIB_API int mp_get_extension (lua_State *L) {
+static int mp_get_extension (lua_State *L) {
   mp_checktype(L, luaL_checkinteger(L, 1), 1);
   mp_getregt(L, LUA_MSGPACK_REG_EXT);
   lua_pushvalue(L, 1);
@@ -1235,13 +1225,13 @@ LUALIB_API int mp_get_extension (lua_State *L) {
   return 1;
 }
 
-LUALIB_API int mp_set_extension (lua_State *L) {
+static int mp_set_extension (lua_State *L) {
   mp_set_extension_helper(L, 1);
   lua_pushvalue(L, 1);
   return 1;
 }
 
-LUALIB_API int mp_clear_extension (lua_State *L) {
+static int mp_clear_extension (lua_State *L) {
   int i, nargs = lua_gettop(L);
   mp_getregt(L, LUA_MSGPACK_REG_EXT);
   for (i = 1; i <= nargs; i++) {
@@ -1257,7 +1247,7 @@ LUALIB_API int mp_clear_extension (lua_State *L) {
   return 0;
 }
 
-LUALIB_API int mp_get_type_extension (lua_State *L) {
+static int mp_get_type_extension (lua_State *L) {
   int top = lua_gettop(L);
   lua_Integer ltype = typetoindex(L, lua_tostring(L, 1));
   luaL_argcheck(L, ltype != -1, 1, "Lua type");
@@ -1274,7 +1264,7 @@ LUALIB_API int mp_get_type_extension (lua_State *L) {
   return 1;
 }
 
-LUALIB_API int mp_set_type_extension (lua_State *L) {
+static int mp_set_type_extension (lua_State *L) {
   lua_Integer ext = 0;
   lua_Integer ltype = typetoindex(L, lua_tostring(L, 1));
   int t = lua_type(L, 2);
@@ -1310,7 +1300,7 @@ LUALIB_API int mp_set_type_extension (lua_State *L) {
   return luaL_error(L, "msgpack extension type: invalid encoder!");
 }
 
-LUALIB_API int mp_setoption (lua_State *L) {
+static int mp_setoption (lua_State *L) {
   const lua_Integer opt = optsnum[luaL_checkoption(L, 1, mp_nullptr, opts)];
   lua_Integer flags = mp_getregi(L, LUA_MSGPACK_REG_OPTIONS, MP_DEFAULT);
   switch (opt) {
@@ -1358,7 +1348,7 @@ LUALIB_API int mp_setoption (lua_State *L) {
   return 0;
 }
 
-LUALIB_API int mp_getoption (lua_State *L) {
+static int mp_getoption (lua_State *L) {
   const lua_Integer opt = optsnum[luaL_checkoption(L, 1, mp_nullptr, opts)];
   const lua_Integer flags = mp_getregi(L, LUA_MSGPACK_REG_OPTIONS, MP_DEFAULT);
   switch (opt) {
@@ -1413,10 +1403,6 @@ LUALIB_API int mp_getoption (lua_State *L) {
   }
   return 1;
 }
-
-#if defined(__cplusplus)
-}
-#endif
 
 static int mp_set_string (lua_State *L) {
   static const char *const s_opts[] = { "string", "string_compat", "string_binary", mp_nullptr };
