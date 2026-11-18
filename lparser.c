@@ -1528,6 +1528,64 @@ static void ifexpr (LexState *ls, expdesc *v) {
 #endif
 
 
+#if defined(GRIT_POWER_INTERP)
+/*
+** Code one interpolated expression as ("%s"):format(expr), its result
+** in the next free register. '%s' converts any value as 'tostring' does,
+** without depending on the global 'tostring'.
+*/
+static void interpvalue (LexState *ls, int line) {
+  FuncState *fs = ls->fs;
+  expdesc f, key, arg;
+  int base;
+  codestring(&f, luaX_newstring(ls, "%s", 2));
+  codestring(&key, luaX_newstring(ls, "format", 6));
+  luaK_self(fs, &f, &key);
+  base = f.u.info;
+  expr(ls, &arg);
+  luaK_exp2nextreg(fs, &arg);
+  luaK_codeABC(fs, OP_CALL, base, 3, 2);
+  luaK_fixline(fs, line);
+  fs->freereg = cast_byte(base + 1);
+}
+
+
+/*
+** interpstring -> INTERPBEGIN expr { INTERPMID expr } INTERPEND
+** The text pieces and converted expressions go to consecutive registers
+** and are joined by one OP_CONCAT.
+*/
+static void interpstring (LexState *ls, expdesc *v) {
+  FuncState *fs = ls->fs;
+  int line = ls->linenumber;
+  int base = fs->freereg;
+  int n = 0;
+  for (;;) {
+    TString *text = ls->t.seminfo.ts;
+    int token = ls->t.token;
+    if (tsslen(text) > 0) {
+      expdesc e;
+      codestring(&e, text);
+      luaK_exp2nextreg(fs, &e);
+      n++;
+    }
+    luaX_next(ls);
+    if (token == TK_INTERPEND) break;
+    if (ls->t.token == TK_INTERPMID || ls->t.token == TK_INTERPEND) luaX_syntaxerror(ls, "empty expression in string interpolation");
+    interpvalue(ls, line);
+    n++;
+    if (ls->t.token != TK_INTERPMID && ls->t.token != TK_INTERPEND) error_expected(ls, '}');
+  }
+  if (n > 1) {
+    luaK_codeABC(fs, OP_CONCAT, base, n, 0);
+    luaK_fixline(fs, line);
+    fs->freereg = cast_byte(base + 1);
+  }
+  init_exp(v, VNONRELOC, base);
+}
+#endif
+
+
 static void simpleexp (LexState *ls, expdesc *v) {
   /* simpleexp -> FLT | INT | STRING | NIL | TRUE | FALSE | ... |
                   constructor | FUNCTION body | suffixedexp */
@@ -1585,6 +1643,12 @@ static void simpleexp (LexState *ls, expdesc *v) {
     case TK_HASH: {
       codehash(v, ls->t.seminfo.ts);
       break;
+    }
+#endif
+#if defined(GRIT_POWER_INTERP)
+    case TK_INTERPBEGIN: {
+      interpstring(ls, v);
+      return;
     }
 #endif
     default: {

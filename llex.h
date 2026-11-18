@@ -50,6 +50,9 @@ enum RESERVED {
 #if defined(GRIT_POWER_COMPOUND)
   , TK_PLUSEQ, TK_MINUSEQ, TK_MULTEQ, TK_DIVEQ, TK_SHLEQ, TK_SHREQ, TK_BANDEQ, TK_BOREQ, TK_BXOREQ
 #endif
+#if defined(GRIT_POWER_INTERP)
+  , TK_INTERPBEGIN, TK_INTERPMID, TK_INTERPEND
+#endif
 };
 
 /* number of reserved words */
@@ -73,6 +76,10 @@ typedef struct Token {
 
 /* state of the scanner plus state of the parser when shared by all
    functions */
+#if defined(GRIT_POWER_INTERP)
+#define LUAI_MAXINTERP 32  /* string interpolations nested inside each other */
+#endif
+
 typedef struct LexState {
   int current;  /* current character (charint) */
   int linenumber;  /* input line counter */
@@ -92,6 +99,11 @@ typedef struct LexState {
 #if defined(GRIT_POWER_CONTINUE)
   TString *ctnn;
   TString *ctnl;
+#endif
+#if defined(GRIT_POWER_INTERP)
+  int interpn;  /* string interpolations open around the current token */
+  int interpdel[LUAI_MAXINTERP];  /* their closing quotes */
+  int interpbraces[LUAI_MAXINTERP];  /* '{' open inside each one's current expression */
 #endif
 } LexState;
 

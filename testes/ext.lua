@@ -520,4 +520,41 @@ do
   assert(string.format("%s|%s", 7, -7) == "7|-7")
 end
 
+print("testing string interpolation")
+
+if load('return $"x"') then
+  local function check_error (src, pattern)
+    local f, msg = load(src)
+    assert(f == nil, src)
+    assert(string.find(msg, pattern, 1, true), msg)
+  end
+  local name, n = "bob", 3
+  assert(load('return $"hello"')() == "hello" and load("return $'it'")() == "it")
+  assert(load('local name, n = ... return $"hi {name}, {n} items"')(name, n) == "hi bob, 3 items")
+  assert(load('local n = ... return $"{n}"')(n) == "3")
+  assert(load('return $"{nil} {true} {1.5} {2^53 | 0}"')() == "nil true 1.5 9007199254740992")
+  assert(load('return $"{1}{2}{3}{4}"')() == "1234")
+  assert(load('local t = ... return $"<{t}>"')(setmetatable({}, { __tostring = function () return "T" end })) == "<T>")
+  assert(load('local n = ... return $"a{ $"b{n}c" }d"')(n) == "ab3cd")
+  assert(load('return $"{ #{1, 2, {3}} } { ({x = 1}).x }"')() == "3 1")
+  assert(load('return $"{ "}" }{ \'{\' }"')() == "}{")
+  assert(load('return $"\\{x\\} {1}"')() == "{x} 1")
+  assert(load('local name = ... return $"{ name:upper() }!"')(name) == "BOB!")
+  assert(load('return $"{ (function () return 1, 2 end)() }"')() == "1")
+  assert(load('return $"\\t{1}\\n\\u{41}"')() == "\t1\nA")
+  assert(load('return $"{vec2(1, 2)}"')() == tostring(vec2(1, 2)))
+  assert(load('local s = "" for i = 1, 3 do s = s .. $"[{i}]" end return s')() == "[1][2][3]")
+  local tostring = nil
+  assert(load('local tostring = nil return $"{1}"')() == "1")
+  check_error('return $"{}"', "empty expression")
+  check_error('return $"{1 2}"', "'}' expected")
+  check_error('return $"abc', "unfinished string")
+  check_error('return $"a\nb"', "unfinished string")
+  check_error('return $"{1"', "unfinished string")
+  check_error('return $', "unexpected symbol")
+  check_error('return $"' .. string.rep('{$"', 40) .. '"', "nested too deeply")
+else
+  print("\n >>> string interpolation not compiled: skipping its tests <<<\n")
+end
+
 print("OK")

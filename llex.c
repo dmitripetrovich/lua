@@ -60,6 +60,9 @@ static const char *const luaX_tokens [] = {
 #if defined(GRIT_POWER_COMPOUND)
     , "+=", "-=", "*=", "/=", "<<=", ">>=", "&=", "|=", "^="
 #endif
+#if defined(GRIT_POWER_INTERP)
+    , "<interpolation>", "<interpolation>", "<interpolation>"
+#endif
 };
 
 
@@ -119,6 +122,9 @@ static const char *txtToken (LexState *ls, int token) {
   switch (token) {
 #if defined(GRIT_POWER_JOAAT)
     case TK_HASH:
+#endif
+#if defined(GRIT_POWER_INTERP)
+    case TK_INTERPBEGIN: case TK_INTERPMID: case TK_INTERPEND:
 #endif
     case TK_NAME: case TK_STRING:
     case TK_FLT: case TK_INT:
@@ -213,6 +219,9 @@ void luaX_setinput (lua_State *L, LexState *ls, ZIO *z, TString *source,
 #if defined(GRIT_POWER_CONTINUE)
   ls->ctnn = luaX_newstring(ls, "continue", 8);
   ls->ctnl = luaX_newstring(ls, "(continue)", 10);
+#endif
+#if defined(GRIT_POWER_INTERP)
+  ls->interpn = 0;
 #endif
   luaZ_resizebuffer(ls->L, ls->buff, LUA_MINBUFFER);  /* initialize buffer */
 }
@@ -523,6 +532,74 @@ static void read_string (LexState *ls, int del, SemInfo *seminfo) {
 }
 
 
+#if defined(GRIT_POWER_INTERP)
+/*
+** Read the text of an interpolated string up to its closing quote 'del'
+** or the '{' that starts an expression, consuming that character and
+** returning it. Escapes are those of short strings, plus '\{' and '\}'.
+*/
+static int read_interp (LexState *ls, int del, SemInfo *seminfo) {
+  int stop;
+  while (ls->current != del && ls->current != '{') {
+    switch (ls->current) {
+      case EOZ:
+        lexerror(ls, "unfinished string", TK_EOS);
+        break;
+      case '\n':
+      case '\r':
+        lexerror(ls, "unfinished string", TK_STRING);
+        break;
+      case '\\': {
+        int c;
+        save_and_next(ls);
+        switch (ls->current) {
+          case 'a': c = '\a'; goto read_save;
+          case 'b': c = '\b'; goto read_save;
+          case 'f': c = '\f'; goto read_save;
+          case 'n': c = '\n'; goto read_save;
+          case 'r': c = '\r'; goto read_save;
+          case 't': c = '\t'; goto read_save;
+          case 'v': c = '\v'; goto read_save;
+          case 'x': c = readhexaesc(ls); goto read_save;
+          case 'u': utf8esc(ls); goto no_save;
+          case '\n': case '\r': inclinenumber(ls); c = '\n'; goto only_save;
+          case '\\': case '\"': case '\'': case '{': case '}': c = ls->current; goto read_save;
+          case EOZ: goto no_save;
+          case 'z': {
+            luaZ_buffremove(ls->buff, 1);
+            ls_next(ls);
+            while (lisspace(ls->current)) {
+              if (currIsNewline(ls)) inclinenumber(ls);
+              else ls_next(ls);
+            }
+            goto no_save;
+          }
+          default: {
+            esccheck(ls, lisdigit(ls->current), "invalid escape sequence");
+            c = readdecesc(ls);
+            goto only_save;
+          }
+        }
+       read_save:
+        ls_next(ls);
+       only_save:
+        luaZ_buffremove(ls->buff, 1);
+        save(ls, c);
+       no_save:
+        break;
+      }
+      default:
+        save_and_next(ls);
+    }
+  }
+  stop = ls->current;
+  ls_next(ls);
+  seminfo->ts = luaX_newstring(ls, luaZ_buffer(ls->buff), luaZ_bufflen(ls->buff));
+  return stop;
+}
+#endif
+
+
 static int llex (LexState *ls, SemInfo *seminfo) {
   luaZ_resetbuffer(ls->buff);
   for (;;) {
@@ -685,6 +762,37 @@ static int llex (LexState *ls, SemInfo *seminfo) {
       case '`': {  /* compiled hash */
         read_string(ls, ls->current, seminfo);
         return TK_HASH;
+      }
+#endif
+#if defined(GRIT_POWER_INTERP)
+      case '$': {  /* interpolated string */
+        int del;
+        ls_next(ls);
+        if (ls->current != '"' && ls->current != '\'') return '$';
+        del = ls->current;
+        ls_next(ls);
+        if (read_interp(ls, del, seminfo) == del) return TK_STRING;
+        if (ls->interpn == LUAI_MAXINTERP) lexerror(ls, "string interpolations nested too deeply", 0);
+        ls->interpdel[ls->interpn] = del;
+        ls->interpbraces[ls->interpn] = 0;
+        ls->interpn++;
+        return TK_INTERPBEGIN;
+      }
+      case '{': {
+        if (ls->interpn > 0) ls->interpbraces[ls->interpn - 1]++;
+        ls_next(ls);
+        return '{';
+      }
+      case '}': {  /* closes a brace, or the expression of an interpolation */
+        ls_next(ls);
+        if (ls->interpn == 0) return '}';
+        if (ls->interpbraces[ls->interpn - 1] > 0) {
+          ls->interpbraces[ls->interpn - 1]--;
+          return '}';
+        }
+        if (read_interp(ls, ls->interpdel[ls->interpn - 1], seminfo) == '{') return TK_INTERPMID;
+        ls->interpn--;
+        return TK_INTERPEND;
       }
 #endif
       case '.': {  /* '.', '..', '...', or number */
