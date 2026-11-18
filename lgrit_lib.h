@@ -120,7 +120,7 @@ LUA_API lua_Integer lua_ToHash (lua_State *L, int idx, int ignore_case);
 #define lua_isvector2(L, I, F) (lua_tofloat4((L), (I), (F), NULL) == LUA_VVECTOR2)
 #define lua_isvector3(L, I, F) (lua_tofloat4((L), (I), (F), NULL) == LUA_VVECTOR3)
 #define lua_isvector4(L, I, F) (lua_tofloat4((L), (I), (F), NULL) == LUA_VVECTOR4)
-#define lua_isquaternion(L, I, F) (lua_tofloat4((L), (I), V_NOTABLE, NULL) == LUA_VQUAT \ || (((F) & V_PARSETABLE) != 0 && lua_tofloat4((L), (I), (F), NULL) == LUA_VVECTOR4))
+#define lua_isquaternion(L, I, F) (lua_tofloat4((L), (I), V_NOTABLE, NULL) == LUA_VQUAT || (((F) & V_PARSETABLE) != 0 && lua_tofloat4((L), (I), (F), NULL) == LUA_VVECTOR4))
 
 /*
 ** Compatibility API: Populate a Float4 of an explicit type, throwing an error
