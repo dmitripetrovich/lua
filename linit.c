@@ -20,6 +20,11 @@
 #include "lauxlib.h"
 #include "llimits.h"
 
+#if defined(GRIT_POWER_LIBS)
+#include "libs/json/ljsonlib.h"
+#include "libs/msgpack/lmsgpacklib.h"
+#endif
+
 
 /*
 ** Standard Libraries. (Must be listed in the same ORDER of their
@@ -58,6 +63,12 @@ LUALIB_API void luaL_openselectedlibs (lua_State *L, int load, int preload) {
     }
   }
   lua_assert((mask >> 1) == LUA_UTF8LIBK);
+#if defined(GRIT_POWER_LIBS)
+  lua_pushcfunction(L, luaopen_json);
+  lua_setfield(L, -2, LUA_JSON_LIBNAME);
+  lua_pushcfunction(L, luaopen_msgpack);
+  lua_setfield(L, -2, LUA_MSGPACK_LIBNAME);
+#endif
   lua_pop(L, 1);  /* remove PRELOAD table */
 }
 

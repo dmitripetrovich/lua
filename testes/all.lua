@@ -202,6 +202,12 @@ dofile('files.lua')
 -- LuaGLM extensions
 dofile('ext.lua')
 dofile('extensions.lua')
+if package.preload.json then   -- json and msgpack libraries (GRIT_POWER_LIBS)
+  dofile('json.lua')
+  dofile('msgpack.lua')
+else
+  Message("\n >>> json and msgpack not compiled: skipping json.lua and msgpack.lua <<<\n")
+end
 dofile('readonly.lua')
 dofile('lglm.lua')
 if load("defer end") then   -- 'defer' statement (GRIT_POWER_DEFER)

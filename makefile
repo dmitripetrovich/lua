@@ -118,6 +118,7 @@ LUA_PATCHES = -DLUA_C99_MATHLIB  \
 		-DGRIT_POWER_GAMELUA \
 		-DGRIT_POWER_UNDUMPHOOK \
 		-DGRIT_POWER_READLINE_HISTORY \
+		-DGRIT_POWER_LIBS \
 		-DLUA_EXT_ITERATION \
 		-DLUA_EXT_ITOA \
 
@@ -127,10 +128,10 @@ CGLM_DIR ?= cglm
 # For C89, "-std=c89 -DLUA_USE_C89"
 # Note that Linux/Posix options are not compatible with C89
 # (For 32-bit, add option "-m32" to MYCFLAGS and MYLDFLAGS.)
-MYCFLAGS= $(TESTS) $(LUA_PATCHES) -isystem $(CGLM_DIR)/include
+MYCFLAGS= $(TESTS) $(LUA_PATCHES) -I. -isystem $(CGLM_DIR)/include
 MYLDFLAGS= $(TESTS)
 MYLIBS=
-MYOBJS=
+MYOBJS= libs/json/ljson.o libs/json/ljsonlib.o libs/msgpack/lmsgpack.o libs/msgpack/lmsgpacklib.o
 
 # == END OF USER SETTINGS. NO NEED TO CHANGE ANYTHING BELOW THIS LINE =========
 
@@ -219,7 +220,7 @@ linux-readline:
 	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_LINUX -DLUA_USE_READLINE" SYSLIBS="-Wl,-E -ldl -lreadline"
 
 linux-one:
-	$(MAKE) linux-readline LUA_O="onelua.o" BASE_O="onelua.o" CORE_O="" LIB_O="" LUAC_T="" MYCFLAGS="$(MYCFLAGS) $(CPERF_FLAGS) -I."
+	$(MAKE) linux-readline LUA_O="onelua.o" BASE_O="onelua.o $(MYOBJS)" CORE_O="" LIB_O="" LUAC_T="" MYCFLAGS="$(MYCFLAGS) $(CPERF_FLAGS) -I."
 
 Darwin macos macosx macos-readline:
 	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_MACOSX" SYSLIBS="-lreadline" CWARNGCC=
@@ -270,7 +271,8 @@ lgc.o: lgc.c lprefix.h lua.h luaconf.h ldebug.h lstate.h lobject.h \
 lglm.o: lglm.c lprefix.h lua.h luaconf.h lauxlib.h lglmext.h lglmaux.h \
  lglmcore.h lobject.h llimits.h lgrit_lib.h lstate.h ltm.h lzio.h lmem.h \
  lapi.h ldebug.h lfunc.h lgc.h ltable.h lvm.h ldo.h
-linit.o: linit.c lprefix.h lua.h luaconf.h lualib.h lauxlib.h llimits.h
+linit.o: linit.c lprefix.h lua.h luaconf.h lualib.h lauxlib.h llimits.h \
+ libs/json/ljsonlib.h libs/msgpack/lmsgpacklib.h
 liolib.o: liolib.c lprefix.h lua.h luaconf.h lauxlib.h lualib.h llimits.h
 llex.o: llex.c lprefix.h lua.h luaconf.h lctype.h llimits.h ldebug.h \
  lstate.h lobject.h ltm.h lzio.h lmem.h ldo.h lgc.h llex.h lparser.h \
@@ -332,5 +334,11 @@ onelua.o: onelua.c lprefix.h luaconf.h lzio.c lua.h lapi.h llimits.h \
  lapi.c lglm.c lauxlib.h lglmext.h lgrit_lib.h lauxlib.c lbaselib.c \
  lualib.h lcorolib.c ldblib.c liolib.c lmathlib.c loadlib.c loslib.c \
  lstrlib.c ltablib.c lutf8lib.c linit.c lua.c
+libs/json/ljson.o: libs/json/ljson.c libs/json/ljson.h
+libs/json/ljsonlib.o: libs/json/ljsonlib.c lua.h luaconf.h lauxlib.h \
+ lualib.h lgrit_lib.h libs/json/ljson.h libs/json/ljsonlib.h
+libs/msgpack/lmsgpack.o: libs/msgpack/lmsgpack.c libs/msgpack/lmsgpack.h
+libs/msgpack/lmsgpacklib.o: libs/msgpack/lmsgpacklib.c lua.h luaconf.h \
+ lauxlib.h lgrit_lib.h libs/msgpack/lmsgpack.h libs/msgpack/lmsgpacklib.h
 
 # (end of Makefile)
