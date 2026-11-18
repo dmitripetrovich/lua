@@ -262,8 +262,7 @@ static int str2numlit (char *s, TValue *o) {
     setivalue(o, l_castU2S(a));
     return 1;
   }
-  else if (l > 1 && (s[l - 1] == 'f' || s[l - 1] == 'F') &&
-           strpbrk(s, "xXnN") == NULL) {
+  else if (l > 1 && (s[l - 1] == 'f' || s[l - 1] == 'F') && strpbrk(s, "xXnN") == NULL) {
     char c = s[l - 1];
     size_t ok;
     s[l - 1] = '\0';
@@ -316,8 +315,7 @@ static int read_numeral (LexState *ls, SemInfo *seminfo) {
     save_and_next(ls);  /* force an error */
   save(ls, '\0');
 #if defined(GRIT_POWER_LITERAL)
-  if (luaO_str2num(luaZ_buffer(ls->buff), &obj) == 0 &&
-      !str2numlit(luaZ_buffer(ls->buff), &obj))
+  if (luaO_str2num(luaZ_buffer(ls->buff), &obj) == 0 && !str2numlit(luaZ_buffer(ls->buff), &obj))
 #else
   if (luaO_str2num(luaZ_buffer(ls->buff), &obj) == 0)  /* format error? */
 #endif

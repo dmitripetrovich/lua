@@ -1487,8 +1487,7 @@ lua_Unsigned luaH_compact (lua_State *L, Table *t) {
     if (!isempty(gval(gnode(t, i))))
       nhsize++;
   }
-  if (newasize == asize &&
-      (nhsize == 0 ? 0u : twoto(luaO_ceillog2(nhsize))) == allocsizenode(t))
+  if (newasize == asize && (nhsize == 0 ? 0u : twoto(luaO_ceillog2(nhsize))) == allocsizenode(t))
     return slots;  /* already compact */
   luaH_resize(L, t, newasize, nhsize);
   return slots + newasize + nhsize;

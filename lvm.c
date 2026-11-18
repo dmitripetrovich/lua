@@ -2257,8 +2257,7 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
 #if defined(LUA_EXT_ITERATION)
         /* 'next' or 'ipairs' over a table with no closing value: keep the
            loop's position in the closing slot instead (see OP_TFORCALL) */
-        if (ttisnil(s2v(ra + 2)) && ttislcf(s2v(ra)) && ttistable(s2v(ra + 1))
-            && !trap) {
+        if (ttisnil(s2v(ra + 2)) && ttislcf(s2v(ra)) && ttistable(s2v(ra + 1)) && !trap) {
           lua_CFunction f = fvalue(s2v(ra));
           if (f == luaB_next && ttisnil(s2v(ra + 3))) {
             setitervalue(s2v(ra + 2), 0, LUA_VPAIRS);
@@ -2327,8 +2326,7 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
               budgetstep();
               vmbreak;
             }
-            if (ttisipairsraw(s2v(ra + 2)) ||
-                fasttm(L, t->metatable, TM_INDEX) == NULL) {  /* the end */
+            if (ttisipairsraw(s2v(ra + 2)) || fasttm(L, t->metatable, TM_INDEX) == NULL) {  /* the end */
               i = *(pc++);  /* go to next instruction */
               lua_assert(GET_OPCODE(i) == OP_TFORLOOP && ra == RA(i));
               vmbreak;

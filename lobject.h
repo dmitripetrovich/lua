@@ -1041,8 +1041,7 @@ LUAI_FUNC const char *luaO_pushvfstring (lua_State *L, const char *fmt,
                                                        va_list argp);
 LUAI_FUNC const char *luaO_pushfstring (lua_State *L, const char *fmt, ...);
 LUAI_FUNC void luaO_chunkid (char *out, const char *source, size_t srclen);
-LUAI_FUNC lua_Integer luaO_HashString (const char *string, size_t length,
-                                       int ignore_case);
+LUAI_FUNC lua_Integer luaO_HashString (const char *string, size_t length, int ignore_case);
 LUAI_FUNC int lglm_tostr (const TValue *obj, char *buff, size_t len);
 
 #if defined(GRIT_POWER_GAMELUA)

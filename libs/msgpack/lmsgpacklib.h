@@ -1,5 +1,5 @@
-#ifndef lua_cmsgpacklib_h
-#define lua_cmsgpacklib_h
+#ifndef lmsgpacklib_h
+#define lmsgpacklib_h
 
 #include <lua.h>
 
@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 #define LUA_MSGPACK_LIBNAME "msgpack"
-LUAMOD_API int (luaopen_cmsgpack) (lua_State *L);
+LUAMOD_API int (luaopen_msgpack) (lua_State *L);
 
 LUALIB_API int mp_pack (lua_State *L);
 

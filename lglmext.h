@@ -447,10 +447,7 @@ static inline __m128 glmm_invsqrt(__m128 v) {
 #else
   __m128 rsqrt0 = _mm_rsqrt_ps(v);
   __m128 mul0 = _mm_mul_ps(_mm_mul_ps(v, rsqrt0), rsqrt0);
-  return _mm_mul_ps(
-    _mm_mul_ps(glmm_set1_rval(0.5f), rsqrt0),
-    _mm_sub_ps(glmm_set1_rval(3.0f), mul0)
-  );
+  return _mm_mul_ps(_mm_mul_ps(glmm_set1_rval(0.5f), rsqrt0), _mm_sub_ps(glmm_set1_rval(3.0f), mul0));
 #endif
 }
 
@@ -3043,27 +3040,19 @@ CGLM_INLINE void glm_billboard(vec3 obj_pos, vec3 eye, vec3 up, vec3 fwd, mat4 d
  */
 
 CGLM_INLINE int glm_vec2_str(char *buff, size_t size, vec3 v) {
-  return glm_sprintf(buff, size, "vec2(%f, %f)",
-    glm_cast(v[0]), glm_cast(v[1])
-  );
+  return glm_sprintf(buff, size, "vec2(%f, %f)", glm_cast(v[0]), glm_cast(v[1]));
 }
 
 CGLM_INLINE int glm_vec3_str(char *buff, size_t size, vec3 v) {
-  return glm_sprintf(buff, size, "vec3(%f, %f, %f)",
-    glm_cast(v[0]), glm_cast(v[1]), glm_cast(v[2])
-  );
+  return glm_sprintf(buff, size, "vec3(%f, %f, %f)", glm_cast(v[0]), glm_cast(v[1]), glm_cast(v[2]));
 }
 
 CGLM_INLINE int glm_vec4_str(char *buff, size_t size, vec4 v) {
-  return glm_sprintf(buff, size, "vec4(%f, %f, %f, %f)",
-    glm_cast(v[0]), glm_cast(v[1]), glm_cast(v[2]), glm_cast(v[3])
-  );
+  return glm_sprintf(buff, size, "vec4(%f, %f, %f, %f)", glm_cast(v[0]), glm_cast(v[1]), glm_cast(v[2]), glm_cast(v[3]));
 }
 
 CGLM_INLINE int glm_quat_str(char *buff, size_t size, versor q) {
-  return glm_sprintf(buff, size, "quat(%f, {%f, %f, %f})",
-    glm_cast(q[3]), glm_cast(q[0]), glm_cast(q[1]), glm_cast(q[2])
-  );
+  return glm_sprintf(buff, size, "quat(%f, {%f, %f, %f})", glm_cast(q[3]), glm_cast(q[0]), glm_cast(q[1]), glm_cast(q[2]));
 }
 
 /*!
@@ -3074,28 +3063,15 @@ CGLM_INLINE int glm_quat_str(char *buff, size_t size, versor q) {
  */
 
 CGLM_INLINE int glm_mat2_str(char *buff, size_t size, mat2 m) {
-  return glm_sprintf(buff, size, "mat2x2((%f, %f), (%f, %f))",
-    glm_cast(m[0][0]), glm_cast(m[0][1]),
-    glm_cast(m[1][0]), glm_cast(m[1][1])
-  );
+  return glm_sprintf(buff, size, "mat2x2((%f, %f), (%f, %f))", glm_cast(m[0][0]), glm_cast(m[0][1]), glm_cast(m[1][0]), glm_cast(m[1][1]));
 }
 
 CGLM_INLINE int glm_mat3_str(char *buff, size_t size, mat3 m) {
-  return glm_sprintf(buff, size, "mat3x3((%f, %f, %f), (%f, %f, %f), (%f, %f, %f))",
-    glm_cast(m[0][0]), glm_cast(m[0][1]), glm_cast(m[0][2]),
-    glm_cast(m[1][0]), glm_cast(m[1][1]), glm_cast(m[1][2]),
-    glm_cast(m[2][0]), glm_cast(m[2][1]), glm_cast(m[2][2])
-  );
+  return glm_sprintf(buff, size, "mat3x3((%f, %f, %f), (%f, %f, %f), (%f, %f, %f))", glm_cast(m[0][0]), glm_cast(m[0][1]), glm_cast(m[0][2]), glm_cast(m[1][0]), glm_cast(m[1][1]), glm_cast(m[1][2]), glm_cast(m[2][0]), glm_cast(m[2][1]), glm_cast(m[2][2]));
 }
 
 CGLM_INLINE int glm_mat4_str(char *buff, size_t size, mat4 m) {
-  return glm_sprintf(buff, size,
-    "mat4x4((%f, %f, %f, %f), (%f, %f, %f, %f), (%f, %f, %f, %f), (%f, %f, %f, %f))",
-    glm_cast(m[0][0]), glm_cast(m[0][1]), glm_cast(m[0][2]), glm_cast(m[0][3]),
-    glm_cast(m[1][0]), glm_cast(m[1][1]), glm_cast(m[1][2]), glm_cast(m[1][3]),
-    glm_cast(m[2][0]), glm_cast(m[2][1]), glm_cast(m[2][2]), glm_cast(m[2][3]),
-    glm_cast(m[3][0]), glm_cast(m[3][1]), glm_cast(m[3][2]), glm_cast(m[3][3])
-  );
+  return glm_sprintf(buff, size, "mat4x4((%f, %f, %f, %f), (%f, %f, %f, %f), (%f, %f, %f, %f), (%f, %f, %f, %f))", glm_cast(m[0][0]), glm_cast(m[0][1]), glm_cast(m[0][2]), glm_cast(m[0][3]), glm_cast(m[1][0]), glm_cast(m[1][1]), glm_cast(m[1][2]), glm_cast(m[1][3]), glm_cast(m[2][0]), glm_cast(m[2][1]), glm_cast(m[2][2]), glm_cast(m[2][3]), glm_cast(m[3][0]), glm_cast(m[3][1]), glm_cast(m[3][2]), glm_cast(m[3][3]));
 }
 
 #undef glm_cast

@@ -1816,8 +1816,7 @@ static void setrelocreg (FuncState *fs, expdesc *e, int outreg) {
 
 
 /* Get the name/index of an expression */
-static void getassignkey (LexState *ls, FuncState *fs, expdesc *v,
-                                                     expdesc *key) {
+static void getassignkey (LexState *ls, FuncState *fs, expdesc *v, expdesc *key) {
   switch (v->k) {
     case VLOCAL: case VVARGVAR:
       codestring(key, getlocalvardesc(fs, v->u.var.vidx)->vd.name);
@@ -1846,8 +1845,7 @@ static void getassignkey (LexState *ls, FuncState *fs, expdesc *v,
 }
 
 
-static void intableunpack (LexState *ls, FuncState *fs, struct LHS_assign *lh,
-                           int outreg, lu_byte base, expdesc *t, expdesc *e) {
+static void intableunpack (LexState *ls, FuncState *fs, struct LHS_assign *lh, int outreg, lu_byte base, expdesc *t, expdesc *e) {
   expdesc key;
   if (lh->prev) {
     intableunpack(ls, fs, lh->prev, outreg - 1, base, t, e);
@@ -1865,8 +1863,7 @@ static void intableunpack (LexState *ls, FuncState *fs, struct LHS_assign *lh,
 ** Parse an expression, and then index it using the names of the variables being assigned.
 ** The results are all pushed onto the stack, apart from the last, which is stored in `e'.
 */
-static void intable (LexState *ls, struct LHS_assign *lh, int nvars,
-                                                         expdesc *e) {
+static void intable (LexState *ls, struct LHS_assign *lh, int nvars, expdesc *e) {
   FuncState *fs = ls->fs;
   expdesc t;
   int outreg;
@@ -2736,8 +2733,7 @@ static void statement (LexState *ls) {
 
 
 #if defined(LUA_NO_PARSER)
-LClosure *luaY_parser (lua_State *L, ZIO *z, Table *anchor, Mbuffer *buff,
-                       Dyndata *dyd, const char *name, int firstchar) {
+LClosure *luaY_parser (lua_State *L, ZIO *z, Table *anchor, Mbuffer *buff, Dyndata *dyd, const char *name, int firstchar) {
   UNUSED(z);
   UNUSED(anchor);
   UNUSED(buff);

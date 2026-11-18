@@ -1878,8 +1878,7 @@ static void copywithendian (char *dest, const char *src,
 }
 
 
-static void shared_pack (lua_State *L, luaL_Buffer *b, const char *fmt,
-                                        int arg) {
+static void shared_pack (lua_State *L, luaL_Buffer *b, const char *fmt, int arg) {
   Header h;
   size_t totalsize = 0;  /* accumulate total size of result */
   initheader(L, &h);
@@ -2045,8 +2044,7 @@ static lua_Integer unpackint (lua_State *L, const char *str,
 }
 
 
-static int shared_unpack (lua_State *L, const char *fmt, const char *data,
-                                         size_t ld, size_t pos) {
+static int shared_unpack (lua_State *L, const char *fmt, const char *data, size_t ld, size_t pos) {
   Header h;
   int n = 0;  /* number of results */
   initheader(L, &h);

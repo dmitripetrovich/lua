@@ -51,8 +51,7 @@ static const TValue *glm_index2value(const lua_State *L, int idx) {
     return l_likely(o < L->top.p) ? s2v(o) : &G(L)->nilvalue;
   }
   else if (idx > LUA_REGISTRYINDEX) { /* negative index */
-    api_check(L, idx != 0 && -idx <= L->top.p - (ci->func.p + 1),
-                 "invalid index");
+    api_check(L, idx != 0 && -idx <= L->top.p - (ci->func.p + 1), "invalid index");
     return s2v(L->top.p + idx);
   }
   else if (idx == LUA_REGISTRYINDEX)
