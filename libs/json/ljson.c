@@ -724,8 +724,8 @@ static int strtoddiyfp (const char *decimals, int dlen, int dexp, double *result
     precisionsize -= scaleexp;
   }
   rounded = diyfp(v.f >> precisionsize, v.e + precisionsize);
-  precisionbits = (v.f & ((UINT64_C(1) << precisionsize) - 1)) * ulp;
-  halfway = (UINT64_C(1) << (precisionsize - 1)) * ulp;
+  precisionbits = (v.f & ((UINT64_C(1) << precisionsize) - 1)) * (uint64_t)ulp;
+  halfway = (UINT64_C(1) << (precisionsize - 1)) * (uint64_t)ulp;
   if (precisionbits >= halfway + (unsigned)error) {
     rounded.f++;
     if (rounded.f & (DP_HIDDEN_BIT << 1)) {
@@ -857,7 +857,7 @@ static int skipwhitespaceandcomments (Parser *P) {
     while (consume(P, '/')) {
       if (consume(P, '*')) {
         for (;;) {
-          if (peek(P) == '\0') return seterror(P, LJSON_ERROR_UNSPECIFIC_SYNTAX_ERROR, tell(P));
+          if (P->p >= P->e) return seterror(P, LJSON_ERROR_UNSPECIFIC_SYNTAX_ERROR, tell(P));
           else if (consume(P, '*')) {
             if (consume(P, '/')) break;
           }
@@ -865,7 +865,7 @@ static int skipwhitespaceandcomments (Parser *P) {
         }
       }
       else if (consume(P, '/')) {
-        while (peek(P) != '\0' && *P->p++ != '\n') {}
+        while (P->p < P->e && *P->p++ != '\n') {}
       }
       else return seterror(P, LJSON_ERROR_UNSPECIFIC_SYNTAX_ERROR, tell(P));
       skipwhitespace(P);
@@ -1171,7 +1171,11 @@ static int parsenumber (Parser *P) {
         int maxexp = 308 - expfrac;
         while (isdigit_(peek(P))) {
           exp = (int)((unsigned)exp * 10u + (unsigned)(*P->p++ - '0'));
-          if (exp > maxexp) return seterror(P, LJSON_ERROR_NUMBER_TOO_BIG, start);
+          if (exp > maxexp && d != 0.0) return seterror(P, LJSON_ERROR_NUMBER_TOO_BIG, start);
+          if (exp > maxexp) {
+            while (isdigit_(peek(P))) P->p++;
+            exp = 0;
+          }
         }
       }
     }
@@ -1317,13 +1321,9 @@ int ljson_parse (const ljson_Reader *r, const char *s, size_t len, const ljson_H
   P.depth = 0;
   P.nframes = sizeof(P.initframes) / sizeof(P.initframes[0]);
   P.maxdepth = r->maxdepth;
-  if (P.flags & LJSON_PARSE_SKIP_BOM) {
-    consume(&P, (char)0xEF);
-    consume(&P, (char)0xBB);
-    consume(&P, (char)0xBF);
-  }
+  if ((P.flags & LJSON_PARSE_SKIP_BOM) && len >= 3 && memcmp(s, "\xEF\xBB\xBF", 3) == 0) P.p += 3;
   if (skipwhitespaceandcomments(&P)) {
-    while (peek(&P) != '\0') {
+    while (P.p < P.e) {
       int d = transit(&P, state, predict[state][tokenize(peek(&P))]);
       if (d == S_ERROR) {
         handleerror(&P, state);
@@ -1592,7 +1592,6 @@ void ljson_writer_init (ljson_Writer *w, ljson_Alloc alloc, void *allocud) {
   w->levels = w->initlevels;
   w->depth = 0;
   w->nlevels = sizeof(w->initlevels) / sizeof(w->initlevels[0]);
-  w->hasroot = 0;
   w->nomem = 0;
   w->alloc = (alloc != NULL) ? alloc : defaultalloc;
   w->allocud = allocud;
@@ -1606,6 +1605,7 @@ void ljson_writer_free (ljson_Writer *w) {
   w->levels = w->initlevels;
   w->nlevels = sizeof(w->initlevels) / sizeof(w->initlevels[0]);
   w->n = w->depth = 0;
+  w->nomem = 0;
 }
 
 const char *ljson_writer_result (const ljson_Writer *w, size_t *len) {
@@ -1647,10 +1647,7 @@ static void writeindent (ljson_Writer *w) {
 
 static void prefix (ljson_Writer *w) {
   ljson_Level *level;
-  if (w->depth == 0) {
-    w->hasroot = 1;
-    return;
-  }
+  if (w->depth == 0) return;
   level = &w->levels[w->depth - 1];
   if (!(w->flags & LJSON_WRITE_PRETTY)) {
     if (level->count > 0) put(w, (level->inarray || level->count % 2 == 0) ? ',' : ':');
@@ -1707,9 +1704,9 @@ int ljson_write_uint (ljson_Writer *w, uint64_t u) {
 
 int ljson_write_double (ljson_Writer *w, double d) {
   uint64_t u = dbits(d);
+  if ((u & DP_EXPONENT_MASK) == DP_EXPONENT_MASK && !(w->flags & LJSON_WRITE_NAN_INF)) return LJSON_ERROR_NAN_INF;
   prefix(w);
   if ((u & DP_EXPONENT_MASK) == DP_EXPONENT_MASK) {
-    if (!(w->flags & LJSON_WRITE_NAN_INF)) return LJSON_ERROR_NAN_INF;
     if (u & DP_SIGNIFICAND_MASK) putn(w, "NaN", 3);
     else if (u & DP_SIGN_MASK) putn(w, "-Infinity", 9);
     else putn(w, "Infinity", 8);
@@ -1730,30 +1727,25 @@ int ljson_write_string (ljson_Writer *w, const char *s, size_t len) {
   };
   size_t i = 0;
   prefix(w);
-  if (len > ((size_t)-1 - 2) / 6 || !reserve(w, 2 + len * 6)) {
-    w->nomem = 1;
-    return LJSON_ERROR_MEMORY;
-  }
-  w->b[w->n++] = '"';
+  put(w, '"');
   while (i < len) {
     size_t run = i;
     unsigned char c;
+    char seq[6];
     while (i < len && !escape[(unsigned char)s[i]]) i++;
-    memcpy(w->b + w->n, s + run, i - run);
-    w->n += i - run;
+    putn(w, s + run, i - run);
     if (i == len) break;
     c = (unsigned char)s[i++];
-    w->b[w->n++] = '\\';
-    w->b[w->n++] = escape[c];
-    if (escape[c] == 'u') {
-      w->b[w->n++] = '0';
-      w->b[w->n++] = '0';
-      w->b[w->n++] = hexdigits[c >> 4];
-      w->b[w->n++] = hexdigits[c & 0xF];
-    }
+    seq[0] = '\\';
+    seq[1] = escape[c];
+    seq[2] = '0';
+    seq[3] = '0';
+    seq[4] = hexdigits[c >> 4];
+    seq[5] = hexdigits[c & 0xF];
+    putn(w, seq, (escape[c] == 'u') ? 6 : 2);
   }
-  w->b[w->n++] = '"';
-  return LJSON_OK;
+  put(w, '"');
+  return done(w);
 }
 
 int ljson_write_key (ljson_Writer *w, const char *s, size_t len) { return ljson_write_string(w, s, len); }

@@ -96,6 +96,7 @@ void lmsgpack_writer_free (lmsgpack_Writer *w) {
     w->alloc(w->allocud, w->buf, w->cap, 0);
   w->buf = NULL;
   w->len = w->cap = 0;
+  w->status = LMSGPACK_OK;
 }
 
 const char *lmsgpack_errormessage (int error) {
@@ -128,7 +129,10 @@ char *lmsgpack_writer_reserve (lmsgpack_Writer *w, size_t n) {
 #define room(w, n) (((w)->cap - (w)->len >= (n)) ? (unsigned char *)(w)->buf + (w)->len : (unsigned char *)lmsgpack_writer_reserve((w), (n)))
 
 static int put (lmsgpack_Writer *w, unsigned int c, size_t size, uint64_t v) {
-  unsigned char *p = room(w, 1 + size);
+  unsigned char *p;
+  if (w->status != LMSGPACK_OK)
+    return w->status;
+  p = room(w, 1 + size);
   if (p == NULL)
     return w->status;
   p[0] = (unsigned char)c;
@@ -224,7 +228,9 @@ int lmsgpack_write_double (lmsgpack_Writer *w, double v) {
 }
 
 static int putlength (lmsgpack_Writer *w, size_t n, unsigned int fix, size_t fixmax, unsigned int tag8, unsigned int tag16, unsigned int tag32) {
-  if (toolarge(n))
+  if (w->status != LMSGPACK_OK)
+    return w->status;
+  else if (toolarge(n))
     return fail(w, LMSGPACK_ERROR_TOO_LARGE);
   else if (n < fixmax)
     return put(w, fix | (unsigned int)n, 0, 0);
@@ -259,6 +265,8 @@ int lmsgpack_write_ext (lmsgpack_Writer *w, size_t n, int8_t type) {
   unsigned char *p;
   size_t size;
   unsigned int tag;
+  if (w->status != LMSGPACK_OK)
+    return w->status;
   if (toolarge(n))
     return fail(w, LMSGPACK_ERROR_TOO_LARGE);
   switch (n) {
@@ -285,8 +293,8 @@ int lmsgpack_write_ext (lmsgpack_Writer *w, size_t n, int8_t type) {
 
 int lmsgpack_write_bytes (lmsgpack_Writer *w, const void *s, size_t n) {
   unsigned char *p;
-  if (n == 0)
-    return LMSGPACK_OK;
+  if (w->status != LMSGPACK_OK || n == 0)
+    return w->status;
   if ((p = room(w, n)) == NULL)
     return w->status;
   memcpy(p, s, n);
@@ -490,9 +498,9 @@ static int scan (const unsigned char *s, size_t len, size_t *off, uint64_t *item
     p = end;
     if (o.type == LMSGPACK_ARRAY || o.type == LMSGPACK_MAP) {
       uint64_t n = (o.type == LMSGPACK_MAP) ? 2 * (uint64_t)o.via.map.size : o.via.array.size;
-      if (top >= LMSGPACK_MAX_DEPTH)
-        return LMSGPACK_ERROR_DEPTH;
       if (n > 0) {
+        if (top >= LMSGPACK_MAX_DEPTH)
+          return LMSGPACK_ERROR_DEPTH;
         *items += n;
         remain[top++] = n;
         continue;

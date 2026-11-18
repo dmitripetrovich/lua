@@ -132,7 +132,6 @@ typedef struct ljson_Writer {
   size_t n, size;
   ljson_Level *levels;
   size_t depth, nlevels;
-  int hasroot;
   int nomem;
   ljson_Alloc alloc;
   void *allocud;

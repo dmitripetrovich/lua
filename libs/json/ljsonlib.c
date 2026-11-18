@@ -21,16 +21,16 @@ extern "C" {
 #include "ljson.h"
 #include "ljsonlib.h"
 
-#if !defined(LUA_JSON_BIT32) && UINTPTR_MAX == UINT_MAX
-  #define LUA_JSON_BIT32
-#endif
-
 #if !defined(LUA_JSON_TABLE_CUTOFF)
   #define LUA_JSON_TABLE_CUTOFF 11
 #endif
 
 #if !defined(LUA_JSON_DEFAULT_DEPTH)
   #define LUA_JSON_DEFAULT_DEPTH 32
+#endif
+
+#if !defined(LUA_JSON_MAX_DEPTH)
+  #define LUA_JSON_MAX_DEPTH 200
 #endif
 
 #if !defined(LUA_JSON_MAX_REPLACEMENTS)
@@ -82,13 +82,7 @@ extern "C" {
 #define JSON_ENCODER_MAX_DEPTH 0x40000000
 #define JSON_TABLE_KEY_ORDER 0x80000000
 
-#if defined(LUA_JSON_BIT32)
-  #define JSON_DEFAULT_BIT32 JSON_ENCODE_INT32
-#else
-  #define JSON_DEFAULT_BIT32 JSON_OPTION_RESERVED
-#endif
-
-#define JSON_DEFAULT (JSON_LUA_NULL | JSON_ARRAY_EMPTY | JSON_ARRAY_WITH_HOLES | JSON_NAN_AND_INF | JSON_DEFAULT_BIT32)
+#define JSON_DEFAULT (JSON_LUA_NULL | JSON_ARRAY_EMPTY | JSON_ARRAY_WITH_HOLES | JSON_NAN_AND_INF)
 
 #define JSON_DECODE_DEFAULT 0x0
 #define JSON_DECODE_EXTENDED 0x1
@@ -100,11 +94,7 @@ extern "C" {
 #define LUA_JSON_REG_MAXDEC 5
 #define LUA_JSON_REG_PRESET 6
 
-#if defined(LUA_JSON_UNSAFE)
-  #define json_checkstack(L, sz) ((void)0)
-#else
-  #define json_checkstack(L, sz) do { if (!lua_checkstack((L), (sz))) throwmsg((L), "Lua Stack Overflow"); } while (0)
-#endif
+#define json_checkstack(L, sz) do { if (!lua_checkstack((L), (sz))) throwmsg((L), "Lua Stack Overflow"); } while (0)
 
 static int throwmsg (lua_State *L, const char *msg) {
   lua_pushstring(L, msg);
@@ -116,8 +106,8 @@ static int throwtype (lua_State *L, const char *fmt, int type) {
   return lua_error(L);
 }
 
-#define ERROR_UNSUPPORTED_TYPE "type '%s' is not supported by JSON\n"
-#define ERROR_UNSUPPORTED_KEY "type '%s' is not supported as a keyorder by JSON\n"
+#define ERROR_UNSUPPORTED_TYPE "type '%s' is not supported by JSON"
+#define ERROR_UNSUPPORTED_KEY "type '%s' is not supported as a keyorder by JSON"
 
 #define LUA_JSON_GUARD "lua_json_guard"
 #define GUARD_BLOCKS 4
@@ -284,7 +274,7 @@ static const char *lua_dtoa (char *s, size_t n, double value) {
 }
 
 static double lua_grisuRound (double d) {
-  if ((DBL_MAX / LUA_NUMBER_FMT_POW) <= d) return d;
+  if ((DBL_MAX / LUA_NUMBER_FMT_POW) <= fabs(d)) return d;
   return round(d * LUA_NUMBER_FMT_POW) / LUA_NUMBER_FMT_POW;
 }
 
@@ -331,12 +321,11 @@ static int table_is_json_array (lua_State *L, int idx, lua_Integer flags, size_t
   *array_length = max;
   lua_settop(L, stacktop);
 #if defined(LUA_JSON_COMPAT)
-
   if (arraylen > (count << 1) + LUA_JSON_TABLE_CUTOFF) return 0;
 #endif
-  if (max == 0 && has_type && !is_array) return 0;
-  else if (max == count) return max > 0 || (flags & JSON_ARRAY_EMPTY);
-  else if (flags & JSON_ARRAY_WITH_HOLES) return (max < LUA_JSON_TABLE_CUTOFF) || max <= arraylen || (count >= (max >> 1));
+  if (has_type && !is_array) return 0;
+  else if (max == count) return max > 0 || has_type || (flags & JSON_ARRAY_EMPTY);
+  else if (has_type || (flags & JSON_ARRAY_WITH_HOLES)) return (max < LUA_JSON_TABLE_CUTOFF) || max <= arraylen || (count >= (max >> 1));
   return 0;
 }
 
@@ -354,6 +343,7 @@ typedef struct KeyList {
   Key *k;
   size_t n, size;
   int slot;
+  int anchor;
 } KeyList;
 
 typedef struct Encoder {
@@ -366,13 +356,26 @@ typedef struct Encoder {
 } Encoder;
 
 static void initkeys (lua_State *L, KeyList *l) {
+  json_checkstack(L, 2);
   l->k = NULL;
   l->n = l->size = 0;
   lua_pushnil(L);
   l->slot = lua_gettop(L);
+  lua_pushnil(L);
+  l->anchor = lua_gettop(L);
 }
 
-static void pushkey (lua_State *L, KeyList *l, Key k) {
+static void pushkey (lua_State *L, KeyList *l, Key k, int keyidx) {
+  keyidx = lua_absindex(L, keyidx);
+  json_checkstack(L, 2);
+  if (k.kind == KEY_STRING) {
+    if (lua_isnil(L, l->anchor)) {
+      lua_createtable(L, 8, 0);
+      lua_replace(L, l->anchor);
+    }
+    lua_pushvalue(L, keyidx);
+    lua_rawseti(L, l->anchor, (lua_Integer)l->n + 1);
+  }
   if (l->n == l->size) {
     size_t nsize = (l->size > 0) ? l->size * 2 : 8;
     Key *nk = (Key *)lua_newuserdatauv(L, nsize * sizeof(Key), 0);
@@ -411,14 +414,19 @@ static Key strkey (const char *s, size_t len) {
 
 static lua_Number keynumber (const Key *k) { return (k->kind == KEY_INTEGER) ? (lua_Number)k->i : k->n; }
 
+static int keystrcmp (const Key *a, const Key *b) {
+  int c = memcmp(a->s, b->s, (a->len < b->len) ? a->len : b->len);
+  return (c != 0) ? c : (a->len < b->len) ? -1 : (a->len > b->len);
+}
+
 static int keyless (const Key *a, const Key *b) {
   if (a->kind != KEY_STRING) return (b->kind != KEY_STRING) ? (keynumber(a) < keynumber(b)) : 1;
-  return (b->kind != KEY_STRING) ? 0 : (strcmp(a->s, b->s) < 0);
+  return (b->kind != KEY_STRING) ? 0 : (keystrcmp(a, b) < 0);
 }
 
 static int keyequal (const Key *a, const Key *b) {
   if (a->kind != KEY_STRING) return (b->kind != KEY_STRING) ? (keynumber(a) == keynumber(b)) : 0;
-  return (b->kind != KEY_STRING) ? 0 : (strcmp(a->s, b->s) == 0);
+  return (b->kind != KEY_STRING) ? 0 : (a->len == b->len && memcmp(a->s, b->s, a->len) == 0);
 }
 
 static int findkey (const KeyList *l, const Key *k) {
@@ -456,14 +464,14 @@ static void populate_key_vector (lua_State *L, int idx, KeyList *sink) {
     json_checkstack(L, 1);
     switch (type) {
       case LUA_TNUMBER: {
-        if (lua_isinteger(L, -1)) pushkey(L, sink, intkey(lua_tointeger(L, -1)));
-        else pushkey(L, sink, numkey(lua_tonumber(L, -1)));
+        if (lua_isinteger(L, -1)) pushkey(L, sink, intkey(lua_tointeger(L, -1)), -1);
+        else pushkey(L, sink, numkey(lua_tonumber(L, -1)), -1);
         break;
       }
       case LUA_TSTRING: {
         size_t len = 0;
         const char *s = lua_tolstring(L, -1, &len);
-        pushkey(L, sink, strkey(s, len));
+        pushkey(L, sink, strkey(s, len), -1);
         break;
       }
       default: {
@@ -483,15 +491,15 @@ static void populate_unordered_vector (lua_State *L, int idx, const KeyList *key
   while (lua_next(L, idx)) {
     switch (lua_type(L, -2)) {
       case LUA_TNUMBER: {
-        Key k = lua_isinteger(L, -1) ? intkey(lua_tointeger(L, -1)) : numkey(lua_tonumber(L, -2));
-        if (!findkey(key_order, &k)) pushkey(L, sink, k);
+        Key k = lua_isinteger(L, -2) ? intkey(lua_tointeger(L, -2)) : numkey(lua_tonumber(L, -2));
+        if (!findkey(key_order, &k)) pushkey(L, sink, k, -2);
         break;
       }
       case LUA_TSTRING: {
         size_t len = 0;
         const char *s = lua_tolstring(L, -2, &len);
         Key k = strkey(s, len);
-        if (!findkey(key_order, &k)) pushkey(L, sink, k);
+        if (!findkey(key_order, &k)) pushkey(L, sink, k, -2);
         break;
       }
       default:
@@ -505,6 +513,11 @@ static void populate_unordered_vector (lua_State *L, int idx, const KeyList *key
 }
 
 static void encodeValue (lua_State *L, Encoder *E, int idx, int depth);
+
+static void encodeComponent (lua_State *L, Encoder *E, const char *key, lua_VecF f) {
+  if (key != NULL) ljson_write_key(E->w, key, 1);
+  if (ljson_write_double(E->w, (double)f) != LJSON_OK) throwmsg(L, "error encoding: kWriteNanAndInfFlag");
+}
 
 static int handle_exception (lua_State *L, Encoder *E, int idx, int depth, const char *reason) {
   int result = 0;
@@ -732,22 +745,15 @@ static void encodeValue (lua_State *L, Encoder *E, int idx, int depth) {
     case LUA_TVECTOR: {
       lua_Float4 v;
       int args = parseVector(L, idx, &v);
-      if (E->flags & JSON_ENCODER_ARRAY_VECTOR) {
-        ljson_write_start_array(w);
-        if (args) { ljson_write_double(w, (double)v.x); args--; }
-        if (args) { ljson_write_double(w, (double)v.y); args--; }
-        if (args) { ljson_write_double(w, (double)v.z); args--; }
-        if (args) { ljson_write_double(w, (double)v.w); args--; }
-        ljson_write_end_array(w);
-      }
-      else {
-        ljson_write_start_object(w);
-        if (args) { ljson_write_key(w, "x", 1); ljson_write_double(w, (double)v.x); args--; }
-        if (args) { ljson_write_key(w, "y", 1); ljson_write_double(w, (double)v.y); args--; }
-        if (args) { ljson_write_key(w, "z", 1); ljson_write_double(w, (double)v.z); args--; }
-        if (args) { ljson_write_key(w, "w", 1); ljson_write_double(w, (double)v.w); args--; }
-        ljson_write_end_object(w);
-      }
+      const int asarray = (E->flags & JSON_ENCODER_ARRAY_VECTOR) != 0;
+      if (asarray) ljson_write_start_array(w);
+      else ljson_write_start_object(w);
+      encodeComponent(L, E, asarray ? NULL : "x", v.x);
+      if (args > 1) encodeComponent(L, E, asarray ? NULL : "y", v.y);
+      if (args > 2) encodeComponent(L, E, asarray ? NULL : "z", v.z);
+      if (args > 3) encodeComponent(L, E, asarray ? NULL : "w", v.w);
+      if (asarray) ljson_write_end_array(w);
+      else ljson_write_end_object(w);
       break;
     }
     case LUA_TSTRING: {
@@ -841,12 +847,9 @@ static int d_key (void *ud, const char *s, size_t len) {
 
 static int d_start (Decoder *D, int inarray) {
   lua_State *L = D->L;
-#if !defined(LUA_JSON_UNSAFE)
   if (!lua_checkstack(L, 2)) return 0;
-#endif
   lua_createtable(L, 0, 0);
-  if ((inarray ? D->arrayarg : D->objectarg) > 0) lua_pushvalue(L, inarray ? D->arrayarg : D->objectarg);
-  else luaL_getmetatable(L, inarray ? "lua_json_array" : "lua_json_object");
+  lua_pushvalue(L, inarray ? D->arrayarg : D->objectarg);
   lua_setmetatable(L, -2);
   if (D->depth == D->nctx) D->ctx = (Ctx *)growarray(D->anchor, D->ctx, D->initctx, &D->nctx, D->depth + 1, sizeof(Ctx));
   D->ctx[D->depth].inarray = inarray;
@@ -968,7 +971,7 @@ static int json_encode (lua_State *L) {
   lua_json_getsubtable(L, LUA_REGISTRYINDEX, "lua_json");
   flags = geti(L, -1, LUA_JSON_REG_FLAGS, JSON_DEFAULT);
   indent = geti(L, -1, LUA_JSON_REG_INDENT, 0);
-  indent_amt = geti(L, -1, LUA_JSON_REG_INDENT_AMT, (indent == 0) ? 4 : 0);
+  indent_amt = geti(L, -1, LUA_JSON_REG_INDENT_AMT, -1);
   depth = (int)geti(L, -1, LUA_JSON_REG_DEPTH, LUA_JSON_DEFAULT_DEPTH);
   decimals = (int)geti(L, -1, LUA_JSON_REG_MAXDEC, LUA_NUMBER_FMT_LEN);
   lua_pop(L, 1);
@@ -976,23 +979,27 @@ static int json_encode (lua_State *L) {
     int has_key_order = 0, has_exception_handler = 0;
     lua_pushnil(L);
     while (lua_next(L, 2)) {
-      const lua_Integer opt = option_keys_num[luaL_optcheckoption(L, -2, NULL, option_keys, 0)];
+      const lua_Integer opt = (lua_type(L, -2) == LUA_TSTRING) ? option_keys_num[luaL_optcheckoption(L, -2, NULL, option_keys, 0)] : JSON_OPTION_RESERVED;
+      lua_Integer v = lua_tointeger(L, -1);
       switch (opt) {
         case JSON_PRETTY_PRINT: case JSON_SORT_KEYS: case JSON_LUA_NULL: case JSON_UNSIGNED_INTEGERS: case JSON_NAN_AND_INF: case JSON_ENCODE_INT32: case JSON_LUA_DTOA: case JSON_LUA_GRISU: case JSON_ENCODER_ARRAY_VECTOR: case JSON_ARRAY_SINGLE_LINE: case JSON_ARRAY_EMPTY: case JSON_ARRAY_WITH_HOLES:
           flags = lua_toboolean(L, -1) ? (flags | opt) : (flags & ~opt);
           break;
         case JSON_ENCODER_MAX_DEPTH:
-          if ((depth = (int)lua_tointeger(L, -1)) <= 0) return luaL_error(L, "invalid encoder depth");
+          if (v <= 0 || v > LUA_JSON_MAX_DEPTH) return luaL_error(L, "invalid encoder depth");
+          depth = (int)v;
           break;
         case JSON_ENCODER_DECIMALS:
-          if ((decimals = (int)lua_tointeger(L, -1)) <= 0) return luaL_error(L, "invalid decimal count");
+          if (v <= 0 || v > LJSON_MAXDECIMALS) return luaL_error(L, "invalid decimal count");
+          decimals = (int)v;
           break;
         case JSON_ENCODER_INDENT:
-          indent = lua_tointeger(L, -1);
-          if (indent < 0 || indent >= 4) return luaL_error(L, "invalid indentation index");
+          if (v < 0 || v >= 4) return luaL_error(L, "invalid indentation index");
+          indent = v;
           break;
         case JSON_ENCODER_INDENT_AMT:
-          if ((indent_amt = lua_tointeger(L, -1)) < 0) return luaL_error(L, "invalid indentation amount");
+          if (v < 0 || v > 255) return luaL_error(L, "invalid indentation amount");
+          indent_amt = v;
           break;
         case JSON_ENCODER_HANDLER:
           has_exception_handler = lua_isfunction(L, -1);
@@ -1015,7 +1022,8 @@ static int json_encode (lua_State *L) {
     }
   }
   else if (!lua_isnoneornil(L, 2)) return luaL_error(L, "Argument 2: table or nothing expected");
-  if (indent < 0 || indent >= 4 || depth < 0) return luaL_error(L, "invalid encoder parameters");
+  if (indent < 0 || indent >= 4 || depth <= 0 || depth > LUA_JSON_MAX_DEPTH) return luaL_error(L, "invalid encoder parameters");
+  if (indent_amt < 0) indent_amt = (indent == 0) ? 4 : 1;
   initkeys(L, &order);
   if (key_order_idx > 0) populate_key_vector(L, key_order_idx, &order);
   initanchor(L, &anchor);
@@ -1051,7 +1059,7 @@ static int json_decode (lua_State *L) {
   ljson_Reader r;
   lua_Integer flags, parsemode;
   const char *contents = NULL;
-  size_t len = 0, position, sublen, offset = 0;
+  size_t len = 0, position, offset = 0;
   int top, error;
   lua_json_getsubtable(L, LUA_REGISTRYINDEX, "lua_json");
   flags = geti(L, -1, LUA_JSON_REG_FLAGS, JSON_DEFAULT);
@@ -1072,6 +1080,14 @@ static int json_decode (lua_State *L) {
   }
   else if (position == 0 || position > len) return luaL_error(L, "invalid position");
   top = lua_gettop(L);
+  if (D.objectarg < 0) {
+    luaL_getmetatable(L, "lua_json_object");
+    D.objectarg = lua_gettop(L);
+  }
+  if (D.arrayarg < 0) {
+    luaL_getmetatable(L, "lua_json_array");
+    D.arrayarg = lua_gettop(L);
+  }
   initanchor(L, &anchor);
   D.anchor = &anchor;
   D.ctx = D.initctx;
@@ -1085,21 +1101,19 @@ static int json_decode (lua_State *L) {
   r.maxdepth = 0;
   r.alloc = anchoralloc;
   r.allocud = &anchor;
-  contents += position - 1;
-  sublen = len - (position - 1);
-  error = ljson_parse(&r, contents, sublen, &decode_handler, &D, &offset);
+  error = ljson_parse(&r, contents + (position - 1), len - (position - 1), &decode_handler, &D, &offset);
   freeanchor(&anchor);
 
-  if (error == LJSON_ERROR_DOCUMENT_EMPTY && offset < sublen && contents[offset] != '\0') error = LJSON_ERROR_VALUE_INVALID;
+  offset += position - 1;
   if (error != LJSON_OK) {
     lua_settop(L, top);
 #if defined(LUA_JSON_EXPLICIT)
-    lua_pushfstring(L, "%s (%d)", ljson_errormessage(error), (int)offset);
-    return throwmsg(L, "Unexpected exception");
+    lua_pushfstring(L, "%s (%I)", ljson_errormessage(error), (LUAI_UACINT)offset);
+    return lua_error(L);
 #else
     lua_pushnil(L);
     lua_pushinteger(L, (lua_Integer)offset);
-    lua_pushfstring(L, "%s (%d)", ljson_errormessage(error), (int)offset);
+    lua_pushfstring(L, "%s (%I)", ljson_errormessage(error), (LUAI_UACINT)offset);
     return 3;
 #endif
   }
@@ -1121,16 +1135,24 @@ static int json_setoption (lua_State *L) {
       break;
     }
     case JSON_ENCODER_MAX_DEPTH:
-      if ((v = luaL_checkinteger(L, 2)) > 0) seti(L, -1, LUA_JSON_REG_DEPTH, v);
+      v = luaL_checkinteger(L, 2);
+      luaL_argcheck(L, v > 0 && v <= LUA_JSON_MAX_DEPTH, 2, "invalid encoder depth");
+      seti(L, -1, LUA_JSON_REG_DEPTH, v);
       break;
     case JSON_ENCODER_INDENT:
-      if ((v = luaL_checkinteger(L, 2)) >= 0 || v < 4) seti(L, -1, LUA_JSON_REG_INDENT, v);
+      v = luaL_checkinteger(L, 2);
+      luaL_argcheck(L, v >= 0 && v < 4, 2, "invalid indentation index");
+      seti(L, -1, LUA_JSON_REG_INDENT, v);
       break;
     case JSON_ENCODER_INDENT_AMT:
-      if ((v = luaL_checkinteger(L, 2)) >= 0) seti(L, -1, LUA_JSON_REG_INDENT_AMT, v);
+      v = luaL_checkinteger(L, 2);
+      luaL_argcheck(L, v >= 0 && v <= 255, 2, "invalid indentation amount");
+      seti(L, -1, LUA_JSON_REG_INDENT_AMT, v);
       break;
     case JSON_ENCODER_DECIMALS:
-      if ((v = luaL_checkinteger(L, 2)) >= 0) seti(L, -1, LUA_JSON_REG_MAXDEC, v);
+      v = luaL_checkinteger(L, 2);
+      luaL_argcheck(L, v > 0 && v <= LJSON_MAXDECIMALS, 2, "invalid decimal count");
+      seti(L, -1, LUA_JSON_REG_MAXDEC, v);
       break;
     case JSON_DECODER_PRESET:
       v = decode_presets_num[luaL_optcheckoption(L, 2, NULL, decode_presets, 0)];
@@ -1159,10 +1181,11 @@ static int json_getoption (lua_State *L) {
       lua_pushinteger(L, geti(L, -1, LUA_JSON_REG_INDENT, 0));
       break;
     case JSON_ENCODER_INDENT_AMT:
-      lua_pushinteger(L, geti(L, -1, LUA_JSON_REG_INDENT_AMT, 0));
+      v = geti(L, -1, LUA_JSON_REG_INDENT_AMT, -1);
+      lua_pushinteger(L, (v >= 0) ? v : (geti(L, -1, LUA_JSON_REG_INDENT, 0) == 0) ? 4 : 1);
       break;
     case JSON_ENCODER_DECIMALS:
-      lua_pushinteger(L, geti(L, -1, LUA_JSON_REG_MAXDEC, LJSON_MAXDECIMALS));
+      lua_pushinteger(L, geti(L, -1, LUA_JSON_REG_MAXDEC, LUA_NUMBER_FMT_LEN));
       break;
     case JSON_DECODER_PRESET: {
       v = geti(L, -1, LUA_JSON_REG_PRESET, JSON_DECODE_DEFAULT);
@@ -1199,8 +1222,6 @@ static int json_isarray (lua_State *L) {
   return 1;
 }
 
-static int json_use_lpeg (lua_State *L) { return luaL_error(L, "use_lpeg has been deprecated!"); }
-
 LUAMOD_API int luaopen_json (lua_State *L) {
   static const luaL_Reg luajson_lib[] = {
     { "decode", json_decode },
@@ -1212,7 +1233,6 @@ LUAMOD_API int luaopen_json (lua_State *L) {
     { "array", json_array },
     { "isobject", json_isobject },
     { "isarray", json_isarray },
-    { "use_lpeg", json_use_lpeg },
     { "_COMPAT", NULL },
     { NULL, NULL }
   };
@@ -1224,8 +1244,6 @@ LUAMOD_API int luaopen_json (lua_State *L) {
   create_shared_meta(L, "lua_json_array", "array");
   create_shared_meta(L, "lua_json_object", "object");
   luaL_newlib(L, luajson_lib);
-  lua_pushboolean(L, 0);
-  lua_setfield(L, -2, "using_lpeg");
 #if defined(LUA_JSON_COMPAT)
   lua_pushboolean(L, 1);
 #else
