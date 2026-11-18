@@ -97,7 +97,7 @@ LUAI_FUNC void luaK_storevar (FuncState *fs, expdesc *var, expdesc *e);
 LUAI_FUNC void luaK_setreturns (FuncState *fs, expdesc *e, int nresults);
 LUAI_FUNC void luaK_setoneret (FuncState *fs, expdesc *e);
 LUAI_FUNC int luaK_jump (FuncState *fs);
-#if defined(GRIT_POWER_COALESCE)
+#if defined(GRIT_POWER_COALESCE) || defined(GRIT_POWER_DEFAULTS)
 LUAI_FUNC int luaK_jumpifnotnil (FuncState *fs, expdesc *e);
 #endif
 LUAI_FUNC void luaK_ret (FuncState *fs, int first, int nret);

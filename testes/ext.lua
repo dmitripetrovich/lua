@@ -676,4 +676,66 @@ else
   print("\n >>> nil-coalescing not compiled: skipping its tests <<<\n")
 end
 
+print("testing default parameter values")
+
+if load("local function f (a = 1) return a end") then
+  local f = load("return function (a, b = 10, c = 's', d = -1, e = true, g = nil, h = 2.5, i = 2^10) return a, b, c, d, e, g, h, i end")()
+  local a, b, c, d, e, g, h, i = f(1)
+  assert(a == 1 and b == 10 and c == "s" and d == -1 and e == true and g == nil and h == 2.5 and i == 1024.0)
+  a, b, c = f(1, false, "x")
+  assert(b == false and c == "x")
+  assert(debug.getinfo(f).nparams == 8)
+
+  local derived = load("return function (a, b = a * 2, c = { a, b }) return a, b, c end")()
+  a, b, c = derived(3)
+  assert(a == 3 and b == 6 and c[1] == 3 and c[2] == 6)
+  a, b, c = derived(3, 1)
+  assert(b == 1 and c[2] == 1)
+
+  local fresh = load("return function (t = {}) return t end")()
+  assert(fresh() ~= fresh() and next(fresh()) == nil)
+  local given = {}
+  assert(fresh(given) == given)
+
+  local calls = 0
+  local lazy = load("local make = ... return function (x = make()) return x end")(function () calls = calls + 1 return "d" end)
+  assert(lazy(1) == 1 and lazy() == "d" and lazy(false) == false and lazy() == "d" and calls == 2)
+
+  DEFAULT_NAME = "anon"
+  local named = load("return function (name = DEFAULT_NAME) return name end")()
+  assert(named() == "anon")
+  DEFAULT_NAME = "other"
+  assert(named() == "other")
+  DEFAULT_NAME = nil
+
+  local obj = load("local o = { base = 5 } function o:get (x = self.base, y = x + 1) return x, y end return o")()
+  a, b = obj:get()
+  assert(a == 5 and b == 6)
+  a, b = obj:get(1)
+  assert(a == 1 and b == 2)
+
+  local va = load("return function (a = 1, b = a + 1, ...) return a, b, select('#', ...), ... end")()
+  local r = table.pack(va())
+  assert(r[1] == 1 and r[2] == 2 and r[3] == 0)
+  r = table.pack(va(nil, nil, "x", "y"))
+  assert(r[1] == 1 and r[2] == 2 and r[3] == 2 and r[4] == "x" and r[5] == "y")
+
+  local fact = load("local function fact (n, acc = 1) if n <= 1 then return acc end return fact(n - 1, acc * n) end return fact")()
+  assert(fact(5) == 120)
+  local nested = load("return function (f = function (x = 2) return x * 3 end) return f() end")()
+  assert(nested() == 6)
+
+  assert(not load("return function (a = ) end"))
+  assert(not load("return function (... = 1) end"))
+  assert(not load("return function (a = 1 2) end"))
+  if load("return |x| x") then assert(not load("return |a = 1| a")) end
+  local many = { "return function (" }
+  for k = 1, 33 do many[#many + 1] = ("p%d = %d,"):format(k, k) end
+  many[#many + 1] = "z) end"
+  local fn, msg = load(table.concat(many))
+  assert(fn == nil and msg:find("too many parameters with default values", 1, true))
+else
+  print("\n >>> default parameter values not compiled: skipping their tests <<<\n")
+end
+
 print("OK")

@@ -1144,17 +1144,103 @@ static void setvararg (FuncState *fs) {
 }
 
 
+#if defined(GRIT_POWER_DEFAULTS)
+#define MAXDEFAULTS 32  /* parameters with default values in one function */
+
+typedef struct Default {
+  int vidx;  /* the parameter */
+  int proto;  /* function computing its value; -1: 'value' is a constant; -2: a new table */
+  expdesc value;
+} Default;
+
+
+/*
+** Parse a parameter's default value. Constants and '{}' are kept to be
+** stored directly; any other expression becomes a nested function, so
+** it can use the parameters before it without touching the registers of
+** those still to come. The parameter itself is the last active variable.
+*/
+static void defaultvalue (LexState *ls, Default *d, int line) {
+  FuncState *fs = ls->fs;
+  FuncState new_fs;
+  BlockCnt bl;
+  expdesc e;
+  d->vidx = fs->nactvar - 1;
+  if (ls->t.token == '{' && luaX_lookahead(ls) == '}') {
+    luaX_next(ls);
+    luaX_next(ls);
+    d->proto = -2;
+    return;
+  }
+  new_fs.f = addprototype(ls);
+  new_fs.f->linedefined = line;
+  open_func(ls, &new_fs, &bl);
+  expr(ls, &e);
+  if (new_fs.pc == 0 && e.t == NO_JUMP && e.f == NO_JUMP && (e.k == VNIL || e.k == VTRUE || e.k == VFALSE || e.k == VKINT || e.k == VKFLT || e.k == VKSTR)) {
+    close_func(ls);
+    fs->f->p[--fs->np] = NULL;  /* a constant needs no function */
+    d->proto = -1;
+    d->value = e;
+    return;
+  }
+  luaK_ret(&new_fs, luaK_exp2anyreg(&new_fs, &e), 1);
+  new_fs.f->lastlinedefined = ls->linenumber;
+  close_func(ls);
+  d->proto = fs->np - 1;
+}
+
+
+/* code 'if p == nil then p = default end' for each parameter with a default */
+static void codedefaults (LexState *ls, Default *defaults, int n) {
+  FuncState *fs = ls->fs;
+  int i;
+  for (i = 0; i < n; i++) {
+    expdesc var, v;
+    int skip;
+    init_var(fs, &var, defaults[i].vidx);
+    skip = luaK_jumpifnotnil(fs, &var);
+    init_var(fs, &var, defaults[i].vidx);
+    if (defaults[i].proto == -1)
+      v = defaults[i].value;
+    else if (defaults[i].proto == -2) {
+      int pc = luaK_codevABCk(fs, OP_NEWTABLE, 0, 0, 0, 0);
+      luaK_code(fs, 0);  /* space for extra arg. */
+      init_exp(&v, VNONRELOC, fs->freereg);
+      luaK_reserveregs(fs, 1);
+      luaK_settablesize(fs, pc, v.u.info, 0, 0);
+    }
+    else {
+      init_exp(&v, VRELOC, luaK_codeABx(fs, OP_CLOSURE, 0, defaults[i].proto));
+      luaK_exp2nextreg(fs, &v);
+      luaK_codeABC(fs, OP_CALL, v.u.info, 1, 2);
+    }
+    luaK_storevar(fs, &var, &v);
+    luaK_patchtohere(fs, skip);
+  }
+}
+#endif
+
+
 #if defined(GRIT_POWER_LAMBDA)
 #define parlist(ls) parlist_ext((ls), ')')
 static void parlist_ext (LexState *ls, int endtoken) {
 #else
 static void parlist (LexState *ls) {
 #endif
-  /* parlist -> [ {NAME ','} (NAME | '...') ] */
+  /* parlist -> [ {NAME ['=' expr] ','} (NAME ['=' expr] | '...') ] */
   FuncState *fs = ls->fs;
   Proto *f = fs->f;
   int nparams = 0;
   int varargk = 0;
+#if defined(GRIT_POWER_DEFAULTS)
+  Default defaults[MAXDEFAULTS];
+  int ndefaults = 0;
+#if defined(GRIT_POWER_LAMBDA)
+  const int allowdefaults = (endtoken == ')');  /* in lambdas '|' would be ambiguous */
+#else
+  const int allowdefaults = 1;
+#endif
+#endif
 #if defined(GRIT_POWER_LAMBDA)
   if (ls->t.token != endtoken) {
 #else
@@ -1165,6 +1251,15 @@ static void parlist (LexState *ls) {
         case TK_NAME: {
           new_localvar(ls, str_checkname(ls));
           nparams++;
+#if defined(GRIT_POWER_DEFAULTS)
+          if (allowdefaults && testnext(ls, '=')) {
+            if (ndefaults == MAXDEFAULTS)
+              luaX_syntaxerror(ls, "too many parameters with default values");
+            adjustlocalvars(ls, nparams);  /* parameters so far are visible to the default */
+            nparams = 0;
+            defaultvalue(ls, &defaults[ndefaults++], ls->linenumber);
+          }
+#endif
           break;
         }
         case TK_DOTS: {
@@ -1188,6 +1283,9 @@ static void parlist (LexState *ls) {
   }
   /* reserve registers for parameters (plus vararg parameter, if present) */
   luaK_reserveregs(fs, fs->nactvar);
+#if defined(GRIT_POWER_DEFAULTS)
+  codedefaults(ls, defaults, ndefaults);
+#endif
 }
 
 

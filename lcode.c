@@ -1828,7 +1828,7 @@ void luaK_prefix (FuncState *fs, UnOpr opr, expdesc *e, int line) {
 ** Process 1st operand 'v' of binary operation 'op' before reading
 ** 2nd operand.
 */
-#if defined(GRIT_POWER_COALESCE)
+#if defined(GRIT_POWER_COALESCE) || defined(GRIT_POWER_DEFAULTS)
 /*
 ** Emit a jump taken when register 'r' is not nil. Comparing with nil
 ** never calls a metamethod.
