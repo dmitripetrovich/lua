@@ -37,6 +37,9 @@ typedef enum BinOpr {
   OPR_NE, OPR_GT, OPR_GE,
   /* logical operators */
   OPR_AND, OPR_OR,
+#if defined(GRIT_POWER_COALESCE)
+  OPR_COALESCE,
+#endif
   OPR_NOBINOPR
 } BinOpr;
 
@@ -94,6 +97,9 @@ LUAI_FUNC void luaK_storevar (FuncState *fs, expdesc *var, expdesc *e);
 LUAI_FUNC void luaK_setreturns (FuncState *fs, expdesc *e, int nresults);
 LUAI_FUNC void luaK_setoneret (FuncState *fs, expdesc *e);
 LUAI_FUNC int luaK_jump (FuncState *fs);
+#if defined(GRIT_POWER_COALESCE)
+LUAI_FUNC int luaK_jumpifnotnil (FuncState *fs, expdesc *e);
+#endif
 LUAI_FUNC void luaK_ret (FuncState *fs, int first, int nret);
 LUAI_FUNC void luaK_patchlist (FuncState *fs, int list, int target);
 LUAI_FUNC void luaK_patchtohere (FuncState *fs, int list);

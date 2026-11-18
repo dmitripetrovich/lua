@@ -1694,6 +1694,9 @@ static BinOpr getbinopr (int op) {
     case TK_GE: return OPR_GE;
     case TK_AND: return OPR_AND;
     case TK_OR: return OPR_OR;
+#if defined(GRIT_POWER_COALESCE)
+    case TK_COALESCE: return OPR_COALESCE;
+#endif
     default: return OPR_NOBINOPR;
   }
 }
@@ -1716,6 +1719,9 @@ static const struct {
    {3, 3}, {3, 3}, {3, 3},   /* ==, <, <= */
    {3, 3}, {3, 3}, {3, 3},   /* ~=, >, >= */
    {2, 2}, {1, 1}            /* and, or */
+#if defined(GRIT_POWER_COALESCE)
+   , {1, 1}                  /* nil-coalescing */
+#endif
 };
 
 #define UNARY_PRIORITY	12  /* priority for unary operators */
@@ -1837,7 +1843,7 @@ static void check_conflict (LexState *ls, struct LHS_assign *lh, expdesc *v) {
 }
 
 
-#if defined(GRIT_POWER_INTABLE) || defined(GRIT_POWER_COMPOUND)
+#if defined(GRIT_POWER_INTABLE) || defined(GRIT_POWER_COMPOUND) || defined(GRIT_POWER_COALESCE)
 static void getindexnofree (FuncState *fs, expdesc *v) {
   /* get the value from a table without freeing the table/key registers */
   switch (v->k) {
@@ -2040,6 +2046,9 @@ static int continuefollows (int t) {
 #endif
 #if defined(GRIT_POWER_SAFENAV)
     case '?':
+#endif
+#if defined(GRIT_POWER_COALESCE)
+    case TK_COALESCEEQ:
 #endif
       return 0;
     default:
@@ -2615,6 +2624,26 @@ static void compound_assignment (LexState *ls, expdesc *v) {
 #endif
 
 
+#if defined(GRIT_POWER_COALESCE)
+static void coalesce_assignment (LexState *ls, expdesc *v) {
+  /* restassign -> coalescing assignment expr: assigns only when the variable is nil */
+  FuncState *fs = ls->fs;
+  expdesc current, rhs;
+  int skip;
+  luaX_next(ls);
+  check_condition(ls, vkisvar(v->k), "syntax error");
+  check_readonly(ls, v);
+  current = *v;
+  if (vkisindexed(current.k))
+    getindexnofree(fs, &current);
+  skip = luaK_jumpifnotnil(fs, &current);
+  expr(ls, &rhs);
+  luaK_storevar(fs, v, &rhs);
+  luaK_patchtohere(fs, skip);
+}
+#endif
+
+
 static void exprstat (LexState *ls) {
   /* stat -> func | assignment */
   FuncState *fs = ls->fs;
@@ -2635,6 +2664,11 @@ static void exprstat (LexState *ls) {
 #if defined(GRIT_POWER_COMPOUND)
   else if (opeqexpr(ls->t.token)) {
     compound_assignment(ls, &v.v);
+  }
+#endif
+#if defined(GRIT_POWER_COALESCE)
+  else if (ls->t.token == TK_COALESCEEQ) {
+    coalesce_assignment(ls, &v.v);
   }
 #endif
   else {  /* stat -> func */

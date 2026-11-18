@@ -53,6 +53,9 @@ enum RESERVED {
 #if defined(GRIT_POWER_INTERP)
   , TK_INTERPBEGIN, TK_INTERPMID, TK_INTERPEND
 #endif
+#if defined(GRIT_POWER_COALESCE)
+  , TK_COALESCE, TK_COALESCEEQ
+#endif
 };
 
 /* number of reserved words */

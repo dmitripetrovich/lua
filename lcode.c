@@ -1828,6 +1828,36 @@ void luaK_prefix (FuncState *fs, UnOpr opr, expdesc *e, int line) {
 ** Process 1st operand 'v' of binary operation 'op' before reading
 ** 2nd operand.
 */
+#if defined(GRIT_POWER_COALESCE)
+/*
+** Emit a jump taken when register 'r' is not nil. Comparing with nil
+** never calls a metamethod.
+*/
+static int jumpifnotnil (FuncState *fs, int r) {
+  int k = nilK(fs);
+  int j;
+  if (k <= MAXARG_B)
+    return condjump(fs, OP_EQK, r, k, 0, 0);
+  else {  /* constant out of EQK's range: compare with a register set to nil */
+    int t = fs->freereg;
+    luaK_reserveregs(fs, 1);
+    luaK_nil(fs, t, 1);
+    j = condjump(fs, OP_EQ, r, t, 0, 0);
+    fs->freereg--;
+    return j;
+  }
+}
+
+
+/* jump taken when 'e' is not nil; 'e' is consumed */
+int luaK_jumpifnotnil (FuncState *fs, expdesc *e) {
+  int j = jumpifnotnil(fs, luaK_exp2anyreg(fs, e));
+  freeexp(fs, e);
+  return j;
+}
+#endif
+
+
 void luaK_infix (FuncState *fs, BinOpr op, expdesc *v) {
   luaK_dischargevars(fs, v);
   switch (op) {
@@ -1839,6 +1869,13 @@ void luaK_infix (FuncState *fs, BinOpr op, expdesc *v) {
       luaK_goiffalse(fs, v);  /* go ahead only if 'v' is false */
       break;
     }
+#if defined(GRIT_POWER_COALESCE)
+    case OPR_COALESCE: {  /* 'v' goes to the result register; skip 'e2' if it isn't nil */
+      luaK_exp2nextreg(fs, v);
+      v->t = jumpifnotnil(fs, v->u.info);
+      break;
+    }
+#endif
     case OPR_CONCAT: {
       luaK_exp2nextreg(fs, v);  /* operand must be on the stack */
       break;
@@ -1915,6 +1952,16 @@ void luaK_posfix (FuncState *fs, BinOpr opr,
       *e1 = *e2;
       break;
     }
+#if defined(GRIT_POWER_COALESCE)
+    case OPR_COALESCE: {  /* nil-coalescing: 'e2' replaces 'e1' in its register */
+      int skip = e1->t;
+      e1->t = NO_JUMP;
+      freeexp(fs, e2);
+      exp2reg(fs, e2, e1->u.info);
+      luaK_patchtohere(fs, skip);
+      break;
+    }
+#endif
     case OPR_CONCAT: {  /* e1 .. e2 */
       luaK_exp2nextreg(fs, e2);
       codeconcat(fs, e1, e2, line);

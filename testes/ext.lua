@@ -618,4 +618,62 @@ else
   print("\n >>> startswith/endswith/sign/lerp not compiled: skipping their tests <<<\n")
 end
 
+print("testing nil-coalescing")
+
+if load("return nil ?? 1") then
+  assert(load("return nil ?? 1")() == 1)
+  assert(load("return false ?? 1")() == false)
+  assert(load("return 0 ?? 1")() == 0 and load("return '' ?? 1")() == "")
+  local calls = 0
+  local function side () calls = calls + 1 return "x" end
+  local pick = load("local a, side = ... return a ?? side()")
+  assert(pick(5, side) == 5 and calls == 0)
+  assert(pick(nil, side) == "x" and calls == 1)
+  assert(load("local a, b, c = ... return a ?? b ?? c")(nil, nil, 3) == 3)
+  assert(load("local a, b, c = ... return a ?? b ?? c")(nil, false, 3) == false)
+  assert(load("local a, b = ... return a ?? b or 'z'")(nil, false) == "z")
+  assert(load("local a = ... return a ?? 1 + 2")(nil) == 3)
+  assert(load("local a = ... return a == nil ?? 'no'")(nil) == true)
+  assert(load("local t = ... return t?.a?.b ?? 'none'")(nil) == "none")
+  assert(load("local t = ... return t?.a?.b ?? 'none'")({ a = { b = false } }) == false)
+  assert(load("local a = ... return { a ?? 1, a ?? 2, (a ?? 3) * 2 }")(nil)[3] == 6)
+  assert(select("#", load("return nil ?? (function () return 1, 2 end)()")()) == 1)
+  local guarded = setmetatable({}, { __eq = function () error("__eq called") end })
+  assert(load("local o = ... return o ?? 1")(guarded) == guarded)
+  assert(load("local t = ... return t.missing ?? t.present")({ present = 7 }) == 7)
+
+  local x, y, a, one, g, f = load([[
+    local t, x, y = {}, nil, 5
+    x ??= 10
+    y ??= 10
+    t.a ??= 1
+    t.a ??= 2
+    t[1] ??= "one"
+    COALESCE_GLOBAL ??= "g"
+    COALESCE_GLOBAL ??= "h"
+    local f = false
+    f ??= true
+    return x, y, t.a, t[1], COALESCE_GLOBAL, f
+  ]])()
+  assert(x == 10 and y == 5 and a == 1 and one == "one" and g == "g" and f == false)
+  COALESCE_GLOBAL = nil
+  local frozen = table.freeze({ v = 1 })
+  assert(load("local t = ... t.v ??= 2 return t.v")(frozen) == 1)
+  assert(not pcall(load("local t = ... t.w ??= 2"), frozen))
+  calls = 0
+  load("local t, side = ... t.k ??= side() t.k ??= side()")({}, side)
+  assert(calls == 1)
+
+  local src = { "local a = ... local t = {" }
+  for i = 1, 300 do src[#src + 1] = ("'k%d',"):format(i) end
+  src[#src + 1] = "} local b b ??= 'set' return a ?? 'deep', b"
+  local deep, set = load(table.concat(src))(nil)
+  assert(deep == "deep" and set == "set")
+
+  assert(not load("return ?? 1") and not load("x ??= ") and not load("f() ??= 1") and not load("return 1 ??= 2"))
+  assert(load("local t = ... return t?.v")({ v = 4 }) == 4 and load("local t = ... return t?.v")(nil) == nil)
+else
+  print("\n >>> nil-coalescing not compiled: skipping its tests <<<\n")
+end
+
 print("OK")

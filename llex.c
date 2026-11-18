@@ -63,6 +63,9 @@ static const char *const luaX_tokens [] = {
 #if defined(GRIT_POWER_INTERP)
     , "<interpolation>", "<interpolation>", "<interpolation>"
 #endif
+#if defined(GRIT_POWER_COALESCE)
+    , "\?\?", "\?\?="
+#endif
 };
 
 
@@ -762,6 +765,14 @@ static int llex (LexState *ls, SemInfo *seminfo) {
       case '`': {  /* compiled hash */
         read_string(ls, ls->current, seminfo);
         return TK_HASH;
+      }
+#endif
+#if defined(GRIT_POWER_COALESCE)
+      case '?': {  /* '?', or nil-coalescing and its assignment */
+        ls_next(ls);
+        if (!check_next1(ls, '?')) return '?';
+        if (check_next1(ls, '=')) return TK_COALESCEEQ;
+        return TK_COALESCE;
       }
 #endif
 #if defined(GRIT_POWER_INTERP)
