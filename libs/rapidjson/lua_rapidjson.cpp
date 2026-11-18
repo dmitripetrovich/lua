@@ -447,6 +447,7 @@ struct DecoderData {
     switch (parsemode) {
       case JSON_DECODE_EXTENDED: {
         result = reader.Parse<rapidjson::ParseFlag::kParseDefaultFlags
+          | rapidjson::ParseFlag::kParseIterativeFlag  /* no C recursion on nesting */
 #if defined(LUA_RAPIDJSON_COMPAT)
           | rapidjson::ParseFlag::kParseStopWhenDoneFlag
 #endif
@@ -460,6 +461,7 @@ struct DecoderData {
       case JSON_DECODE_DEFAULT: {
       default:
         result = reader.Parse<rapidjson::ParseFlag::kParseDefaultFlags
+          | rapidjson::ParseFlag::kParseIterativeFlag  /* no C recursion on nesting */
 #if defined(LUA_RAPIDJSON_COMPAT)
           | rapidjson::ParseFlag::kParseStopWhenDoneFlag
 #endif
@@ -469,6 +471,10 @@ struct DecoderData {
         break;
       }
     }
+
+    /* the iterative parser reports any bad first token as an empty document */
+    if (result.Code() == rapidjson::kParseErrorDocumentEmpty && s.Peek() != '\0')
+      result.Set(rapidjson::kParseErrorValueInvalid, result.Offset());
 
     position = s.Tell();
 
