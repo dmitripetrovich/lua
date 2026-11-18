@@ -215,19 +215,18 @@ static lua_VecF mp_loadvec (const unsigned char *p) {
   return f;
 }
 
-static int mp_null (lua_State *L) {
-  lua_pushcfunction(L, mp_null);
-  return 1;
+static void mp_pushnull (lua_State *L) {
+  lua_pushlightuserdata(L, mp_nullptr);
 }
 
 static int mp_is_null (lua_State *L, int idx) {
-  return lua_tocfunction(L, idx) == mp_null;
+  return lua_type(L, idx) == LUA_TLIGHTUSERDATA && lua_touserdata(L, idx) == mp_nullptr;
 }
 
 static void mp_replace_null (lua_State *L) {
   if (lua_isnil(L, -1)) {
     lua_pop(L, 1);
-    mp_null(L);
+    mp_pushnull(L);
   }
 }
 
@@ -625,7 +624,7 @@ static void mp_encode_any (mp_encoder *e, int idx, int level) {
     case LUA_TNUMBER: mp_encode_number(e, idx); break;
     case LUA_TSTRING: mp_encode_string(e, idx); break;
     case LUA_TTABLE: mp_encode_extended_table(e, idx, level); break;
-    case LUA_TFUNCTION: {
+    case LUA_TLIGHTUSERDATA: {
       if (mp_is_null(e->L, idx))
         lmsgpack_write_nil(e->w);
       else
@@ -1524,8 +1523,10 @@ LUAMOD_API int luaopen_msgpack (lua_State *L) {
   }
   lua_pop(L, 1);
   mp_setregi(L, LUA_MSGPACK_REG_OPTIONS, MP_DEFAULT);
-  mp_null(L); lua_setfield(L, -2, "null");
-  mp_null(L); lua_setfield(L, -2, "sentinel");
+  mp_pushnull(L);
+  lua_setfield(L, -2, "null");
+  mp_pushnull(L);
+  lua_setfield(L, -2, "sentinel");
   lua_newtable(L);
   luaL_setfuncs(L, packers, 0);
   lua_setfield(L, -2, "packers");

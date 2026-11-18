@@ -233,12 +233,7 @@ static void seti (lua_State *L, int idx, lua_Integer key, lua_Integer value) {
   lua_rawseti(L, idx, key);
 }
 
-static int json_null (lua_State *L) {
-  lua_pushcfunction(L, json_null);
-  return 1;
-}
-
-static int is_json_null (lua_State *L, int idx) { return lua_tocfunction(L, idx) == json_null; }
+static int is_json_null (lua_State *L, int idx) { return lua_type(L, idx) == LUA_TLIGHTUSERDATA && lua_touserdata(L, idx) == NULL; }
 
 static int has_json_type (lua_State *L, int idx, int *is_array) {
   int result = 0;
@@ -699,7 +694,7 @@ static void encodeTable (lua_State *L, Encoder *E, int idx, int depth) {
 
 static void encodeValue (lua_State *L, Encoder *E, int idx, int depth) {
   ljson_Writer *w = E->w;
-  if (lua_type(L, idx) == LUA_TFUNCTION && is_json_null(L, idx)) {
+  if (is_json_null(L, idx)) {
     ljson_write_null(w);
     return;
   }
@@ -804,7 +799,7 @@ static int d_null (void *ud) {
   Decoder *D = (Decoder *)ud;
   if (D->nullarg > 0) lua_pushvalue(D->L, D->nullarg);
   else if (D->flags & JSON_LUA_NULL) lua_pushnil(D->L);
-  else json_null(D->L);
+  else lua_pushlightuserdata(D->L, NULL);
   return submit(D);
 }
 
@@ -1228,7 +1223,7 @@ LUAMOD_API int luaopen_json (lua_State *L) {
     { "encode", json_encode },
     { "setoption", json_setoption },
     { "getoption", json_getoption },
-    { "null", json_null },
+    { "null", NULL },
     { "object", json_object },
     { "array", json_array },
     { "isobject", json_isobject },
@@ -1244,6 +1239,8 @@ LUAMOD_API int luaopen_json (lua_State *L) {
   create_shared_meta(L, "lua_json_array", "array");
   create_shared_meta(L, "lua_json_object", "object");
   luaL_newlib(L, luajson_lib);
+  lua_pushlightuserdata(L, NULL);
+  lua_setfield(L, -2, "null");
 #if defined(LUA_JSON_COMPAT)
   lua_pushboolean(L, 1);
 #else
