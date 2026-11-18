@@ -557,4 +557,38 @@ else
   print("\n >>> string interpolation not compiled: skipping its tests <<<\n")
 end
 
+print("testing string.buffer")
+
+if string.buffer then
+  local b = string.buffer()
+  assert(#b == 0 and b:tostring() == "" and tostring(b) == "")
+  assert(b:put("a", 1, 2.5, true, nil) == b)
+  assert(b:tostring() == "a12.5truenil" and #b == 12)
+  b:put(setmetatable({}, { __tostring = function () return "T" end }), vec2(1, 2))
+  assert(b:tostring() == "a12.5truenilT" .. tostring(vec2(1, 2)))
+  assert(b:reset() == b and #b == 0 and tostring(b) == "")
+  b:put("ab"):put(b):put(b)
+  assert(tostring(b) == "abababab")
+  local other = string.buffer(4):put("xyz")
+  b:reset():put(other, "-", other)
+  assert(tostring(b) == "xyz-xyz" and tostring(other) == "xyz")
+  assert(b:reset():putf("%d+%s=%.1f", 1, "two", 3):tostring() == "1+two=3.0")
+  local big = string.buffer()
+  for i = 1, 100000 do big:put(i, ",") end
+  local parts = {}
+  for i = 1, 100000 do parts[i] = i .. "," end
+  assert(big:tostring() == table.concat(parts) and #big == #table.concat(parts))
+  big:reset()
+  big:put(string.rep("z", 3 << 20))
+  assert(#big == 3 << 20 and big:tostring() == string.rep("z", 3 << 20))
+  assert(big:put("\0x\0"):tostring():sub(-3) == "\0x\0")
+  assert(not pcall(string.buffer, -1))
+  assert(not pcall(b.put, "notabuffer", "x"))
+  assert(not pcall(b.putf, b, "%d", "x"))
+  assert(not pcall(b.put, b, setmetatable({}, { __tostring = function () return {} end })))
+  assert(getmetatable(b).__name == "string.buffer")
+else
+  print("\n >>> string.buffer not compiled: skipping its tests <<<\n")
+end
+
 print("OK")

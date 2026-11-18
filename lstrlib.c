@@ -2201,6 +2201,144 @@ static int str_blobunpack (lua_State *L) {
 /* }====================================================== */
 
 
+#if defined(GRIT_POWER_STRBUF)
+/*
+** {======================================================
+** STRING BUFFER
+** A growable string builder. Its bytes live in a userdata kept as the
+** buffer's user value, so the collector accounts for them and nothing
+** leaks if growing fails.
+** =======================================================
+*/
+
+#define STRBUF_TNAME "string.buffer"
+
+typedef struct StrBuf {
+  char *p;  /* bytes, owned by the user value */
+  size_t n;  /* bytes in use */
+  size_t size;  /* bytes available */
+} StrBuf;
+
+
+static StrBuf *checkstrbuf (lua_State *L, int arg) {
+  return (StrBuf *)luaL_checkudata(L, arg, STRBUF_TNAME);
+}
+
+
+/* make room for 'need' more bytes in the buffer at stack index 'arg' */
+static char *strbuf_reserve (lua_State *L, StrBuf *b, int arg, size_t need) {
+  if (b->size - b->n < need) {
+    size_t size = (b->size > 0) ? b->size : LUAL_BUFFERSIZE;
+    char *p;
+    if (l_unlikely(need > MAX_SIZE - b->n)) luaL_error(L, "string buffer too large");
+    while (size - b->n < need) size = (size <= MAX_SIZE / 2) ? size * 2 : b->n + need;
+    p = (char *)lua_newuserdatauv(L, size, 0);
+    if (b->n > 0) memcpy(p, b->p, b->n);
+    lua_setiuservalue(L, arg, 1);
+    b->p = p;
+    b->size = size;
+  }
+  return b->p + b->n;
+}
+
+
+static int str_buffer (lua_State *L) {
+  lua_Integer size = luaL_optinteger(L, 1, 0);
+  StrBuf *b;
+  luaL_argcheck(L, size >= 0 && (lua_Unsigned)size <= MAX_SIZE, 1, "invalid size");
+  b = (StrBuf *)lua_newuserdatauv(L, sizeof(StrBuf), 1);
+  b->p = NULL;
+  b->n = b->size = 0;
+  luaL_setmetatable(L, STRBUF_TNAME);
+  if (size > 0) strbuf_reserve(L, b, lua_gettop(L), (size_t)size);
+  return 1;
+}
+
+
+/* buf:put(...): append values as 'tostring' converts them; buffers append their bytes */
+static int strbuf_put (lua_State *L) {
+  StrBuf *b = checkstrbuf(L, 1);
+  int i;
+  int n = lua_gettop(L);
+  for (i = 2; i <= n; i++) {
+    StrBuf *other = (StrBuf *)luaL_testudata(L, i, STRBUF_TNAME);
+    if (other != NULL) {
+      size_t len = other->n;
+      if (len > 0) {
+        char *dst = strbuf_reserve(L, b, 1, len);
+        memcpy(dst, other->p, len);
+        b->n += len;
+      }
+    }
+    else {
+      size_t len;
+      const char *s = (lua_type(L, i) == LUA_TSTRING) ? lua_tolstring(L, i, &len) : luaL_tolstring(L, i, &len);
+      if (len > 0) {
+        memcpy(strbuf_reserve(L, b, 1, len), s, len);
+        b->n += len;
+      }
+      lua_settop(L, n);
+    }
+  }
+  lua_settop(L, 1);
+  return 1;
+}
+
+
+/* buf:putf(fmt, ...): append string.format(fmt, ...) */
+static int strbuf_putf (lua_State *L) {
+  StrBuf *b = checkstrbuf(L, 1);
+  size_t len;
+  const char *s;
+  lua_pushcfunction(L, str_format);
+  lua_insert(L, 2);
+  lua_call(L, lua_gettop(L) - 2, 1);
+  s = lua_tolstring(L, 2, &len);
+  if (len > 0) {
+    memcpy(strbuf_reserve(L, b, 1, len), s, len);
+    b->n += len;
+  }
+  lua_settop(L, 1);
+  return 1;
+}
+
+
+static int strbuf_tostring (lua_State *L) {
+  StrBuf *b = checkstrbuf(L, 1);
+  lua_pushlstring(L, b->p, b->n);
+  return 1;
+}
+
+
+/* buf:reset(): empty the buffer, keeping its memory */
+static int strbuf_reset (lua_State *L) {
+  checkstrbuf(L, 1)->n = 0;
+  lua_settop(L, 1);
+  return 1;
+}
+
+
+static int strbuf_len (lua_State *L) {
+  lua_pushinteger(L, (lua_Integer)checkstrbuf(L, 1)->n);
+  return 1;
+}
+
+
+static const luaL_Reg strbuf_meta[] = {
+  {"put", strbuf_put},
+  {"putf", strbuf_putf},
+  {"tostring", strbuf_tostring},
+  {"reset", strbuf_reset},
+  {"__tostring", strbuf_tostring},
+  {"__len", strbuf_len},
+  {"__index", NULL},  /* placeholder */
+  {NULL, NULL}
+};
+
+/* }====================================================== */
+#endif
+
+
 static const luaL_Reg strlib[] = {
   {"byte", str_byte},
   {"char", str_char},
@@ -2235,6 +2373,9 @@ static const luaL_Reg strlib[] = {
   {"blob_pack", str_blobpack},
   {"blob_unpack", str_blobunpack},
 #endif
+#if defined(GRIT_POWER_STRBUF)
+  {"buffer", str_buffer},
+#endif
   {NULL, NULL}
 };
 
@@ -2259,6 +2400,13 @@ static void createmetatable (lua_State *L) {
 LUAMOD_API int luaopen_string (lua_State *L) {
   luaL_newlib(L, strlib);
   createmetatable(L);
+#if defined(GRIT_POWER_STRBUF)
+  luaL_newmetatable(L, STRBUF_TNAME);
+  luaL_setfuncs(L, strbuf_meta, 0);
+  lua_pushvalue(L, -1);
+  lua_setfield(L, -2, "__index");  /* buffer methods are in the metatable */
+  lua_pop(L, 1);
+#endif
 #if defined(GRIT_POWER_FASTCALL)
   lua_setfastcall(L, LUA_FASTSTRLEN, str_len);
   lua_setfastcall(L, LUA_FASTSTRBYTE, str_byte);
