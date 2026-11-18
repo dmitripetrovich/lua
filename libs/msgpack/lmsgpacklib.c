@@ -132,6 +132,12 @@ static lua_Integer mp_getregi (lua_State *L, const char *key, lua_Integer opt) {
   return result;
 }
 
+static lua_Integer mp_flags (lua_State *L) {
+  if (lua_type(L, lua_upvalueindex(1)) == LUA_TNUMBER)
+    return lua_tointeger(L, lua_upvalueindex(1));
+  return mp_getregi(L, LUA_MSGPACK_REG_OPTIONS, MP_DEFAULT);
+}
+
 static void mp_setregi (lua_State *L, const char *key, lua_Integer value) {
   lua_pushinteger(L, value);
   lua_setfield(L, LUA_REGISTRYINDEX, key);
@@ -276,7 +282,7 @@ static int mp_heapreserve (lmsgpack_Writer *w, size_t need) {
 static void mp_encoder_init (lua_State *L, mp_encoder *e, lmsgpack_Writer *w, char *init, size_t size) {
   e->L = L;
   e->w = w;
-  e->flags = mp_getregi(L, LUA_MSGPACK_REG_OPTIONS, MP_DEFAULT) & ~MP_MASK_RUNTIME;
+  e->flags = mp_flags(L) & ~MP_MASK_RUNTIME;
   e->fetched = 0;
   lua_pushnil(L);
   e->box = lua_gettop(L);
@@ -1144,7 +1150,7 @@ static int mp_unpacker (lua_State *L, int compat_api, int include_offset) {
 
   top = lua_gettop(L);
   len = (end_position == 0) ? len : end_position;
-  if ((count = mp_decode_objects(L, mp_getregi(L, LUA_MSGPACK_REG_OPTIONS, MP_DEFAULT), s, len, &offset, limit, &err_msg, &err_code)) == 0) {
+  if ((count = mp_decode_objects(L, mp_flags(L), s, len, &offset, limit, &err_msg, &err_code)) == 0) {
     lua_settop(L, top);
     if (include_offset && err_code == LMSGPACK_ERROR_INCOMPLETE) {
       lua_pushinteger(L, -(mp_cast(lua_Integer, offset) + 1));
@@ -1191,7 +1197,7 @@ static lua_Integer mp_set_extension_helper (lua_State *L, int idx) {
 }
 
 static int mp_packer_new (lua_State *L) {
-  mp_packer_create(L, mp_getregi(L, LUA_MSGPACK_REG_OPTIONS, MP_DEFAULT));
+  mp_packer_create(L, mp_flags(L));
   return 1;
 }
 
@@ -1314,51 +1320,46 @@ static int mp_set_type_extension (lua_State *L) {
   return luaL_error(L, "msgpack extension type: invalid encoder!");
 }
 
-static int mp_setoption (lua_State *L) {
-  const lua_Integer opt = optsnum[luaL_checkoption(L, 1, mp_nullptr, opts)];
-  lua_Integer flags = mp_getregi(L, LUA_MSGPACK_REG_OPTIONS, MP_DEFAULT);
-  switch (opt) {
+static lua_Integer mp_applygroup (lua_Integer flags, lua_Integer opt, lua_Integer mask, int on) {
+  flags &= on ? ~mask : ~opt;
+  flags |= on ? opt : 0;
+  if ((flags & mask) == 0)
+    flags |= (MP_DEFAULT & mask);
+  return flags;
+}
+
+static lua_Integer mp_applyoption (lua_State *L, const char *name, lua_Integer flags, int on) {
+  int i;
+  for (i = 0; opts[i] != mp_nullptr && strcmp(opts[i], name) != 0; i++) {}
+  if (opts[i] == mp_nullptr)
+    luaL_error(L, "unknown msgpack option '%s'", name);
+  switch (optsnum[i]) {
     case MP_IGNORE_INVALID:
     case MP_USE_SENTINEL:
     case MP_EMPTY_AS_ARRAY:
-    case MP_UNSIGNED_INTEGERS: {
-      luaL_checktype(L, 2, LUA_TBOOLEAN);
-      flags = lua_toboolean(L, 2) ? (flags | opt) : (flags & ~opt);
-      break;
-    }
+    case MP_UNSIGNED_INTEGERS:
+      return on ? (flags | optsnum[i]) : (flags & ~optsnum[i]);
     case MP_NUMBER_AS_INTEGER:
     case MP_NUMBER_AS_FLOAT:
-    case MP_NUMBER_AS_DOUBLE: {
-      luaL_checktype(L, 2, LUA_TBOOLEAN);
-      flags &= lua_toboolean(L, 2) ? ~MP_MASK_NUMBER : ~opt;
-      flags |= lua_toboolean(L, 2) ? opt : 0;
-      if ((flags & MP_MASK_NUMBER) == 0)
-        flags |= (MP_DEFAULT & MP_MASK_NUMBER);
-      break;
-    }
+    case MP_NUMBER_AS_DOUBLE:
+      return mp_applygroup(flags, optsnum[i], MP_MASK_NUMBER, on);
     case MP_ARRAY_AS_MAP:
     case MP_ARRAY_WITH_HOLES:
-    case MP_ARRAY_WITHOUT_HOLES: {
-      luaL_checktype(L, 2, LUA_TBOOLEAN);
-      flags &= lua_toboolean(L, 2) ? ~MP_MASK_ARRAY : ~opt;
-      flags |= lua_toboolean(L, 2) ? opt : 0;
-      if ((flags & MP_MASK_ARRAY) == 0)
-        flags |= (MP_DEFAULT & MP_MASK_ARRAY);
-      break;
-    }
+    case MP_ARRAY_WITHOUT_HOLES:
+      return mp_applygroup(flags, optsnum[i], MP_MASK_ARRAY, on);
     case MP_STRING_BINARY:
-    case MP_STRING_COMPAT: {
-      luaL_checktype(L, 2, LUA_TBOOLEAN);
-      flags &= lua_toboolean(L, 2) ? ~MP_MASK_STRING : ~opt;
-      flags |= lua_toboolean(L, 2) ? opt : 0;
-      if ((flags & MP_MASK_STRING) == 0)
-        flags |= (MP_DEFAULT & MP_MASK_STRING);
-      break;
-    }
+    case MP_STRING_COMPAT:
+      return mp_applygroup(flags, optsnum[i], MP_MASK_STRING, on);
     default:
-      break;
+      luaL_error(L, "msgpack option '%s' can only be read", name);
+      return flags;
   }
-  mp_setregi(L, LUA_MSGPACK_REG_OPTIONS, flags);
+}
+
+static int mp_setoption (lua_State *L) {
+  const char *name = opts[luaL_checkoption(L, 1, mp_nullptr, opts)];
+  luaL_checktype(L, 2, LUA_TBOOLEAN);
+  mp_setregi(L, LUA_MSGPACK_REG_OPTIONS, mp_applyoption(L, name, mp_getregi(L, LUA_MSGPACK_REG_OPTIONS, MP_DEFAULT), lua_toboolean(L, 2)));
   return 0;
 }
 
@@ -1447,6 +1448,44 @@ static int mp_set_number (lua_State *L) {
   return 0;
 }
 
+static const luaL_Reg msgpack_bound[] = {
+  { "pack", mp_pack },
+  { "pack_args", mp_pack_args },
+#if defined(LUA_MSGPACK_COMPAT)
+  { "unpack", mp_unpack_compat },
+  { "unpack2", mp_unpack },
+#else
+  { "unpack", mp_unpack },
+#endif
+  { "next", mp_unpack_next },
+  { "new", mp_packer_new },
+  { mp_nullptr, mp_nullptr }
+};
+
+static void mp_makesafe (lua_State *L, const luaL_Reg *l);
+
+static int mp_with (lua_State *L) {
+  lua_Integer flags = MP_DEFAULT;
+  luaL_checktype(L, 1, LUA_TTABLE);
+  lua_settop(L, 1);
+  lua_pushnil(L);
+  while (lua_next(L, 1)) {
+    if (lua_type(L, -2) != LUA_TSTRING)
+      return luaL_error(L, "msgpack option names are strings");
+    else if (lua_type(L, -1) != LUA_TBOOLEAN)
+      return luaL_error(L, "msgpack option '%s' takes a boolean", lua_tostring(L, -2));
+    flags = mp_applyoption(L, lua_tostring(L, -2), flags, lua_toboolean(L, -1));
+    lua_pop(L, 1);
+  }
+  lua_createtable(L, 0, 8);
+  lua_pushinteger(L, flags);
+  luaL_setfuncs(L, msgpack_bound, 1);
+  mp_makesafe(L, msgpack_bound);
+  mp_pushnull(L);
+  lua_setfield(L, -2, "null");
+  return 1;
+}
+
 #if defined(LUA_MSGPACK_SAFE)
 static int mp_safe (lua_State *L) {
   int argc = lua_gettop(L), err, total_results;
@@ -1466,7 +1505,22 @@ static int mp_issafe (lua_State *L) {
   lua_pushboolean(L, 1);
   return 1;
 }
+
+static void mp_makesafe (lua_State *L, const luaL_Reg *l) {
+  for (; l->name != mp_nullptr; l++) {
+    if (l->func == mp_nullptr)
+      continue;
+    lua_getfield(L, -1, l->name);
+    lua_pushcclosure(L, mp_safe, 1);
+    lua_setfield(L, -2, l->name);
+  }
+}
 #else
+static void mp_makesafe (lua_State *L, const luaL_Reg *l) {
+  (void)L;
+  (void)l;
+}
+
 static int mp_issafe (lua_State *L) {
   lua_pushboolean(L, 0);
   return 1;
@@ -1484,6 +1538,7 @@ static const luaL_Reg msgpack_lib[] = {
 #endif
   { "next", mp_unpack_next },
   { "new", mp_packer_new },
+  { "with", mp_with },
   { "setoption", mp_setoption },
   { "getoption", mp_getoption },
   { "safe", mp_issafe },
@@ -1506,16 +1561,7 @@ extern "C" {
 
 LUAMOD_API int luaopen_msgpack (lua_State *L) {
   luaL_newlib(L, msgpack_lib);
-#if defined(LUA_MSGPACK_SAFE)
-  {
-    size_t i;
-    for (i = 0; i < (sizeof(msgpack_lib) / sizeof(*msgpack_lib) - 1); i++) {
-      lua_getfield(L, -1, msgpack_lib[i].name);
-      lua_pushcclosure(L, mp_safe, 1);
-      lua_setfield(L, -2, msgpack_lib[i].name);
-    }
-  }
-#endif
+  mp_makesafe(L, msgpack_lib);
   if (luaL_newmetatable(L, LUA_MSGPACK_USERDATA)) {
     luaL_setfuncs(L, msgpack_metafuncs, 0);
     luaL_newlib(L, packers);
