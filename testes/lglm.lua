@@ -29,6 +29,9 @@ do
   assert(vec({1, 2, 3}) == vec3(1, 2, 3))
   assert(vec3(true, false, nil) == vec3(1, 0, 0))
   assert(ivec3(1.7, -1.7, 2.2) == vec3(1, -1, 2))
+  -- int vectors hold no NaN or infinity: NaN gives 0, the infinities +-2^31
+  assert(ivec3(0/0, math.huge, -math.huge) == vec3(0, 2^31, -2^31))
+  assert(ivec2(-0/0, -1e-3) == vec2(0, 0) and ivec4(2.9) == vec4(2))
   assert(bvec3(0, 2, -1) == vec3(0, 1, 1))
   check("unexpected", vec3, 1, 2)
   assert(vec(1) == vec3(1, 1, 1))

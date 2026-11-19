@@ -2085,6 +2085,32 @@ CGLM_INLINE int glm_f2i(float f) {
   return (f > 0.0f) ? 2147483647 : (f < 0.0f) ? (-2147483647 - 1) : 0;
 }
 
+/* lowest float that fits in an int32_t (-2^31) and the first above it that does not (2^31) */
+#define GLM_F2I_LOWEST (-2147483648.0f)
+#define GLM_F2I_OVERFLOW_POS 2147483648.0f
+
+/*!
+ * @brief truncf for int vectors (as LuaGLM): NaN gives 0 and the infinities
+ *        the int32 limits as floats; +Inf gives 2^31 so that negation stays
+ *        symmetric (convert with glm_f2i, not a cast).
+ */
+CGLM_INLINE float glm_ftofi(float x) {
+  if (x != x)
+    return 0.0f;
+  if (x == INFINITY)
+    return GLM_F2I_OVERFLOW_POS;
+  if (x == -INFINITY)
+    return GLM_F2I_LOWEST;
+  return truncf(x);
+}
+
+CGLM_INLINE void glm_ivec4f_trunc(vec4 v, vec4 dest) {
+  dest[0] = glm_ftofi(v[0]);
+  dest[1] = glm_ftofi(v[1]);
+  dest[2] = glm_ftofi(v[2]);
+  dest[3] = glm_ftofi(v[3]);
+}
+
 CGLM_INLINE void glm_ivec4f(vec4 v, ivec4 dest) {
   dest[0] = glm_f2i(v[0]);
   dest[1] = glm_f2i(v[1]);

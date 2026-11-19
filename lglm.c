@@ -1159,7 +1159,7 @@ static int glm_createVector(lua_State *L, int desired) {
 static int glm_createVectorInt(lua_State *L, int desired) {
   vec4 v;
   int len = glm_constructVector(L, desired, v);
-  glm_pushvid(vvaltag(len), glm_vec4_trunc, v);
+  glm_pushvid(vvaltag(len), glm_ivec4f_trunc, v);
   return 1;
 }
 
