@@ -268,9 +268,20 @@ static int math_frexp (lua_State *L) {
 }
 
 
+/* an exponent argument, clamped to 'int' (beyond it the result saturates anyway) */
+static int checkexp (lua_State *L, int arg) {
+  lua_Integer e = luaL_checkinteger(L, arg);
+  if (e > INT_MAX)
+    return INT_MAX;
+  if (e < INT_MIN)
+    return INT_MIN;
+  return (int)e;
+}
+
+
 static int math_ldexp (lua_State *L) {
   lua_Number x = luaL_checknumber(L, 1);
-  int ep = (int)luaL_checkinteger(L, 2);
+  int ep = checkexp(L, 2);
   lua_pushnumber(L, l_mathop(ldexp)(x, ep));
   return 1;
 }
@@ -743,6 +754,15 @@ static int math_log10 (lua_State *L) {
   return 1;
 }
 
+#endif
+/* }================================================================== */
+
+
+/*
+** {==================================================================
+** C99 functions (LUA_C99_MATHLIB)
+** ===================================================================
+*/
 #if defined(LUA_C99_MATHLIB)
 static int math_asinh (lua_State *L) {
   lua_pushnumber(L, l_mathop(asinh)(luaL_checknumber(L, 1)));
@@ -820,7 +840,7 @@ static int math_isnan (lua_State *L) {
 }
 
 static int math_isnormal (lua_State *L) {
-  lua_pushboolean(L,isnormal(luaL_checknumber(L, 1)));
+  lua_pushboolean(L, isnormal(luaL_checknumber(L, 1)));
   return 1;
 }
 
@@ -860,7 +880,7 @@ static int math_round (lua_State *L) {
 }
 
 static int math_scalbn (lua_State *L) {
-  lua_pushnumber(L, l_mathop(scalbn)(luaL_checknumber(L, 1), (int)luaL_checkinteger(L, 2)));
+  lua_pushnumber(L, l_mathop(scalbn)(luaL_checknumber(L, 1), checkexp(L, 2)));
   return 1;
 }
 
@@ -868,7 +888,6 @@ static int math_trunc (lua_State *L) {
   lua_pushnumber(L, l_mathop(trunc)(luaL_checknumber(L, 1)));
   return 1;
 }
-#endif  /* LUA_C99_MATHLIB */
 #endif
 /* }================================================================== */
 
@@ -905,6 +924,7 @@ static const luaL_Reg mathlib[] = {
   {"tanh", math_tanh},
   {"pow", math_pow},
   {"log10", math_log10},
+#endif
 #if defined(LUA_C99_MATHLIB)
   { "asinh", math_asinh },
   { "acosh", math_acosh },
@@ -931,7 +951,6 @@ static const luaL_Reg mathlib[] = {
   { "round", math_round },
   { "scalbn", math_scalbn },
   { "trunc", math_trunc },
-#endif
 #endif
 #if defined(GRIT_COMPAT_GLM)
   /* grit-lua compatibility */
@@ -966,8 +985,10 @@ LUAMOD_API int luaopen_math (lua_State *L) {
   lua_pushinteger(L, LUA_MININTEGER);
   lua_setfield(L, -2, "mininteger");
 #if defined(LUA_C99_MATHLIB)
-  lua_pushnumber(L, LUA_NUMBER_EPS); lua_setfield(L, -2, "eps");
-  lua_pushnumber(L, (lua_Number)FLT_EPSILON); lua_setfield(L, -2, "feps");
+  lua_pushnumber(L, LUA_NUMBER_EPS);
+  lua_setfield(L, -2, "eps");
+  lua_pushnumber(L, (lua_Number)FLT_EPSILON);
+  lua_setfield(L, -2, "feps");
 #endif
   setrandfunc(L);
 #if defined(GRIT_POWER_FASTCALL)

@@ -816,23 +816,11 @@ static Proto *addprototype (LexState *ls) {
 ** are in use at that time.
 
 */
-#if defined(GRIT_POWER_DEFER)
-static void codeclosure (LexState *ls, expdesc *v, int deferred) {
-  FuncState *fs = ls->fs->prev;
-  int pc = deferred ? luaK_codeABC(fs, OP_DEFER, 0, 0, 0) : -1;
-  init_exp(v, VRELOC, luaK_codeABx(fs, OP_CLOSURE, 0, fs->np - 1));
-  luaK_exp2nextreg(fs, v);  /* fix it at the last register */
-  if (deferred) {
-    SETARG_A(fs->f->code[pc], v->u.info);
-  }
-}
-#else
 static void codeclosure (LexState *ls, expdesc *v) {
   FuncState *fs = ls->fs->prev;
   init_exp(v, VRELOC, luaK_codeABx(fs, OP_CLOSURE, 0, fs->np - 1));
   luaK_exp2nextreg(fs, v);  /* fix it at the last register */
 }
-#endif
 
 
 static void open_func (LexState *ls, FuncState *fs, BlockCnt *bl) {
@@ -1309,11 +1297,7 @@ static void body (LexState *ls, expdesc *e, int ismethod, int line) {
   statlist(ls);
   new_fs.f->lastlinedefined = ls->linenumber;
   check_match(ls, TK_END, TK_FUNCTION, line);
-#if defined(GRIT_POWER_DEFER)
-  codeclosure(ls, e, 0);
-#else
   codeclosure(ls, e);
-#endif
   close_func(ls);
 }
 
@@ -1340,11 +1324,7 @@ static void simplebody (LexState *ls, expdesc *e, int line) {
   else
     luaK_ret(&new_fs, luaK_exp2anyreg(&new_fs, &v), 1);
   new_fs.f->lastlinedefined = ls->lastline;
-#if defined(GRIT_POWER_DEFER)
-  codeclosure(ls, e, 0);
-#else
   codeclosure(ls, e);
-#endif
   close_func(ls);
 }
 #endif
@@ -1361,7 +1341,9 @@ static void body_noparms (LexState *ls, expdesc *e, int line, int deferred) {
   statlist(ls);
   new_fs.f->lastlinedefined = ls->linenumber;
   check_match(ls, TK_END, TK_FUNCTION, line);
-  codeclosure(ls, e, deferred);
+  codeclosure(ls, e);
+  if (deferred)  /* mark the closure's register as deferred */
+    luaK_codeABC(ls->fs->prev, OP_DEFER, e->u.info, 0, 0);
   close_func(ls);
 }
 #endif
@@ -1396,13 +1378,18 @@ static const struct {
 };
 
 
+/*
+** A bare name matches any entry by its function name, so a local alias
+** ('local sqrt = math.sqrt') is fast too; the VM checks that the called
+** value really is the library function.
+*/
 static int fastid (TString *first, TString *second) {
   size_t i;
   if (first == NULL)
     return -1;
   for (i = 0; i < sizeof(fastnames) / sizeof(fastnames[0]); i++) {
     if (second == NULL) {
-      if (fastnames[i].space == NULL && strcmp(getstr(first), fastnames[i].name) == 0)
+      if (strcmp(getstr(first), fastnames[i].name) == 0)
         return fastnames[i].id;
     }
     else if (fastnames[i].space != NULL && strcmp(getstr(first), fastnames[i].space) == 0 && strcmp(getstr(second), fastnames[i].name) == 0)
@@ -1631,23 +1618,21 @@ static void ifexpr (LexState *ls, expdesc *v) {
 
 #if defined(GRIT_POWER_INTERP)
 /*
-** Code one interpolated expression as ("%s"):format(expr), its result
-** in the next free register. '%s' converts any value as 'tostring' does,
-** without depending on the global 'tostring'.
+** Code one interpolated expression into the next free register, followed
+** by OP_TOSTRING unless it is a string constant. OP_TOSTRING converts any
+** value as 'tostring' does, without depending on any global.
 */
 static void interpvalue (LexState *ls, int line) {
   FuncState *fs = ls->fs;
-  expdesc f, key, arg;
-  int base;
-  codestring(&f, luaX_newstring(ls, "%s", 2));
-  codestring(&key, luaX_newstring(ls, "format", 6));
-  luaK_self(fs, &f, &key);
-  base = f.u.info;
+  expdesc arg;
+  int isstring;
   expr(ls, &arg);
+  isstring = (arg.k == VKSTR);
   luaK_exp2nextreg(fs, &arg);
-  luaK_codeABC(fs, OP_CALL, base, 3, 2);
-  luaK_fixline(fs, line);
-  fs->freereg = cast_byte(base + 1);
+  if (!isstring) {  /* convert it in place, as 'tostring' */
+    luaK_codeABC(fs, OP_TOSTRING, arg.u.info, 0, 0);
+    luaK_fixline(fs, line);
+  }
 }
 
 
@@ -1947,31 +1932,10 @@ static void check_conflict (LexState *ls, struct LHS_assign *lh, expdesc *v) {
 #if defined(GRIT_POWER_INTABLE) || defined(GRIT_POWER_COMPOUND) || defined(GRIT_POWER_COALESCE)
 static void getindexnofree (FuncState *fs, expdesc *v) {
   /* get the value from a table without freeing the table/key registers */
-  switch (v->k) {
-    case VINDEXED: {
-      v->u.info = luaK_codeABC(fs, OP_GETTABLE, 0, v->u.ind.t, v->u.ind.idx);
-      v->k = VRELOC;
-      break;
-    }
-    case VINDEXUP: {
-      v->u.info = luaK_codeABC(fs, OP_GETTABUP, 0, v->u.ind.t, v->u.ind.idx);
-      v->k = VRELOC;
-      break;
-    }
-    case VINDEXI: {
-      v->u.info = luaK_codeABC(fs, OP_GETI, 0, v->u.ind.t, v->u.ind.idx);
-      v->k = VRELOC;
-      break;
-    }
-    case VINDEXSTR: {
-      v->u.info = luaK_codeABC(fs, OP_GETFIELD, 0, v->u.ind.t, v->u.ind.idx);
-      v->k = VRELOC;
-      break;
-    }
-    default:
-      lua_assert(0);
-      break;
-  }
+  lu_byte freereg = fs->freereg;
+  lua_assert(vkisindexed(v->k));
+  luaK_dischargevars(fs, v);
+  fs->freereg = freereg;
 }
 #endif
 
@@ -2556,29 +2520,31 @@ static void localstat (LexState *ls) {
   } while (testnext(ls, ','));
 #if defined(GRIT_POWER_INTABLE)
   if (testnext(ls, TK_IN)) {
-    int regs = fs->freereg;
     int vars = fs->nactvar;
-    int fromvar;
-    (void)regs;  /* only read by an assertion ('UNUSED' would clear it) */
+    int fromvar = -1;  /* hidden "(in)" variable, if the table needs one */
+    int treg;
     luaK_reserveregs(fs, nvars);
     suffixedexp(ls, &e);
     adjustlocalvars(ls, nvars);
-    new_localvarliteral(ls, "(in)");
-    luaK_exp2nextreg(fs, &e);
-    fromvar = fs->nactvar;
-    adjustlocalvars(ls, 1);
-    luaK_setoneret(fs, &e);  /* close last expression */
+    if (e.k == VLOCAL)  /* already a local: index it in its own register */
+      treg = e.u.var.ridx;
+    else {  /* a hidden local, so that indexing never frees its register */
+      new_localvarliteral(ls, "(in)");
+      luaK_exp2nextreg(fs, &e);
+      fromvar = fs->nactvar;
+      adjustlocalvars(ls, 1);
+      treg = fs->freereg - 1;
+    }
     for (nexps = 0; nexps < nvars; nexps++) {
       expdesc v, key;
-      TString *key_str = getlocalvardesc(fs, vars + nexps)->vd.name;
-      init_exp(&e, VNONRELOC, fs->freereg - 1);
-      codestring(&key, key_str);
+      init_exp(&e, VNONRELOC, treg);
+      codestring(&key, getlocalvardesc(fs, vars + nexps)->vd.name);
       luaK_indexed(fs, &e, &key);
       init_var(fs, &v, vars + nexps);
-      lua_assert(v.u.var.ridx == regs + nexps);
       luaK_storevar(fs, &v, &e);
     }
-    removevars(fs, fromvar);
+    if (fromvar >= 0)
+      removevars(fs, fromvar);
     checktoclose(fs, toclose);
     return;
   }
@@ -2757,7 +2723,7 @@ static BinOpr getcompoundopr (int op) {
     case TK_SHREQ: return OPR_SHR;
     case TK_BANDEQ: return OPR_BAND;
     case TK_BOREQ: return OPR_BOR;
-    case TK_BXOREQ: return OPR_BXOR;
+    case TK_POWEQ: return OPR_POW;
     default: return OPR_NOBINOPR;
   }
 }

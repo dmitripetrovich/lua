@@ -19,14 +19,26 @@ extern "C++" {
 #endif
 
 #include "lmsgpack.h"
+#include "../lcodec.h"
 
 #if LUA_VERSION_NUM < 504
   #error unsupported Lua version
 #endif
 
 #if !defined(MP_MAX_NESTING)
-  #define MP_MAX_NESTING 16
+  #define MP_MAX_NESTING 32
 #endif
+
+#if !defined(MP_MAX_NESTING_LIMIT)
+  #define MP_MAX_NESTING_LIMIT 200
+#endif
+
+#if !defined(MP_DECODE_DEPTH)
+  #define MP_DECODE_DEPTH LMSGPACK_DEPTH_LIMIT
+#endif
+
+#define MP_OPT_MAX_DEPTH (-1)
+#define MP_OPT_DECODE_DEPTH (-2)
 
 #if !defined(MP_TABLE_CUTOFF)
   #define MP_TABLE_CUTOFF 16
@@ -53,7 +65,6 @@ extern "C++" {
 #define mp_checkstack(L, sz) luaL_checkstack((L), (sz), "too many (nested) values in encoded msgpack")
 
 #define MP_MAX_SIZET (~mp_cast(size_t, 0))
-#define MP_MAX_LUAINDEX (sizeof(size_t) < sizeof(lua_Integer) ? MP_MAX_SIZET : mp_cast(size_t, LUA_MAXINTEGER))
 
 #define LUA_MSGPACK_META_MTYPE "__ext"
 #define LUA_MSGPACK_META_ENCODE "__pack"
@@ -111,6 +122,9 @@ extern "C++" {
 
 typedef struct lua_msgpack {
   lua_Integer flags;
+  size_t committed;
+  int depth;
+  int slot;
   lmsgpack_Writer w;
 } lua_msgpack;
 
@@ -118,9 +132,6 @@ typedef struct lua_msgpack {
 
 #define LUA_MSGPACK_REG_OPTIONS "lua_msgpack_flags"
 #define LUA_MSGPACK_REG_EXT "lua_msgpack_meta"
-
-#define MP_STRINGIFY_(x) #x
-#define MP_STRINGIFY(x) MP_STRINGIFY_(x)
 
 #define mp_is_packing(ud) (((ud)->flags & MP_MODE) == MP_PACKING)
 
@@ -136,6 +147,30 @@ static lua_Integer mp_flags (lua_State *L) {
   if (lua_type(L, lua_upvalueindex(1)) == LUA_TNUMBER)
     return lua_tointeger(L, lua_upvalueindex(1));
   return mp_getregi(L, LUA_MSGPACK_REG_OPTIONS, MP_DEFAULT);
+}
+
+static int mp_encdepth (lua_State *L) {
+  if (lua_type(L, lua_upvalueindex(2)) == LUA_TNUMBER)
+    return mp_cast(int, lua_tointeger(L, lua_upvalueindex(2)));
+  return mp_cast(int, mp_getregi(L, "lua_msgpack_depth", MP_MAX_NESTING));
+}
+
+static int mp_decdepth (lua_State *L) {
+  if (lua_type(L, lua_upvalueindex(3)) == LUA_TNUMBER)
+    return mp_cast(int, lua_tointeger(L, lua_upvalueindex(3)));
+  return mp_cast(int, mp_getregi(L, "lua_msgpack_decode_depth", MP_DECODE_DEPTH));
+}
+
+static int mp_depthvalue (lua_State *L, int idx, lua_Integer opt) {
+  lua_Integer v;
+  if (!lua_isinteger(L, idx))
+    luaL_error(L, "msgpack option '%s' takes an integer", (opt == MP_OPT_MAX_DEPTH) ? "max_depth" : "decode_max_depth");
+  v = lua_tointeger(L, idx);
+  if (opt == MP_OPT_MAX_DEPTH && (v <= 0 || v > MP_MAX_NESTING_LIMIT))
+    luaL_error(L, "invalid encoder depth");
+  else if (opt == MP_OPT_DECODE_DEPTH && (v <= 0 || v > LMSGPACK_DEPTH_LIMIT))
+    luaL_error(L, "invalid decoder depth");
+  return mp_cast(int, v);
 }
 
 static void mp_setregi (lua_State *L, const char *key, lua_Integer value) {
@@ -169,20 +204,6 @@ static int typetoindex (lua_State *L, const char *name) {
   if (found == -1 && strcmp("lightuserdata", name) == 0)
     found = LUA_TLIGHTUSERDATA;
   return found;
-}
-
-static size_t mp_optsizet (lua_State *L, int arg, size_t def) {
-  if (lua_isnoneornil(L, arg))
-    return def;
-  else if (lua_isinteger(L, arg)) {
-    const lua_Integer i = lua_tointeger(L, arg);
-    if (i >= 0 && mp_cast(size_t, i) <= MP_MAX_LUAINDEX)
-      return mp_cast(size_t, i);
-    luaL_argerror(L, arg, "invalid integer argument");
-    return 0;
-  }
-  luaL_argerror(L, arg, lua_pushfstring(L, "integer expected"));
-  return 0;
 }
 
 #if LUA_VEC_TYPE == LUA_FLOAT_FLOAT
@@ -225,10 +246,6 @@ static void mp_pushnull (lua_State *L) {
   lua_pushlightuserdata(L, mp_nullptr);
 }
 
-static int mp_is_null (lua_State *L, int idx) {
-  return lua_type(L, idx) == LUA_TLIGHTUSERDATA && lua_touserdata(L, idx) == mp_nullptr;
-}
-
 static void mp_replace_null (lua_State *L) {
   if (lua_isnil(L, -1)) {
     lua_pop(L, 1);
@@ -240,6 +257,7 @@ typedef struct mp_encoder {
   lua_State *L;
   lmsgpack_Writer *w;
   lua_Integer flags;
+  int maxdepth;
   int box;
   int ext;
   int fetched;
@@ -254,6 +272,7 @@ static int mp_boxreserve (lmsgpack_Writer *w, size_t need) {
     luaL_error(L, "buffer too large");
   if (size < w->len + need)
     size = w->len + need;
+  luaL_checkstack(L, 1, mp_nullptr);
   b = mp_pcast(char *, lua_newuserdatauv(L, size, 0));
   memcpy(b, w->buf, w->len);
   lua_replace(L, e->box);
@@ -262,18 +281,20 @@ static int mp_boxreserve (lmsgpack_Writer *w, size_t need) {
   return LMSGPACK_OK;
 }
 
-static int mp_heapreserve (lmsgpack_Writer *w, size_t need) {
+static int mp_packreserve (lmsgpack_Writer *w, size_t need) {
+  lua_msgpack *ud = mp_pcast(lua_msgpack *, mp_pcast(char *, w) - offsetof(lua_msgpack, w));
   lua_State *L = mp_pcast(lua_State *, w->ud);
-  void *ud;
-  lua_Alloc f = lua_getallocf(L, &ud);
   size_t size = w->cap * 2;
   char *b;
   if (MP_MAX_SIZET - need < w->len)
     luaL_error(L, "buffer too large");
   if (size < w->len + need)
     size = w->len + need;
-  if ((b = mp_pcast(char *, f(ud, w->buf, w->cap, size))) == mp_nullptr)
-    luaL_error(L, "unable to allocate buffer");
+  luaL_checkstack(L, 1, mp_nullptr);
+  b = mp_pcast(char *, lua_newuserdatauv(L, size, 0));
+  if (w->len > 0)
+    memcpy(b, w->buf, w->len);
+  lua_setiuservalue(L, ud->slot, 1);
   w->buf = b;
   w->cap = size;
   return LMSGPACK_OK;
@@ -283,6 +304,7 @@ static void mp_encoder_init (lua_State *L, mp_encoder *e, lmsgpack_Writer *w, ch
   e->L = L;
   e->w = w;
   e->flags = mp_flags(L) & ~MP_MASK_RUNTIME;
+  e->maxdepth = mp_encdepth(L);
   e->fetched = 0;
   lua_pushnil(L);
   e->box = lua_gettop(L);
@@ -354,11 +376,25 @@ static void mp_encode_vector (mp_encoder *e, int idx) {
   lua_Float4 v;
   int type, size;
   switch (lua_tofloat4(e->L, idx, V_NOTABLE, &v)) {
-    case LUA_VVECTOR2: type = MSGPACK_EXT_VECTOR2; size = 2; break;
-    case LUA_VVECTOR3: type = MSGPACK_EXT_VECTOR3; size = 3; break;
-    case LUA_VVECTOR4: type = MSGPACK_EXT_VECTOR4; size = 4; break;
-    case LUA_VQUAT: type = MSGPACK_EXT_QUATERNION; size = 4; break;
-    default: luaL_error(e->L, "invalid vector type"); return;
+    case LUA_VVECTOR2:
+      type = MSGPACK_EXT_VECTOR2;
+      size = 2;
+      break;
+    case LUA_VVECTOR3:
+      type = MSGPACK_EXT_VECTOR3;
+      size = 3;
+      break;
+    case LUA_VVECTOR4:
+      type = MSGPACK_EXT_VECTOR4;
+      size = 4;
+      break;
+    case LUA_VQUAT:
+      type = MSGPACK_EXT_QUATERNION;
+      size = 4;
+      break;
+    default:
+      luaL_error(e->L, "invalid vector type");
+      return;
   }
   mp_storevec(&buf[0 * sizeof(lua_VecF)], v.x);
   mp_storevec(&buf[1 * sizeof(lua_VecF)], v.y);
@@ -477,52 +513,33 @@ static int mp_encode_registered_lua_type (mp_encoder *e, int idx, int type) {
 }
 
 static int mp_table_is_an_array (lua_State *L, int idx, lua_Integer flags, size_t *array_length, size_t *pairs) {
-  size_t count = 0, max = 0, arraylen = 0, entries = 0;
-  int isarray = 1;
-  const int stacktop = lua_gettop(L);
+  size_t max;
+  lcodec_Scan scan;
   mp_checkstack(L, 2);
-  lua_pushnil(L);
-  while (lua_next(L, idx)) {
-    lua_Integer n;
-#if !defined(LUA_MSGPACK_COMPAT)
-    size_t keylen = 0;
-    const char *key = mp_nullptr;
+#if defined(LUA_MSGPACK_COMPAT)
+  lcodec_scantable(L, idx, 0, 1, &scan);
+#else
+  lcodec_scantable(L, idx, 1, 1, &scan);
 #endif
-    lua_checkhook(L, 1);
-    entries++;
-    if (isarray && lua_isinteger(L, -2) && ((n = lua_tointeger(L, -2)) >= 1 && mp_cast(size_t, n) <= MP_MAX_LUAINDEX)) {
-      count++;
-      max = mp_cast(size_t, n) > max ? mp_cast(size_t, n) : max;
-    }
-#if !defined(LUA_MSGPACK_COMPAT)
-    else if (isarray && lua_type(L, -2) == LUA_TSTRING && lua_isinteger(L, -1) && (n = lua_tointeger(L, -1), (n >= 1 && mp_cast(size_t, n) <= MP_MAX_LUAINDEX)) && (key = lua_tolstring(L, -2, &keylen), key != mp_nullptr) && keylen == 1 && key[0] == 'n') {
-      arraylen = mp_cast(size_t, n);
-    }
-#endif
-    else
-      isarray = 0;
-    lua_pop(L, 1);
-  }
-  lua_settop(L, stacktop);
-  *pairs = entries;
-  if (!isarray)
+  *pairs = scan.entries;
+  if (!scan.isarray)
     return 0;
-  if (arraylen > 0 && arraylen <= 2 * count + MP_TABLE_CUTOFF)
-    max = arraylen > max ? arraylen : max;
-  else if (arraylen > 0)
+  max = scan.max;
+  if (scan.nfield > 0 && scan.nfield <= 2 * scan.count + MP_TABLE_CUTOFF)
+    max = scan.nfield > max ? scan.nfield : max;
+  else if (scan.nfield > 0)
     return 0;
   *array_length = max;
-  if (max == count)
+  if (max == scan.count)
     return max > 0 || (flags & MP_EMPTY_AS_ARRAY);
   else if (flags & MP_ARRAY_WITH_HOLES)
-    return ((max <= MP_TABLE_CUTOFF) || max <= arraylen || (count >= (max >> 1)));
+    return ((max <= MP_TABLE_CUTOFF) || max <= scan.nfield || (scan.count >= (max >> 1)));
   return 0;
 }
 
 static void mp_encode_array (mp_encoder *e, int idx, int level, size_t array_length) {
   lua_State *L = e->L;
   size_t j;
-  luaL_checktype(L, idx, LUA_TTABLE);
   if (lmsgpack_write_array(e->w, array_length) != 0)
     mp_toolarge(e);
   mp_checkstack(L, 1);
@@ -549,7 +566,6 @@ static size_t mp_count_pairs (lua_State *L, int idx) {
 static void mp_encode_map (mp_encoder *e, int idx, int level, size_t len) {
   lua_State *L = e->L;
   size_t written = 0;
-  luaL_checktype(L, idx, LUA_TTABLE);
   if (lmsgpack_write_map(e->w, len) != 0)
     mp_toolarge(e);
   mp_checkstack(L, 3);
@@ -569,7 +585,6 @@ static void mp_encode_map (mp_encoder *e, int idx, int level, size_t len) {
 
 static void mp_encode_table (mp_encoder *e, int idx, int level) {
   size_t array_length = 0, pairs = 0;
-  luaL_checktype(e->L, idx, LUA_TTABLE);
   if ((e->flags & MP_ARRAY_AS_MAP) == MP_ARRAY_AS_MAP)
     mp_encode_map(e, idx, level, mp_count_pairs(e->L, idx));
   else if (mp_table_is_an_array(e->L, idx, e->flags, &array_length, &pairs))
@@ -616,29 +631,37 @@ static void mp_encode_extended (mp_encoder *e, int idx) {
 
 static void mp_encode_any (mp_encoder *e, int idx, int level) {
   int t = lua_type(e->L, idx);
-  if (t == LUA_TTABLE && level >= MP_MAX_NESTING) {
-#if defined(LUA_MSGPACK_ERROR_NESTING)
-    luaL_error(e->L, "maximum table nesting depth (%d) exceeded", MP_MAX_NESTING);
-    return;
-#else
-    t = LUA_TNIL;
-#endif
-  }
+  if (t == LUA_TTABLE && level >= e->maxdepth)
+    luaL_error(e->L, "maximum table nesting depth exceeded");
   switch (t) {
-    case LUA_TNIL: lmsgpack_write_nil(e->w); break;
-    case LUA_TBOOLEAN: lmsgpack_write_bool(e->w, lua_toboolean(e->L, idx)); break;
-    case LUA_TNUMBER: mp_encode_number(e, idx); break;
-    case LUA_TSTRING: mp_encode_string(e, idx); break;
-    case LUA_TTABLE: mp_encode_extended_table(e, idx, level); break;
+    case LUA_TNIL:
+      lmsgpack_write_nil(e->w);
+      break;
+    case LUA_TBOOLEAN:
+      lmsgpack_write_bool(e->w, lua_toboolean(e->L, idx));
+      break;
+    case LUA_TNUMBER:
+      mp_encode_number(e, idx);
+      break;
+    case LUA_TSTRING:
+      mp_encode_string(e, idx);
+      break;
+    case LUA_TTABLE:
+      mp_encode_extended_table(e, idx, level);
+      break;
     case LUA_TLIGHTUSERDATA: {
-      if (mp_is_null(e->L, idx))
+      if (lcodec_isnull(e->L, idx))
         lmsgpack_write_nil(e->w);
       else
         mp_encode_extended(e, idx);
       break;
     }
-    case LUA_TVECTOR: mp_encode_vector(e, idx); break;
-    default: mp_encode_extended(e, idx); break;
+    case LUA_TVECTOR:
+      mp_encode_vector(e, idx);
+      break;
+    default:
+      mp_encode_extended(e, idx);
+      break;
   }
 }
 
@@ -648,6 +671,7 @@ typedef struct mp_decoder {
   size_t len;
   size_t off;
   lua_Integer flags;
+  int maxdepth;
 } mp_decoder;
 
 static void mp_decode (mp_decoder *d);
@@ -667,10 +691,18 @@ static void mp_decode_vector (lua_State *L, const lmsgpack_Value *o) {
   if (count > 3)
     v.w = mp_loadvec(p + 3 * sizeof(lua_VecF));
   switch (o->via.ext.type) {
-    case MSGPACK_EXT_VECTOR2: variant = LUA_VVECTOR2; break;
-    case MSGPACK_EXT_VECTOR3: variant = LUA_VVECTOR3; break;
-    case MSGPACK_EXT_VECTOR4: variant = LUA_VVECTOR4; break;
-    default: variant = LUA_VQUAT; break;
+    case MSGPACK_EXT_VECTOR2:
+      variant = LUA_VVECTOR2;
+      break;
+    case MSGPACK_EXT_VECTOR3:
+      variant = LUA_VVECTOR3;
+      break;
+    case MSGPACK_EXT_VECTOR4:
+      variant = LUA_VVECTOR4;
+      break;
+    default:
+      variant = LUA_VQUAT;
+      break;
   }
   lua_pushfloat4(L, v, variant);
 }
@@ -741,7 +773,7 @@ static void mp_decode_map (mp_decoder *d, uint32_t size) {
     }
     else {
       lua_pop(L, 1);
-      lmsgpack_check(d->s, d->len, &d->off);
+      lmsgpack_checkdepth(d->s, d->len, &d->off, d->maxdepth);
     }
   }
 }
@@ -751,8 +783,12 @@ static void mp_decode (mp_decoder *d) {
   lmsgpack_Value o;
   lmsgpack_read(d->s, d->len, &d->off, &o);
   switch (o.type) {
-    case LMSGPACK_NIL: lua_pushnil(L); break;
-    case LMSGPACK_BOOLEAN: lua_pushboolean(L, o.via.boolean); break;
+    case LMSGPACK_NIL:
+      lua_pushnil(L);
+      break;
+    case LMSGPACK_BOOLEAN:
+      lua_pushboolean(L, o.via.boolean);
+      break;
     case LMSGPACK_POSITIVE_INTEGER: {
       if (o.via.u64 > mp_cast(lua_Unsigned, LUA_MAXINTEGER))
         lua_pushnumber(L, mp_cast(lua_Number, o.via.u64));
@@ -770,18 +806,34 @@ static void mp_decode (mp_decoder *d) {
       lua_pushinteger(L, mp_cast(lua_Integer, o.via.i64));
       break;
     }
-    case LMSGPACK_FLOAT32: lua_pushnumber(L, mp_cast(lua_Number, mp_cast(float, o.via.f64))); break;
-    case LMSGPACK_FLOAT64: lua_pushnumber(L, mp_cast(lua_Number, o.via.f64)); break;
-    case LMSGPACK_STR: lua_pushlstring(L, o.via.str.ptr, o.via.str.size); break;
-    case LMSGPACK_BIN: lua_pushlstring(L, o.via.bin.ptr, o.via.bin.size); break;
-    case LMSGPACK_ARRAY: mp_decode_array(d, o.via.array.size); break;
-    case LMSGPACK_MAP: mp_decode_map(d, o.via.map.size); break;
-    case LMSGPACK_EXT: mp_decode_ext(L, &o); break;
-    default: lua_pushnil(L); break;
+    case LMSGPACK_FLOAT32:
+      lua_pushnumber(L, mp_cast(lua_Number, mp_cast(float, o.via.f64)));
+      break;
+    case LMSGPACK_FLOAT64:
+      lua_pushnumber(L, mp_cast(lua_Number, o.via.f64));
+      break;
+    case LMSGPACK_STR:
+      lua_pushlstring(L, o.via.str.ptr, o.via.str.size);
+      break;
+    case LMSGPACK_BIN:
+      lua_pushlstring(L, o.via.bin.ptr, o.via.bin.size);
+      break;
+    case LMSGPACK_ARRAY:
+      mp_decode_array(d, o.via.array.size);
+      break;
+    case LMSGPACK_MAP:
+      mp_decode_map(d, o.via.map.size);
+      break;
+    case LMSGPACK_EXT:
+      mp_decode_ext(L, &o);
+      break;
+    default:
+      lua_pushnil(L);
+      break;
   }
 }
 
-static int mp_decode_objects (lua_State *L, lua_Integer flags, const char *s, size_t len, size_t *offset, int limit, const char **error, int *err_code) {
+static int mp_decode_objects (lua_State *L, lua_Integer flags, int maxdepth, const char *s, size_t len, size_t *offset, int limit, const char **error, int *err_code) {
   int done = 0;
   int object_count = 0;
   int err_res = LMSGPACK_OK;
@@ -793,7 +845,8 @@ static int mp_decode_objects (lua_State *L, lua_Integer flags, const char *s, si
     d.len = len;
     d.off = *offset;
     d.flags = flags;
-    switch ((err_res = lmsgpack_check(s, len, offset))) {
+    d.maxdepth = maxdepth;
+    switch ((err_res = lmsgpack_checkdepth(s, len, offset, maxdepth))) {
       case LMSGPACK_OK:
         mp_checkstack(L, 1);
         mp_decode(&d);
@@ -807,7 +860,7 @@ static int mp_decode_objects (lua_State *L, lua_Integer flags, const char *s, si
         err_msg = "msgpack format data is invalid";
         break;
       case LMSGPACK_ERROR_DEPTH:
-        err_msg = "msgpack data nests too deeply (over " MP_STRINGIFY(LMSGPACK_MAX_DEPTH) " levels) or needs too much memory";
+        err_msg = "msgpack data nests too deeply";
         break;
       default:
         err_msg = "msgpack unknown decoder result";
@@ -819,11 +872,14 @@ static int mp_decode_objects (lua_State *L, lua_Integer flags, const char *s, si
   return (err_msg == mp_nullptr) ? object_count : 0;
 }
 
-static lua_msgpack *mp_packer_create (lua_State *L, lua_Integer flags) {
-  lua_msgpack *ud = mp_pcast(lua_msgpack *, lua_newuserdatauv(L, sizeof(lua_msgpack), 0));
+static lua_msgpack *mp_packer_create (lua_State *L, lua_Integer flags, int depth) {
+  lua_msgpack *ud = mp_pcast(lua_msgpack *, lua_newuserdatauv(L, sizeof(lua_msgpack), 1));
   ud->flags = 0;
-  lmsgpack_writer_initbuffer(&ud->w, mp_nullptr, 0, mp_heapreserve, L);
-  mp_heapreserve(&ud->w, MP_BUFFER_INITSIZE);
+  ud->committed = 0;
+  ud->depth = depth;
+  ud->slot = lua_gettop(L);
+  lmsgpack_writer_initbuffer(&ud->w, mp_nullptr, 0, mp_packreserve, L);
+  mp_packreserve(&ud->w, MP_BUFFER_INITSIZE);
   ud->flags = MP_PACKING | (flags & ~MP_MASK_RUNTIME);
   luaL_setmetatable(L, LUA_MSGPACK_USERDATA);
   return ud;
@@ -832,15 +888,14 @@ static lua_msgpack *mp_packer_create (lua_State *L, lua_Integer flags) {
 static int mp_packer_destroy (lua_State *L, int idx) {
   lua_msgpack *ud = mp_pcast(lua_msgpack *, luaL_checkudata(L, idx, LUA_MSGPACK_USERDATA));
   if (ud->flags & MP_MODE) {
-    if (ud->w.buf != mp_nullptr) {
-      void *aud;
-      lua_Alloc f = lua_getallocf(L, &aud);
-      f(aud, ud->w.buf, ud->w.cap, 0);
-    }
     ud->w.buf = mp_nullptr;
-    ud->w.len = ud->w.cap = 0;
+    ud->w.len = 0;
+    ud->w.cap = 0;
+    ud->committed = 0;
     ud->flags = 0;
     if (lua_checkstack(L, 2)) {
+      lua_pushnil(L);
+      lua_setiuservalue(L, idx, 1);
       lua_pushnil(L);
       lua_setmetatable(L, idx);
     }
@@ -849,20 +904,25 @@ static int mp_packer_destroy (lua_State *L, int idx) {
   return 0;
 }
 
-static void mp_packer_begin (lua_State *L, mp_encoder *e, int input, int *nargs) {
+static lua_msgpack *mp_packer_begin (lua_State *L, mp_encoder *e, int input, int *nargs) {
   lua_msgpack *ud = mp_pcast(lua_msgpack *, luaL_checkudata(L, 1, LUA_MSGPACK_USERDATA));
   if ((*nargs = lua_gettop(L)) < input)
     luaL_argerror(L, 0, "MessagePack pack needs input");
   else if (!mp_is_packing(ud))
     luaL_error(L, "invalid packer UD");
+  ud->w.len = ud->committed;
+  ud->w.status = LMSGPACK_OK;
   ud->w.ud = L;
+  ud->slot = 1;
   e->L = L;
   e->w = &ud->w;
   e->flags = ud->flags;
+  e->maxdepth = ud->depth;
   e->box = 0;
   e->fetched = 0;
   lua_pushnil(L);
   e->ext = lua_gettop(L);
+  return ud;
 }
 
 #define mp_int_packer(NAME, TYPE) static void NAME (mp_encoder *e, int idx) { lmsgpack_write_int(e->w, mp_cast(int64_t, mp_cast(TYPE, luaL_checkinteger(e->L, idx)))); }
@@ -924,122 +984,122 @@ static void mp_pack_bytes (mp_encoder *e, int idx, int (*header) (lmsgpack_Write
   lmsgpack_write_bytes(e->w, s, len);
 }
 
-#define mp_function(NAME, CALL) static int NAME (lua_State *L) { mp_encoder e; int i, nargs; mp_packer_begin(L, &e, 2, &nargs); for (i = 2; i <= nargs; i++) { CALL; } lua_pushvalue(L, 1); return 1; }
-#define mp_function_op(NAME, CALL) static int NAME (lua_State *L) { mp_encoder e; int nargs; mp_packer_begin(L, &e, 1, &nargs); CALL; lua_pushvalue(L, 1); return 1; }
+#define mp_function(NAME, CALL) static int NAME (lua_State *L) { mp_encoder e; int i, nargs; lua_msgpack *ud = mp_packer_begin(L, &e, 2, &nargs); for (i = 2; i <= nargs; i++) { CALL; } ud->committed = ud->w.len; lua_pushvalue(L, 1); return 1; }
+#define mp_function_op(NAME, CALL) static int NAME (lua_State *L) { mp_encoder e; int nargs; lua_msgpack *ud = mp_packer_begin(L, &e, 1, &nargs); CALL; ud->committed = ud->w.len; lua_pushvalue(L, 1); return 1; }
 
-mp_function(luaL_pack_char, mp_pack_char(&e, i))
-mp_function(luaL_pack_signed_char, mp_pack_signed_char(&e, i))
-mp_function(luaL_pack_short, mp_pack_short(&e, i))
-mp_function(luaL_pack_int, mp_pack_int(&e, i))
-mp_function(luaL_pack_long, mp_pack_long(&e, i))
-mp_function(luaL_pack_long_long, mp_pack_long_long(&e, i))
-mp_function(luaL_pack_unsigned_char, mp_pack_unsigned_char(&e, i))
-mp_function(luaL_pack_unsigned_short, mp_pack_unsigned_short(&e, i))
-mp_function(luaL_pack_unsigned_int, mp_pack_unsigned_int(&e, i))
-mp_function(luaL_pack_unsigned_long, mp_pack_unsigned_long(&e, i))
-mp_function(luaL_pack_unsigned_long_long, mp_pack_unsigned_long_long(&e, i))
+mp_function(packer_char, mp_pack_char(&e, i))
+mp_function(packer_signed_char, mp_pack_signed_char(&e, i))
+mp_function(packer_short, mp_pack_short(&e, i))
+mp_function(packer_int, mp_pack_int(&e, i))
+mp_function(packer_long, mp_pack_long(&e, i))
+mp_function(packer_long_long, mp_pack_long_long(&e, i))
+mp_function(packer_unsigned_char, mp_pack_unsigned_char(&e, i))
+mp_function(packer_unsigned_short, mp_pack_unsigned_short(&e, i))
+mp_function(packer_unsigned_int, mp_pack_unsigned_int(&e, i))
+mp_function(packer_unsigned_long, mp_pack_unsigned_long(&e, i))
+mp_function(packer_unsigned_long_long, mp_pack_unsigned_long_long(&e, i))
 
-mp_function(luaL_pack_uint8, mp_pack_uint8(&e, i))
-mp_function(luaL_pack_uint16, mp_pack_uint16(&e, i))
-mp_function(luaL_pack_uint32, mp_pack_uint32(&e, i))
-mp_function(luaL_pack_uint64, mp_pack_uint64(&e, i))
-mp_function(luaL_pack_int8, mp_pack_int8(&e, i))
-mp_function(luaL_pack_int16, mp_pack_int16(&e, i))
-mp_function(luaL_pack_int32, mp_pack_int32(&e, i))
-mp_function(luaL_pack_int64, mp_pack_int64(&e, i))
+mp_function(packer_uint8, mp_pack_uint8(&e, i))
+mp_function(packer_uint16, mp_pack_uint16(&e, i))
+mp_function(packer_uint32, mp_pack_uint32(&e, i))
+mp_function(packer_uint64, mp_pack_uint64(&e, i))
+mp_function(packer_int8, mp_pack_int8(&e, i))
+mp_function(packer_int16, mp_pack_int16(&e, i))
+mp_function(packer_int32, mp_pack_int32(&e, i))
+mp_function(packer_int64, mp_pack_int64(&e, i))
 
-mp_function(luaL_pack_fix_uint8, mp_pack_fix_uint8(&e, i))
-mp_function(luaL_pack_fix_uint16, mp_pack_fix_uint16(&e, i))
-mp_function(luaL_pack_fix_uint32, mp_pack_fix_uint32(&e, i))
-mp_function(luaL_pack_fix_uint64, mp_pack_fix_uint64(&e, i))
-mp_function(luaL_pack_fix_int8, mp_pack_fix_int8(&e, i))
-mp_function(luaL_pack_fix_int16, mp_pack_fix_int16(&e, i))
-mp_function(luaL_pack_fix_int32, mp_pack_fix_int32(&e, i))
-mp_function(luaL_pack_fix_int64, mp_pack_fix_int64(&e, i))
+mp_function(packer_fix_uint8, mp_pack_fix_uint8(&e, i))
+mp_function(packer_fix_uint16, mp_pack_fix_uint16(&e, i))
+mp_function(packer_fix_uint32, mp_pack_fix_uint32(&e, i))
+mp_function(packer_fix_uint64, mp_pack_fix_uint64(&e, i))
+mp_function(packer_fix_int8, mp_pack_fix_int8(&e, i))
+mp_function(packer_fix_int16, mp_pack_fix_int16(&e, i))
+mp_function(packer_fix_int32, mp_pack_fix_int32(&e, i))
+mp_function(packer_fix_int64, mp_pack_fix_int64(&e, i))
 
-mp_function(luaL_pack_signed_int16, mp_pack_signed_int16(&e, i))
-mp_function(luaL_pack_signed_int32, mp_pack_signed_int32(&e, i))
-mp_function(luaL_pack_signed_int64, mp_pack_signed_int64(&e, i))
+mp_function(packer_signed_int16, mp_pack_signed_int16(&e, i))
+mp_function(packer_signed_int32, mp_pack_signed_int32(&e, i))
+mp_function(packer_signed_int64, mp_pack_signed_int64(&e, i))
 
-mp_function(luaL_pack_float, mp_pack_float(&e, i))
-mp_function(luaL_pack_double, mp_pack_double(&e, i))
-mp_function(luaL_pack_integer, { luaL_checkinteger(L, i); mp_encode_integer(&e, i); })
-mp_function(luaL_pack_number, { luaL_checknumber(L, i); mp_encode_number(&e, i); })
-mp_function(luaL_pack_vector, mp_encode_vector(&e, i))
+mp_function(packer_float, mp_pack_float(&e, i))
+mp_function(packer_double, mp_pack_double(&e, i))
+mp_function(packer_integer, { luaL_checkinteger(L, i); mp_encode_integer(&e, i); })
+mp_function(packer_number, { luaL_checknumber(L, i); mp_encode_number(&e, i); })
+mp_function(packer_vector, mp_encode_vector(&e, i))
 
-mp_function_op(luaL_pack_nil, lmsgpack_write_nil(e.w))
-mp_function_op(luaL_pack_true, lmsgpack_write_true(e.w))
-mp_function_op(luaL_pack_false, lmsgpack_write_false(e.w))
-mp_function(luaL_pack_boolean, mp_pack_boolean(&e, i))
+mp_function_op(packer_nil, lmsgpack_write_nil(e.w))
+mp_function_op(packer_true, lmsgpack_write_true(e.w))
+mp_function_op(packer_false, lmsgpack_write_false(e.w))
+mp_function(packer_boolean, mp_pack_boolean(&e, i))
 
-mp_function(luaL_pack_string, mp_pack_bytes(&e, i, lmsgpack_write_str))
-mp_function(luaL_pack_v4, mp_pack_bytes(&e, i, lmsgpack_write_str_compat))
-mp_function(luaL_pack_bin, mp_pack_bytes(&e, i, lmsgpack_write_bin))
-mp_function(luaL_pack_parse_string, { luaL_checklstring(L, i, mp_nullptr); mp_encode_string(&e, i); })
+mp_function(packer_string, mp_pack_bytes(&e, i, lmsgpack_write_str))
+mp_function(packer_v4, mp_pack_bytes(&e, i, lmsgpack_write_str_compat))
+mp_function(packer_bin, mp_pack_bytes(&e, i, lmsgpack_write_bin))
+mp_function(packer_parse_string, { luaL_checklstring(L, i, mp_nullptr); mp_encode_string(&e, i); })
 
-mp_function(luaL_pack_array, mp_encode_array(&e, i, 1, mp_cast(size_t, lua_rawlen(L, i))))
-mp_function(luaL_pack_map, { luaL_checktype(L, i, LUA_TTABLE); mp_encode_map(&e, i, 1, mp_count_pairs(L, i)); })
-mp_function(luaL_pack_parsed_table, mp_encode_extended_table(&e, i, 1))
-mp_function(luaL_pack_unparsed_table, mp_encode_table(&e, i, 1))
-mp_function(luaL_pack_any, mp_encode_any(&e, i, 1))
+mp_function(packer_array, { luaL_checktype(L, i, LUA_TTABLE); mp_encode_array(&e, i, 1, mp_cast(size_t, lua_rawlen(L, i))); })
+mp_function(packer_map, { luaL_checktype(L, i, LUA_TTABLE); mp_encode_map(&e, i, 1, mp_count_pairs(L, i)); })
+mp_function(packer_parsed_table, { luaL_checktype(L, i, LUA_TTABLE); mp_encode_extended_table(&e, i, 1); })
+mp_function(packer_unparsed_table, { luaL_checktype(L, i, LUA_TTABLE); mp_encode_table(&e, i, 1); })
+mp_function(packer_any, mp_encode_any(&e, i, 1))
 
 static const luaL_Reg packers[] = {
-  { "nil", luaL_pack_nil, }, { "null", luaL_pack_nil, },
-  { "boolean", luaL_pack_boolean, },
-  { "string_compat", luaL_pack_v4, },
-  { "_string", luaL_pack_string, },
-  { "string", luaL_pack_parse_string },
-  { "binary", luaL_pack_bin, },
-  { "map", luaL_pack_map, },
-  { "array", luaL_pack_array, },
-  { "table", luaL_pack_parsed_table },
-  { "_table", luaL_pack_unparsed_table },
-  { "unsigned", luaL_pack_unsigned_long_long },
-  { "signed", luaL_pack_long_long },
-  { "integer", luaL_pack_integer },
-  { "float", luaL_pack_float },
-  { "double", luaL_pack_double },
-  { "number", luaL_pack_number },
-  { "any", luaL_pack_any },
-  { "true", luaL_pack_true, }, { "t", luaL_pack_true, },
-  { "false", luaL_pack_false, }, { "f", luaL_pack_false, },
-  { "fix_uint8", luaL_pack_fix_uint8, },
-  { "fix_uint16", luaL_pack_fix_uint16, },
-  { "fix_uint32", luaL_pack_fix_uint32, },
-  { "fix_uint64", luaL_pack_fix_uint64, },
-  { "fix_int8", luaL_pack_fix_int8, },
-  { "fix_int16", luaL_pack_fix_int16, },
-  { "fix_int32", luaL_pack_fix_int32, },
-  { "fix_int64", luaL_pack_fix_int64, },
-  { "uint8", luaL_pack_uint8, },
-  { "uint16", luaL_pack_uint16, },
-  { "uint32", luaL_pack_uint32, },
-  { "uint64", luaL_pack_uint64, },
-  { "int8", luaL_pack_int8, },
-  { "int16", luaL_pack_int16, },
-  { "int32", luaL_pack_int32, },
-  { "int64", luaL_pack_int64, },
-  { "char", luaL_pack_char, },
-  { "signed_char", luaL_pack_signed_char, },
-  { "unsigned_char", luaL_pack_unsigned_char, },
-  { "short", luaL_pack_short, },
-  { "int", luaL_pack_int, },
-  { "long", luaL_pack_long, },
-  { "long_long", luaL_pack_long_long, },
-  { "unsigned_short", luaL_pack_unsigned_short, },
-  { "unsigned_int", luaL_pack_unsigned_int, },
-  { "unsigned_long", luaL_pack_unsigned_long, },
-  { "unsigned_long_long", luaL_pack_unsigned_long_long, },
-  { "signed_int16", luaL_pack_signed_int16, },
-  { "signed_int32", luaL_pack_signed_int32, },
-  { "signed_int64", luaL_pack_signed_int64, },
-  { "vector", luaL_pack_vector, },
+  { "nil", packer_nil, }, { "null", packer_nil, },
+  { "boolean", packer_boolean, },
+  { "string_compat", packer_v4, },
+  { "_string", packer_string, },
+  { "string", packer_parse_string },
+  { "binary", packer_bin, },
+  { "map", packer_map, },
+  { "array", packer_array, },
+  { "table", packer_parsed_table },
+  { "_table", packer_unparsed_table },
+  { "unsigned", packer_unsigned_long_long },
+  { "signed", packer_long_long },
+  { "integer", packer_integer },
+  { "float", packer_float },
+  { "double", packer_double },
+  { "number", packer_number },
+  { "any", packer_any },
+  { "true", packer_true, }, { "t", packer_true, },
+  { "false", packer_false, }, { "f", packer_false, },
+  { "fix_uint8", packer_fix_uint8, },
+  { "fix_uint16", packer_fix_uint16, },
+  { "fix_uint32", packer_fix_uint32, },
+  { "fix_uint64", packer_fix_uint64, },
+  { "fix_int8", packer_fix_int8, },
+  { "fix_int16", packer_fix_int16, },
+  { "fix_int32", packer_fix_int32, },
+  { "fix_int64", packer_fix_int64, },
+  { "uint8", packer_uint8, },
+  { "uint16", packer_uint16, },
+  { "uint32", packer_uint32, },
+  { "uint64", packer_uint64, },
+  { "int8", packer_int8, },
+  { "int16", packer_int16, },
+  { "int32", packer_int32, },
+  { "int64", packer_int64, },
+  { "char", packer_char, },
+  { "signed_char", packer_signed_char, },
+  { "unsigned_char", packer_unsigned_char, },
+  { "short", packer_short, },
+  { "int", packer_int, },
+  { "long", packer_long, },
+  { "long_long", packer_long_long, },
+  { "unsigned_short", packer_unsigned_short, },
+  { "unsigned_int", packer_unsigned_int, },
+  { "unsigned_long", packer_unsigned_long, },
+  { "unsigned_long_long", packer_unsigned_long_long, },
+  { "signed_int16", packer_signed_int16, },
+  { "signed_int32", packer_signed_int32, },
+  { "signed_int64", packer_signed_int64, },
+  { "vector", packer_vector, },
   { mp_nullptr, mp_nullptr },
 };
 
 static int packed_len (lua_State *L) {
   lua_msgpack *ud = mp_pcast(lua_msgpack *, luaL_checkudata(L, 1, LUA_MSGPACK_USERDATA));
-  lua_pushinteger(L, mp_is_packing(ud) ? mp_cast(lua_Integer, ud->w.len) : 0);
+  lua_pushinteger(L, mp_is_packing(ud) ? mp_cast(lua_Integer, ud->committed) : 0);
   return 1;
 }
 
@@ -1047,12 +1107,16 @@ static int packed_buffer_append (lua_State *L) {
   lua_msgpack *ud = mp_pcast(lua_msgpack *, luaL_checkudata(L, 1, LUA_MSGPACK_USERDATA));
   if (mp_is_packing(ud)) {
     int i;
+    ud->w.len = ud->committed;
+    ud->w.status = LMSGPACK_OK;
     ud->w.ud = L;
+    ud->slot = 1;
     for (i = 2; i <= lua_gettop(L); ++i) {
       size_t len = 0;
       const char *s = luaL_checklstring(L, i, &len);
       lmsgpack_write_bytes(&ud->w, s, len);
     }
+    ud->committed = ud->w.len;
   }
   return 0;
 }
@@ -1065,6 +1129,7 @@ static int packed_encode (lua_State *L) {
     mp_packer_begin(L, &e, 1, &nargs);
     for (i = 2; i <= nargs; ++i)
       mp_encode_any(&e, i, 0);
+    ud->committed = ud->w.len;
   }
   return 0;
 }
@@ -1072,7 +1137,7 @@ static int packed_encode (lua_State *L) {
 static int packed_tostring (lua_State *L) {
   lua_msgpack *ud = mp_pcast(lua_msgpack *, luaL_checkudata(L, 1, LUA_MSGPACK_USERDATA));
   if (mp_is_packing(ud)) {
-    lua_pushlstring(L, ud->w.buf, ud->w.len);
+    lua_pushlstring(L, ud->w.buf, ud->committed);
     return 1;
   }
   return 0;
@@ -1100,6 +1165,7 @@ static const char *const opts[] = {
   "string_compat", "string_binary",
   "empty_table_as_array", "without_hole", "with_hole", "always_as_map",
   "small_lua", "full64bits", "long_double", "sentinel", "ignore_invalid",
+  "max_depth", "decode_max_depth",
   mp_nullptr
 };
 
@@ -1108,6 +1174,7 @@ static const lua_Integer optsnum[] = {
   MP_STRING_COMPAT, MP_STRING_BINARY,
   MP_EMPTY_AS_ARRAY, MP_ARRAY_WITHOUT_HOLES, MP_ARRAY_WITH_HOLES, MP_ARRAY_AS_MAP,
   MP_SMALL_LUA, MP_FULL_64_BITS, MP_LONG_DOUBLE, MP_USE_SENTINEL, MP_IGNORE_INVALID,
+  MP_OPT_MAX_DEPTH, MP_OPT_DECODE_DEPTH,
 };
 
 static int mp_unpacker (lua_State *L, int compat_api, int include_offset) {
@@ -1123,25 +1190,19 @@ static int mp_unpacker (lua_State *L, int compat_api, int include_offset) {
   }
   else {
     lua_Integer n;
-    position = mp_optsizet(L, 2, 1);
+    position = lcodec_optsizet(L, 2, 1);
     n = luaL_optinteger(L, 3, include_offset ? 1 : 0);
     luaL_argcheck(L, n >= 0, 3, "invalid limit");
     limit = (n > INT_MAX) ? INT_MAX : mp_cast(int, n);
-    end_position = mp_optsizet(L, 4, 0);
+    end_position = lcodec_optsizet(L, 4, 0);
   }
-  offset = position - 1;
-
-  if (lua_isinteger(L, 2) && lua_tointeger(L, 2) <= 0) {
-    lua_pushvalue(L, 2);
+  if (position == 0) {
+    lua_pushinteger(L, 0);
     lua_pushnil(L);
     return 2;
   }
-
-  if (len == 0)
-    return 0;
-  else if (position == 0)
-    return luaL_error(L, "invalid string position: <0>");
-  else if (offset > len)
+  offset = position - 1;
+  if (offset > len)
     return luaL_error(L, "start offset greater than input length");
   else if (end_position > 0 && end_position < offset)
     return luaL_error(L, "end position less than offset");
@@ -1150,7 +1211,7 @@ static int mp_unpacker (lua_State *L, int compat_api, int include_offset) {
 
   top = lua_gettop(L);
   len = (end_position == 0) ? len : end_position;
-  if ((count = mp_decode_objects(L, mp_flags(L), s, len, &offset, limit, &err_msg, &err_code)) == 0) {
+  if ((count = mp_decode_objects(L, mp_flags(L), mp_decdepth(L), s, len, &offset, limit, &err_msg, &err_code)) == 0) {
     lua_settop(L, top);
     if (include_offset && err_code == LMSGPACK_ERROR_INCOMPLETE) {
       lua_pushinteger(L, -(mp_cast(lua_Integer, offset) + 1));
@@ -1197,7 +1258,7 @@ static lua_Integer mp_set_extension_helper (lua_State *L, int idx) {
 }
 
 static int mp_packer_new (lua_State *L) {
-  mp_packer_create(L, mp_flags(L));
+  mp_packer_create(L, mp_flags(L), mp_encdepth(L));
   return 1;
 }
 
@@ -1230,13 +1291,19 @@ static int mp_pack_args (lua_State *L) {
   return 1;
 }
 
-static int mp_unpack (lua_State *L) { return mp_unpacker(L, 0, 0); }
+static int mp_unpack (lua_State *L) {
+  return mp_unpacker(L, 0, 0);
+}
 
 #if defined(LUA_MSGPACK_COMPAT)
-static int mp_unpack_compat (lua_State *L) { return mp_unpacker(L, 1, 0); }
+static int mp_unpack_compat (lua_State *L) {
+  return mp_unpacker(L, 1, 0);
+}
 #endif
 
-static int mp_unpack_next (lua_State *L) { return mp_unpacker(L, 0, 1); }
+static int mp_unpack_next (lua_State *L) {
+  return mp_unpacker(L, 0, 1);
+}
 
 static int mp_get_extension (lua_State *L) {
   mp_checktype(L, luaL_checkinteger(L, 1), 1);
@@ -1357,7 +1424,16 @@ static lua_Integer mp_applyoption (lua_State *L, const char *name, lua_Integer f
 }
 
 static int mp_setoption (lua_State *L) {
-  const char *name = opts[luaL_checkoption(L, 1, mp_nullptr, opts)];
+  const int i = luaL_checkoption(L, 1, mp_nullptr, opts);
+  const char *name = opts[i];
+  if (optsnum[i] == MP_OPT_MAX_DEPTH) {
+    mp_setregi(L, "lua_msgpack_depth", mp_depthvalue(L, 2, MP_OPT_MAX_DEPTH));
+    return 0;
+  }
+  else if (optsnum[i] == MP_OPT_DECODE_DEPTH) {
+    mp_setregi(L, "lua_msgpack_decode_depth", mp_depthvalue(L, 2, MP_OPT_DECODE_DEPTH));
+    return 0;
+  }
   luaL_checktype(L, 2, LUA_TBOOLEAN);
   mp_setregi(L, LUA_MSGPACK_REG_OPTIONS, mp_applyoption(L, name, mp_getregi(L, LUA_MSGPACK_REG_OPTIONS, MP_DEFAULT), lua_toboolean(L, 2)));
   return 0;
@@ -1403,6 +1479,12 @@ static int mp_getoption (lua_State *L) {
       lua_pushboolean(L, LUA_FLOAT_TYPE == LUA_FLOAT_LONGDOUBLE);
       break;
     }
+    case MP_OPT_MAX_DEPTH:
+      lua_pushinteger(L, mp_encdepth(L));
+      break;
+    case MP_OPT_DECODE_DEPTH:
+      lua_pushinteger(L, mp_decdepth(L));
+      break;
     default:
       return 0;
   }
@@ -1466,20 +1548,31 @@ static void mp_makesafe (lua_State *L, const luaL_Reg *l);
 
 static int mp_with (lua_State *L) {
   lua_Integer flags = MP_DEFAULT;
+  int encdepth = mp_encdepth(L);
+  int decdepth = mp_decdepth(L);
   luaL_checktype(L, 1, LUA_TTABLE);
   lua_settop(L, 1);
   lua_pushnil(L);
   while (lua_next(L, 1)) {
+    const char *name;
     if (lua_type(L, -2) != LUA_TSTRING)
       return luaL_error(L, "msgpack option names are strings");
+    name = lua_tostring(L, -2);
+    if (strcmp(name, "max_depth") == 0)
+      encdepth = mp_depthvalue(L, -1, MP_OPT_MAX_DEPTH);
+    else if (strcmp(name, "decode_max_depth") == 0)
+      decdepth = mp_depthvalue(L, -1, MP_OPT_DECODE_DEPTH);
     else if (lua_type(L, -1) != LUA_TBOOLEAN)
-      return luaL_error(L, "msgpack option '%s' takes a boolean", lua_tostring(L, -2));
-    flags = mp_applyoption(L, lua_tostring(L, -2), flags, lua_toboolean(L, -1));
+      return luaL_error(L, "msgpack option '%s' takes a boolean", name);
+    else
+      flags = mp_applyoption(L, name, flags, lua_toboolean(L, -1));
     lua_pop(L, 1);
   }
   lua_createtable(L, 0, 8);
   lua_pushinteger(L, flags);
-  luaL_setfuncs(L, msgpack_bound, 1);
+  lua_pushinteger(L, encdepth);
+  lua_pushinteger(L, decdepth);
+  luaL_setfuncs(L, msgpack_bound, 3);
   mp_makesafe(L, msgpack_bound);
   mp_pushnull(L);
   lua_setfield(L, -2, "null");

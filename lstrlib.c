@@ -244,22 +244,6 @@ static int str_rep (lua_State *L) {
 }
 
 
-/*
-** Charge 'n' steps of a long loop to the count hook ('lua_checkhook')
-** once every HOOKSTEPS of them; '*steps' accumulates them.
-*/
-#if defined(GRIT_POWER_CHECKHOOK) || defined(GRIT_POWER_BUDGET)
-#define HOOKSTEPS	1024
-
-static void hooksteps (lua_State *L, size_t *steps, size_t n) {
-  if ((*steps += n) >= HOOKSTEPS) {
-    lua_checkhook(L, (*steps > INT_MAX) ? INT_MAX : (int)*steps);
-    *steps = 0;
-  }
-}
-#else
-#define hooksteps(L,steps,n)	((void)(L), (void)(steps), (void)(n))
-#endif
 
 
 #if defined(GRIT_POWER_WOW)
@@ -273,11 +257,11 @@ static int str_trim (lua_State *L) {
   size_t j = len;
 
   while (i < j && memchr(delimiter, str[i], dlen)) {
-    hooksteps(L, &steps, dlen + 1);
+    luaL_hooksteps(L, &steps, dlen + 1);
     i++;
   }
   while (j > i && memchr(delimiter, str[j - 1], dlen)) {
-    hooksteps(L, &steps, dlen + 1);
+    luaL_hooksteps(L, &steps, dlen + 1);
     j--;
   }
 
@@ -286,43 +270,34 @@ static int str_trim (lua_State *L) {
 }
 
 static int str_split (lua_State *L) {
-  const char *delimiter = luaL_checkstring(L, 1);
-  const char *str = luaL_checkstring(L, 2);
-  int limit = (int)luaL_optinteger(L, 3, 0);
+  size_t dlen = 0;
+  size_t len = 0;
+  const char *delimiter = luaL_checklstring(L, 1, &dlen);
+  const char *str = luaL_checklstring(L, 2, &len);
+  lua_Integer limit = luaL_optinteger(L, 3, 0);
+  const char *end = str + len;
   int count = 0;
-  size_t dlen = strlen(delimiter) + 1;
   size_t steps = 0;
 
   lua_settop(L, 3);  /* keep the strings while their pieces are made */
-  if (limit == 0 || limit > 1) {
-    const char *end;
-    for (end = str; *end; ++end) {
-      const char *s;
-      int split = 0;
-      hooksteps(L, &steps, dlen);
-      for (s = delimiter; *s; ++s) {
-        if (*s == *end) {
-          split = 1;
-          break;
-        }
-      }
-
-      if (split) {
+  if (limit <= 0 || limit > 1) {  /* (a limit below 1 means no limit) */
+    const char *p;
+    for (p = str; p < end; ++p) {
+      luaL_hooksteps(L, &steps, dlen + 1);
+      if (memchr(delimiter, *p, dlen)) {
         luaL_checkstack(L, count + 1, "too many results");
-        lua_pushlstring(L, str, cast_sizet(end - str));
-
+        lua_pushlstring(L, str, cast_sizet(p - str));
         ++count;
-        str = end + 1;
-        if (count == (limit - 1)) {
+        str = p + 1;
+        if (count == limit - 1)
           break;
-        }
       }
     }
   }
 
   /* Trailing characters */
   luaL_checkstack(L, count + 1, "too many results");
-  lua_pushstring(L, str);
+  lua_pushlstring(L, str, cast_sizet(end - str));
   return count + 1;
 }
 
@@ -330,31 +305,21 @@ static int str_join (lua_State *L) {
   size_t delimiter_length = 0;
   const char *delimiter = luaL_checklstring(L, 1, &delimiter_length);
   const int top = lua_gettop(L);
+  int i;
+  luaL_Buffer b;
 
-  if (top == 1) /* No arguments to join */
-    lua_pushstring(L, "");
-  else if (top == 2) /* A single argument, tostring it */
-    lua_tostring(L, 2);
-  else if (delimiter_length == 0) /* invalid delimiter, just concatenate */
-    lua_concat(L, top - 1);
-  else {
-    int i;
-
-    luaL_Buffer b;
-    luaL_buffinit(L, &b);
-    for (i = 2; i <= top; ++i) {
-      if (!lua_isstring(L, i)) {
-        return luaL_error(L, "invalid value (%s) at argument %d for 'join'", luaL_typename(L, i), i);
-      }
-
-      lua_pushvalue(L, i);
-      luaL_addvalue(&b);
-      if (i < top)
-        luaL_addlstring(&b, delimiter, delimiter_length);
-    }
-    luaL_checkhook(L, luaL_bufflen(&b));
-    luaL_pushresult(&b);
+  luaL_buffinit(L, &b);
+  for (i = 2; i <= top; ++i) {
+    size_t len = 0;
+    const char *s = lua_tolstring(L, i, &len);
+    if (s == NULL)
+      return luaL_error(L, "invalid value (%s) at argument %d for 'join'", luaL_typename(L, i), i);
+    luaL_addlstring(&b, s, len);
+    if (i < top)
+      luaL_addlstring(&b, delimiter, delimiter_length);
   }
+  luaL_checkhook(L, luaL_bufflen(&b));
+  luaL_pushresult(&b);
   return 1;
 }
 
@@ -383,7 +348,7 @@ static int str_blob (lua_State *L) {
   if (type == LUA_TNUMBER) {  /* Create a string blob */
     const lua_Integer n = luaL_checkinteger(L, 1);
     if (n <= 0)
-      return luaL_error(L, "blob length is negative");
+      return luaL_error(L, "blob length must be positive");
     else if ((size_t)n > MAX_SIZE)
       return luaL_error(L, "resulting string too large");
     lua_pushblob(L, (size_t)n);
@@ -724,7 +689,7 @@ static int singlematch (MatchState *ms, const char *s, const char *p,
       case '.': return 1;  /* matches any char */
       case L_ESC: return match_class(c, cast_uchar(*(p+1)));
       case '[': {
-        hooksteps(ms->L, &ms->hooksteps, (size_t)(ep - p));
+        luaL_hooksteps(ms->L, &ms->hooksteps, (size_t)(ep - p));
         return matchbracketclass(c, p, ep-1);
       }
       default:  return (cast_uchar(*p) == c);
@@ -743,7 +708,7 @@ static const char *matchbalance (MatchState *ms, const char *s,
     int e = *(p+1);
     int cont = 1;
     while (++s < ms->src_end) {
-      hooksteps(ms->L, &ms->hooksteps, 1);
+      luaL_hooksteps(ms->L, &ms->hooksteps, 1);
       if (*s == e) {
         if (--cont == 0) return s+1;
       }
@@ -758,7 +723,7 @@ static const char *max_expand (MatchState *ms, const char *s,
                                  const char *p, const char *ep) {
   ptrdiff_t i = 0;  /* counts maximum expand for item */
   while (singlematch(ms, s + i, p, ep)) {
-    hooksteps(ms->L, &ms->hooksteps, 1);
+    luaL_hooksteps(ms->L, &ms->hooksteps, 1);
     i++;
   }
   /* keeps trying to match with the maximum repetitions */
@@ -813,7 +778,7 @@ static const char *match_capture (MatchState *ms, const char *s, int l) {
   size_t len;
   l = check_capture(ms, l);
   len = cast_sizet(ms->capture[l].len);
-  hooksteps(ms->L, &ms->hooksteps, len);
+  luaL_hooksteps(ms->L, &ms->hooksteps, len);
   if ((size_t)(ms->src_end-s) >= len &&
       memcmp(ms->capture[l].init, s, len) == 0)
     return s+len;
@@ -825,7 +790,7 @@ static const char *match (MatchState *ms, const char *s, const char *p) {
   if (l_unlikely(ms->matchdepth-- == 0))
     luaL_error(ms->L, "pattern too complex");
   init: /* using goto to optimize tail recursion */
-  hooksteps(ms->L, &ms->hooksteps, 1);
+  luaL_hooksteps(ms->L, &ms->hooksteps, 1);
   if (p != ms->p_end) {  /* end of pattern? */
     switch (*p) {
       case '(': {  /* start capture */
@@ -935,7 +900,7 @@ static const char *lmemfind (lua_State *L, const char *s1, size_t l1,
     l2--;  /* 1st char will be checked by 'memchr' */
     l1 = l1-l2;  /* 's2' cannot be found after that */
     while (l1 > 0 && (init = (const char *)memchr(s1, *s2, l1)) != NULL) {
-      hooksteps(L, &steps, l2 + 1);
+      luaL_hooksteps(L, &steps, l2 + 1);
       init++;   /* 1st char is already checked */
       if (memcmp(init, s2+1, l2) == 0)
         return init-1;
@@ -1161,7 +1126,7 @@ static void add_s (MatchState *ms, luaL_Buffer *b, const char *s,
     news = p + 1;
   }
   luaL_addlstring(b, news, l);
-  hooksteps(L, &ms->hooksteps, whole + ct_diff2sz(e - s));
+  luaL_hooksteps(L, &ms->hooksteps, whole + ct_diff2sz(e - s));
 }
 
 
@@ -1599,9 +1564,12 @@ static int str_format (lua_State *L) {
           break;
         }
         case 'p': {
-#if defined(LUA_SANDBOX)
-          lua_Integer id = lua_opaqueid(L, arg);
-          nb = l_sprintf(buff, maxitem, LUA_OPAQUEID_FMT, (LUAI_UACINT)id);
+#if defined(LUA_SANDBOX)  /* an opaque id instead of an address */
+          char id[32];
+          checkformat(L, form, L_FMTFLAGSC, 0);
+          l_sprintf(id, sizeof(id), LUA_OPAQUEID_FMT, (LUAI_UACINT)lua_opaqueid(L, arg));
+          form[strlen(form) - 1] = 's';  /* format the id as a string */
+          nb = l_sprintf(buff, maxitem, form, id);
 #else
           const void *p = lua_topointer(L, arg);
           checkformat(L, form, L_FMTFLAGSC, 0);
@@ -2178,7 +2146,7 @@ static int str_blobpack (lua_State *L) {
   return 1;
 }
 
-/* blob_unpack(blob, fmt [, pos]) */
+/* blob_unpack(blob [, pos], fmt) */
 static int str_blobunpack (lua_State *L) {
   size_t blob_len = 0;  /* length of current blob */
   size_t offset = 0;  /* offset into blob */
@@ -2193,7 +2161,6 @@ static int str_blobunpack (lua_State *L) {
   }
 
   fmt = luaL_checkstring(L, format_idx);
-  luaL_argcheck(L, offset <= blob_len, 3, "initial position out of string");
   return shared_unpack(L, fmt, blob, blob_len, offset);
 }
 #endif
@@ -2252,10 +2219,20 @@ static char *strbuf_reserve (lua_State *L, StrBuf *b, int arg, size_t need) {
   if (b->size - b->n < need) {
     size_t size = (b->size > 0) ? b->size : LUAL_BUFFERSIZE;
     char *p;
-    if (l_unlikely(need > MAX_SIZE - b->n)) luaL_error(L, "string buffer too large");
-    while (size - b->n < need) size = (size <= MAX_SIZE / 2) ? size * 2 : b->n + need;
+    if (l_unlikely(need > MAX_SIZE - b->n))
+      luaL_error(L, "string buffer too large");
+    while (size - b->n < need)
+      size = (size <= MAX_SIZE / 2) ? size * 2 : b->n + need;
+#if defined(GRIT_POWER_ALLOWANCE)
+    if (!lua_allows(L, size)) {  /* as luaL_Buffer: fall back to the exact size */
+      size = b->n + need;
+      if (!lua_allows(L, size))
+        luaL_error(L, "string buffer too large");
+    }
+#endif
     p = (char *)lua_newuserdatauv(L, size, 0);
-    if (b->n > 0) memcpy(p, b->p, b->n);
+    if (b->n > 0)
+      memcpy(p, b->p, b->n);
     lua_setiuservalue(L, arg, 1);
     b->p = p;
     b->size = size;
@@ -2272,7 +2249,8 @@ static int str_buffer (lua_State *L) {
   b->p = NULL;
   b->n = b->size = 0;
   luaL_setmetatable(L, STRBUF_TNAME);
-  if (size > 0) strbuf_reserve(L, b, lua_gettop(L), (size_t)size);
+  if (size > 0)
+    strbuf_reserve(L, b, lua_gettop(L), (size_t)size);
   return 1;
 }
 
@@ -2283,7 +2261,7 @@ static int strbuf_put (lua_State *L) {
   int i;
   int n = lua_gettop(L);
   for (i = 2; i <= n; i++) {
-    StrBuf *other = (StrBuf *)luaL_testudata(L, i, STRBUF_TNAME);
+    StrBuf *other = (lua_type(L, i) == LUA_TSTRING) ? NULL : (StrBuf *)luaL_testudata(L, i, STRBUF_TNAME);
     if (other != NULL) {
       size_t len = other->n;
       if (len > 0) {

@@ -141,33 +141,23 @@
 
 #if defined(__cplusplus) && __cplusplus >= 201103L
   #include <chrono>
-/* https://docs.microsoft.com/en-us/windows/win32/sysinfo/acquiring-high-resolution-time-stamps */
+  #define LUA_CLOCK_CHRONO
 #elif defined(_WIN32)
   #define WIN32_LEAN_AND_MEAN
   #include <windows.h>
-
-  /* Ensure the performance counter frequency is initialized. */
-  static LARGE_INTEGER info;
-  static LUA_INLINE void InitPerformanceCounter() {
-    static int init = 1;
-    if (init) {
-      init = 0; /* @TODO: Fix potential race condition */
-      QueryPerformanceFrequency(&info);
-    }
-  }
+  #define LUA_CLOCK_QPC
 #elif defined(__APPLE__)
-  #include <sys/time.h>
-#elif defined(_POSIX_TIMERS) && _POSIX_TIMERS > 0
-  #ifdef _POSIX_MONOTONIC_CLOCK
-    #define HAVE_CLOCK_GETTIME
-    #include <time.h>
+  #define LUA_CLOCK_MONOTONIC  /* clock_gettime: macOS 10.12 and later */
+#elif defined(__unix__)
+  #include <unistd.h>
+  #if defined(_POSIX_TIMERS) && _POSIX_TIMERS > 0 && defined(_POSIX_MONOTONIC_CLOCK) && _POSIX_MONOTONIC_CLOCK >= 0
+    #define LUA_CLOCK_MONOTONIC
   #else
     #include <sys/time.h>
-    #warning "A nanosecond resolution clock is not available; falling back to gettimeofday()..."
+    #define LUA_CLOCK_TIMEOFDAY  /* no monotonic clock: wall-clock time */
   #endif
 #else
   #undef LUA_SYS_CLOCK
-  #warning "A nanosecond resolution clock is not available."
 #endif
 
 #if defined(_MSC_VER) && defined(_M_X64)
@@ -179,7 +169,40 @@
 #endif
 
 #if defined(LUA_SYS_CLOCK)
-#include "llimits.h"
+/*
+** Current time of a monotonic clock in units of 1/'persec' seconds
+** (computed in 64 bits; a 32-bit lua_Integer wraps, which 'deltatime'
+** handles).
+*/
+static long long clocktime (lua_State *L, long long persec) {
+#if defined(LUA_CLOCK_CHRONO)
+  namespace sc = std::chrono;
+  auto now = sc::steady_clock::now().time_since_epoch();
+  UNUSED(L);
+  if (persec == 1000000)
+    return (long long)sc::duration_cast<sc::microseconds>(now).count();
+  return (long long)sc::duration_cast<sc::nanoseconds>(now).count();
+#elif defined(LUA_CLOCK_QPC)
+  LARGE_INTEGER freq;
+  LARGE_INTEGER now;
+  UNUSED(L);
+  QueryPerformanceFrequency(&freq);  /* fixed at boot, so no caching needed */
+  QueryPerformanceCounter(&now);
+  /* scale in two steps so that 'now * persec' cannot overflow */
+  return (long long)((now.QuadPart / freq.QuadPart) * persec + (now.QuadPart % freq.QuadPart) * persec / freq.QuadPart);
+#elif defined(LUA_CLOCK_MONOTONIC)
+  struct timespec spec;
+  if (clock_gettime(CLOCK_MONOTONIC, &spec) != 0)
+    luaL_error(L, "clock_gettime() failed: %s", strerror(errno));
+  return (long long)spec.tv_sec * persec + (long long)spec.tv_nsec / (1000000000 / persec);
+#else
+  struct timeval spec;
+  if (gettimeofday(&spec, NULL) < 0)
+    luaL_error(L, "gettimeofday() failed: %s", strerror(errno));
+  return (long long)spec.tv_sec * persec + (long long)spec.tv_usec * persec / 1000000;
+#endif
+}
+
 static int os_deltatime(lua_State *L) {
   const lua_Unsigned end = l_castS2U(luaL_checkinteger(L, 1));
   const lua_Unsigned start = l_castS2U(luaL_checkinteger(L, 2));
@@ -188,57 +211,13 @@ static int os_deltatime(lua_State *L) {
 }
 
 static int os_microtime(lua_State *L) {
-#if defined(__cplusplus) && __cplusplus >= 201103L
-  namespace sc = std::chrono;
-  auto since_epoch = sc::high_resolution_clock::now().time_since_epoch();
-  auto micros = sc::duration_cast<sc::microseconds>(since_epoch);
-  l_pushtime(L, micros.count());
-#elif defined(_WIN32)
-  LARGE_INTEGER now;
-  InitPerformanceCounter();
-  QueryPerformanceCounter(&now);
-  l_pushtime(L, ((1000000L * now.QuadPart) / info.QuadPart));
-#elif defined(HAVE_CLOCK_GETTIME)
-  struct timespec spec;
-  if (clock_gettime(CLOCK_MONOTONIC, &spec) != 0)
-    return luaL_error(L, "clock_gettime() failed:%s", strerror(errno));
-
-  l_pushtime(L, (spec.tv_sec * 1000000L) + (spec.tv_nsec / 1000L));
-#else
-  struct timeval spec;
-  if (gettimeofday(&spec, NULL) < 0)
-    return luaL_error(L, "gettimeofday() failed!:%s", strerror(errno));
-
-  l_pushtime(L, (spec.tv_sec * 1000000L) + spec.tv_usec);
-#endif
+  l_pushtime(L, clocktime(L, 1000000));
   return 1;
 }
 
 #if !defined(LUA_32BITS)
 static int os_nanotime(lua_State *L) {
-#if defined(__cplusplus) && __cplusplus >= 201103L
-  namespace sc = std::chrono;
-  auto since_epoch = sc::high_resolution_clock::now().time_since_epoch();
-  auto nanos = sc::duration_cast<sc::nanoseconds>(since_epoch);
-  l_pushtime(L, nanos.count());
-#elif defined(_WIN32)
-  LARGE_INTEGER now;
-  InitPerformanceCounter();
-  QueryPerformanceCounter(&now);
-  l_pushtime(L, ((1000000000L * now.QuadPart) / info.QuadPart));
-#elif defined(HAVE_CLOCK_GETTIME)
-  struct timespec spec;
-  if (clock_gettime(CLOCK_MONOTONIC, &spec) != 0)
-    return luaL_error(L, "clock_gettime() failed:%s", strerror(errno));
-
-  l_pushtime(L, (spec.tv_sec * 1000000000L) + spec.tv_nsec);
-#else
-  struct timeval spec;
-  if (gettimeofday(&spec, NULL) < 0)
-    return luaL_error(L, "gettimeofday() failed!:%s", strerror(errno));
-
-  l_pushtime(L, (spec.tv_sec * 1000000000L) + (spec.tv_usec * 1000L));
-#endif
+  l_pushtime(L, clocktime(L, 1000000000));
   return 1;
 }
 #endif

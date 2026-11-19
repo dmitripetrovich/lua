@@ -513,7 +513,8 @@ do
   local header = {  -- header components
     "\27Lua",               -- signature
     0x55,                   -- version 5.5 (0x55)
-    0,                      -- format
+    "fork",                 -- format: 0 plus a bit per bytecode-changing
+                            -- fork feature (see LUAC_FORMAT in lundump.h)
     "\x19\x93\r\n\x1a\n",   -- a binary string
     string.packsize("i"),   -- size of an int
     -0x5678,                -- an int
@@ -538,7 +539,11 @@ do
   -- check header
   local t = {string.unpack(headformat, c)}
   for i = 1, #header do
-    assert(t[i] == header[i])
+    if header[i] == "fork" then
+      assert(t[i] & ~0x0F == 0)
+    else
+      assert(t[i] == header[i])
+    end
   end
 
   -- Testing corrupted header.

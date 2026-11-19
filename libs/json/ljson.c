@@ -11,7 +11,8 @@
 #endif
 
 static void *defaultalloc (void *ud, void *ptr, size_t osize, size_t nsize) {
-  (void)ud; (void)osize;
+  (void)ud;
+  (void)osize;
   if (nsize == 0) {
     free(ptr);
     return NULL;
@@ -22,21 +23,27 @@ static void *defaultalloc (void *ud, void *ptr, size_t osize, size_t nsize) {
 static int growblock (ljson_Alloc alloc, void *ud, void **block, void *init, size_t *size, size_t need, size_t elem) {
   size_t nsize = (*size > 0) ? *size * 2 : 16;
   void *nb;
-  if (nsize < need) nsize = need;
-  if (nsize > (size_t)-1 / elem) return 0;
+  if (nsize < need)
+    nsize = need;
+  if (nsize > (size_t)-1 / elem)
+    return 0;
   if (*block == init) {
     nb = alloc(ud, NULL, 0, nsize * elem);
-    if (nb != NULL) memcpy(nb, init, *size * elem);
+    if (nb != NULL)
+      memcpy(nb, init, *size * elem);
   }
-  else nb = alloc(ud, *block, *size * elem, nsize * elem);
-  if (nb == NULL) return 0;
+  else
+    nb = alloc(ud, *block, *size * elem, nsize * elem);
+  if (nb == NULL)
+    return 0;
   *block = nb;
   *size = nsize;
   return 1;
 }
 
 static void freeblock (ljson_Alloc alloc, void *ud, void *block, void *init, size_t size, size_t elem) {
-  if (block != init) alloc(ud, block, size * elem, 0);
+  if (block != init)
+    alloc(ud, block, size * elem, 0);
 }
 
 #define DP_SIGNIFICAND_SIZE 52
@@ -61,7 +68,9 @@ static double dfrombits (uint64_t u) {
   return d;
 }
 
-static int dnormal (uint64_t u) { return (u & DP_EXPONENT_MASK) != 0 || (u & DP_SIGNIFICAND_MASK) == 0; }
+static int dnormal (uint64_t u) {
+  return (u & DP_EXPONENT_MASK) != 0 || (u & DP_SIGNIFICAND_MASK) == 0;
+}
 
 typedef struct DiyFp {
   uint64_t f;
@@ -79,7 +88,8 @@ static DiyFp diyfromdouble (double d) {
   uint64_t u = dbits(d);
   int biased = (int)((u & DP_EXPONENT_MASK) >> DP_SIGNIFICAND_SIZE);
   uint64_t significand = u & DP_SIGNIFICAND_MASK;
-  if (biased != 0) return diyfp(significand + DP_HIDDEN_BIT, biased - DP_EXPONENT_BIAS);
+  if (biased != 0)
+    return diyfp(significand + DP_HIDDEN_BIT, biased - DP_EXPONENT_BIAS);
   return diyfp(significand, DP_MIN_EXPONENT + 1);
 }
 
@@ -106,7 +116,8 @@ static DiyFp diymul (DiyFp a, DiyFp b) {
   u128 p = (u128)a.f * (u128)b.f;
   uint64_t h = (uint64_t)(p >> 64);
   uint64_t l = (uint64_t)p;
-  if (l & (UINT64_C(1) << 63)) h++;
+  if (l & (UINT64_C(1) << 63))
+    h++;
   return diyfp(h, a.e + b.e + 64);
 #else
   const uint64_t M32 = 0xFFFFFFFF;
@@ -144,8 +155,10 @@ static void diyboundaries (DiyFp v, DiyFp *minus, DiyFp *plus) {
 
 static double diytodouble (DiyFp v) {
   uint64_t be;
-  if (v.e < DP_DENORMAL_EXPONENT) return 0.0;
-  if (v.e >= DP_MAX_EXPONENT) return dfrombits(DP_EXPONENT_MASK);
+  if (v.e < DP_DENORMAL_EXPONENT)
+    return 0.0;
+  if (v.e >= DP_MAX_EXPONENT)
+    return dfrombits(DP_EXPONENT_MASK);
   be = (v.e == DP_DENORMAL_EXPONENT && (v.f & DP_HIDDEN_BIT) == 0) ? 0 : (uint64_t)(v.e + DP_EXPONENT_BIAS);
   return dfrombits((v.f & DP_SIGNIFICAND_MASK) | (be << DP_SIGNIFICAND_SIZE));
 }
@@ -188,7 +201,8 @@ static DiyFp cachedpower (int e, int *K) {
   double dk = (-61 - e) * 0.30102999566398114 + 347;
   int k = (int)dk;
   unsigned index;
-  if (dk - k > 0.0) k++;
+  if (dk - k > 0.0)
+    k++;
   index = (unsigned)((k >> 3) + 1);
   *K = -(-348 + (int)(index << 3));
   return diyfp(cachedf[index], cachede[index]);
@@ -215,14 +229,22 @@ static void grisuround (char *buff, int len, uint64_t delta, uint64_t rest, uint
 }
 
 static int countdecimaldigit32 (uint32_t n) {
-  if (n < 10) return 1;
-  if (n < 100) return 2;
-  if (n < 1000) return 3;
-  if (n < 10000) return 4;
-  if (n < 100000) return 5;
-  if (n < 1000000) return 6;
-  if (n < 10000000) return 7;
-  if (n < 100000000) return 8;
+  if (n < 10)
+    return 1;
+  if (n < 100)
+    return 2;
+  if (n < 1000)
+    return 3;
+  if (n < 10000)
+    return 4;
+  if (n < 100000)
+    return 5;
+  if (n < 1000000)
+    return 6;
+  if (n < 10000000)
+    return 7;
+  if (n < 100000000)
+    return 8;
   return 9;
 }
 
@@ -237,18 +259,46 @@ static void digitgen (DiyFp W, DiyFp Mp, uint64_t delta, char *buff, int *len, i
     uint32_t d = 0;
     uint64_t tmp;
     switch (kappa) {
-      case 9: d = p1 / 100000000; p1 %= 100000000; break;
-      case 8: d = p1 / 10000000; p1 %= 10000000; break;
-      case 7: d = p1 / 1000000; p1 %= 1000000; break;
-      case 6: d = p1 / 100000; p1 %= 100000; break;
-      case 5: d = p1 / 10000; p1 %= 10000; break;
-      case 4: d = p1 / 1000; p1 %= 1000; break;
-      case 3: d = p1 / 100; p1 %= 100; break;
-      case 2: d = p1 / 10; p1 %= 10; break;
-      case 1: d = p1; p1 = 0; break;
+      case 9:
+        d = p1 / 100000000;
+        p1 %= 100000000;
+        break;
+      case 8:
+        d = p1 / 10000000;
+        p1 %= 10000000;
+        break;
+      case 7:
+        d = p1 / 1000000;
+        p1 %= 1000000;
+        break;
+      case 6:
+        d = p1 / 100000;
+        p1 %= 100000;
+        break;
+      case 5:
+        d = p1 / 10000;
+        p1 %= 10000;
+        break;
+      case 4:
+        d = p1 / 1000;
+        p1 %= 1000;
+        break;
+      case 3:
+        d = p1 / 100;
+        p1 %= 100;
+        break;
+      case 2:
+        d = p1 / 10;
+        p1 %= 10;
+        break;
+      case 1:
+        d = p1;
+        p1 = 0;
+        break;
       default: break;
     }
-    if (d || *len) buff[(*len)++] = (char)('0' + (char)d);
+    if (d || *len)
+      buff[(*len)++] = (char)('0' + (char)d);
     kappa--;
     tmp = ((uint64_t)p1 << -one.e) + p2;
     if (tmp <= delta) {
@@ -262,7 +312,8 @@ static void digitgen (DiyFp W, DiyFp Mp, uint64_t delta, char *buff, int *len, i
     p2 *= 10;
     delta *= 10;
     d = (char)(p2 >> -one.e);
-    if (d || *len) buff[(*len)++] = (char)('0' + d);
+    if (d || *len)
+      buff[(*len)++] = (char)('0' + d);
     p2 &= one.f - 1;
     kappa--;
     if (p2 < delta) {
@@ -302,7 +353,8 @@ static char *writeexponent (int K, char *buff) {
     *buff++ = digitslut[K * 2];
     *buff++ = digitslut[K * 2 + 1];
   }
-  else *buff++ = (char)('0' + (char)K);
+  else
+    *buff++ = (char)('0' + (char)K);
   return buff;
 }
 
@@ -310,7 +362,8 @@ static char *prettify (char *buff, int length, int k, int maxdecimals) {
   const int kk = length + k;
   int i;
   if (0 <= k && kk <= 21) {
-    for (i = length; i < kk; i++) buff[i] = '0';
+    for (i = length; i < kk; i++)
+      buff[i] = '0';
     buff[kk] = '.';
     buff[kk + 1] = '0';
     return &buff[kk + 2];
@@ -320,7 +373,8 @@ static char *prettify (char *buff, int length, int k, int maxdecimals) {
     buff[kk] = '.';
     if (0 > k + maxdecimals) {
       for (i = kk + maxdecimals; i > kk + 1; i--) {
-        if (buff[i] != '0') return &buff[i + 1];
+        if (buff[i] != '0')
+          return &buff[i + 1];
       }
       return &buff[kk + 2];
     }
@@ -331,10 +385,12 @@ static char *prettify (char *buff, int length, int k, int maxdecimals) {
     memmove(&buff[offset], &buff[0], (size_t)length);
     buff[0] = '0';
     buff[1] = '.';
-    for (i = 2; i < offset; i++) buff[i] = '0';
+    for (i = 2; i < offset; i++)
+      buff[i] = '0';
     if (length - kk > maxdecimals) {
       for (i = maxdecimals + 1; i > 2; i--) {
-        if (buff[i] != '0') return &buff[i + 1];
+        if (buff[i] != '0')
+          return &buff[i + 1];
       }
       return &buff[3];
     }
@@ -361,7 +417,8 @@ static char *prettify (char *buff, int length, int k, int maxdecimals) {
 char *ljson_dtoa (double value, char *buff, int maxdecimals) {
   uint64_t u = dbits(value);
   if ((u & (DP_EXPONENT_MASK | DP_SIGNIFICAND_MASK)) == 0) {
-    if (u & DP_SIGN_MASK) *buff++ = '-';
+    if (u & DP_SIGN_MASK)
+      *buff++ = '-';
     buff[0] = '0';
     buff[1] = '.';
     buff[2] = '0';
@@ -380,13 +437,25 @@ char *ljson_dtoa (double value, char *buff, int maxdecimals) {
 
 char *ljson_u64toa (uint64_t u, char *buff) {
   char tmp[20];
-  int n = 0;
-  do {
-    tmp[n++] = (char)('0' + (int)(u % 10));
-    u /= 10;
-  } while (u != 0);
-  while (n > 0) *buff++ = tmp[--n];
-  return buff;
+  char *p = tmp + sizeof(tmp);
+  size_t n;
+  while (u >= 100) {
+    const size_t d = (size_t)(u % 100);
+    u /= 100;
+    p -= 2;
+    p[0] = digitslut[d * 2];
+    p[1] = digitslut[d * 2 + 1];
+  }
+  if (u >= 10) {
+    p -= 2;
+    p[0] = digitslut[u * 2];
+    p[1] = digitslut[u * 2 + 1];
+  }
+  else
+    *--p = (char)('0' + (int)u);
+  n = (size_t)(tmp + sizeof(tmp) - p);
+  memcpy(buff, p, n);
+  return buff + n;
 }
 
 char *ljson_i64toa (int64_t i, char *buff) {
@@ -431,9 +500,12 @@ static const double pow10_[] = {
 };
 
 static double fastpath (double significand, int exp) {
-  if (exp < -308) return 0.0;
-  else if (exp >= 0) return significand * pow10_[exp];
-  else return significand / pow10_[-exp];
+  if (exp < -308)
+    return 0.0;
+  else if (exp >= 0)
+    return significand * pow10_[exp];
+  else
+    return significand / pow10_[-exp];
 }
 
 static double strtodnormal (double d, int p) {
@@ -441,7 +513,8 @@ static double strtodnormal (double d, int p) {
     d = fastpath(d, -308);
     d = fastpath(d, p + 308);
   }
-  else d = fastpath(d, p);
+  else
+    d = fastpath(d, p);
   return d;
 }
 
@@ -462,12 +535,17 @@ static void bigcopy (BigInt *b, const BigInt *a) {
   memcpy(b->d, a->d, a->n * sizeof(uint64_t));
 }
 
-static int bigiszero (const BigInt *b) { return b->n == 1 && b->d[0] == 0; }
+static int bigiszero (const BigInt *b) {
+  return b->n == 1 && b->d[0] == 0;
+}
 
-static int bigequ (const BigInt *b, uint64_t u) { return b->n == 1 && b->d[0] == u; }
+static int bigequ (const BigInt *b, uint64_t u) {
+  return b->n == 1 && b->d[0] == u;
+}
 
 static void bigpush (BigInt *b, uint64_t digit) {
-  if (b->n < BIGCAP) b->d[b->n++] = digit;
+  if (b->n < BIGCAP)
+    b->d[b->n++] = digit;
 }
 
 static void bigaddu (BigInt *b, uint64_t u) {
@@ -475,11 +553,13 @@ static void bigaddu (BigInt *b, uint64_t u) {
   size_t i;
   b->d[0] += u;
   for (i = 0; i < b->n - 1; i++) {
-    if (b->d[i] >= backup) return;
+    if (b->d[i] >= backup)
+      return;
     backup = b->d[i + 1];
     b->d[i + 1] += 1;
   }
-  if (b->d[b->n - 1] < backup) bigpush(b, 1);
+  if (b->d[b->n - 1] < backup)
+    bigpush(b, 1);
 }
 
 static uint64_t muladd64 (uint64_t a, uint64_t b, uint64_t k, uint64_t *high) {
@@ -495,11 +575,13 @@ static uint64_t muladd64 (uint64_t a, uint64_t b, uint64_t k, uint64_t *high) {
   uint64_t lo, hi;
   x1 += (x0 >> 32);
   x1 += x2;
-  if (x1 < x2) x3 += (UINT64_C(1) << 32);
+  if (x1 < x2)
+    x3 += (UINT64_C(1) << 32);
   lo = (x1 << 32) + (x0 & 0xFFFFFFFF);
   hi = x3 + (x1 >> 32);
   lo += k;
-  if (lo < k) hi++;
+  if (lo < k)
+    hi++;
   *high = hi;
   return lo;
 #endif
@@ -508,23 +590,38 @@ static uint64_t muladd64 (uint64_t a, uint64_t b, uint64_t k, uint64_t *high) {
 static void bigmul64 (BigInt *b, uint64_t u) {
   uint64_t k = 0;
   size_t i;
-  if (u == 0) { bigset(b, 0); return; }
-  if (u == 1) return;
-  if (bigequ(b, 1)) { bigset(b, u); return; }
+  if (u == 0) {
+    bigset(b, 0);
+    return;
+  }
+  if (u == 1)
+    return;
+  if (bigequ(b, 1)) {
+    bigset(b, u);
+    return;
+  }
   for (i = 0; i < b->n; i++) {
     uint64_t hi;
     b->d[i] = muladd64(b->d[i], u, k, &hi);
     k = hi;
   }
-  if (k > 0) bigpush(b, k);
+  if (k > 0)
+    bigpush(b, k);
 }
 
 static void bigmul32 (BigInt *b, uint32_t u) {
   uint64_t k = 0;
   size_t i;
-  if (u == 0) { bigset(b, 0); return; }
-  if (u == 1) return;
-  if (bigequ(b, 1)) { bigset(b, u); return; }
+  if (u == 0) {
+    bigset(b, 0);
+    return;
+  }
+  if (u == 1)
+    return;
+  if (bigequ(b, 1)) {
+    bigset(b, u);
+    return;
+  }
   for (i = 0; i < b->n; i++) {
     const uint64_t c = b->d[i] >> 32;
     const uint64_t d = b->d[i] & 0xFFFFFFFF;
@@ -535,43 +632,52 @@ static void bigmul32 (BigInt *b, uint32_t u) {
     b->d[i] = (p0 & 0xFFFFFFFF) | (p1 << 32);
     k = p1 >> 32;
   }
-  if (k > 0) bigpush(b, k);
+  if (k > 0)
+    bigpush(b, k);
 }
 
 static void bigshl (BigInt *b, size_t shift) {
   size_t offset, inter, i;
-  if (bigiszero(b) || shift == 0) return;
+  if (bigiszero(b) || shift == 0)
+    return;
   offset = shift / 64;
   inter = shift % 64;
-  if (b->n + offset > BIGCAP) return;
+  if (b->n + offset > BIGCAP)
+    return;
   if (inter == 0) {
     memmove(b->d + offset, b->d, b->n * sizeof(uint64_t));
     b->n += offset;
   }
   else {
-    if (b->n + offset >= BIGCAP) return;
+    if (b->n + offset >= BIGCAP)
+      return;
     b->d[b->n] = 0;
     for (i = b->n; i > 0; i--) b->d[i + offset] = (b->d[i] << inter) | (b->d[i - 1] >> (64 - inter));
     b->d[offset] = b->d[0] << inter;
     b->n += offset;
-    if (b->d[b->n]) b->n++;
+    if (b->d[b->n])
+      b->n++;
   }
   memset(b->d, 0, offset * sizeof(uint64_t));
 }
 
 static void bigmulpow5 (BigInt *b, unsigned exp) {
   static const uint32_t pow5[12] = { 5, 25, 125, 625, 3125, 15625, 78125, 390625, 1953125, 9765625, 48828125, 244140625 };
-  if (exp == 0) return;
+  if (exp == 0)
+    return;
   for (; exp >= 27; exp -= 27) bigmul64(b, UINT64_C(0x6765C793FA10079D));
   for (; exp >= 13; exp -= 13) bigmul32(b, 1220703125u);
-  if (exp > 0) bigmul32(b, pow5[exp - 1]);
+  if (exp > 0)
+    bigmul32(b, pow5[exp - 1]);
 }
 
 static int bigcompare (const BigInt *a, const BigInt *b) {
   size_t i;
-  if (a->n != b->n) return a->n < b->n ? -1 : 1;
+  if (a->n != b->n)
+    return a->n < b->n ? -1 : 1;
   for (i = a->n; i-- > 0;) {
-    if (a->d[i] != b->d[i]) return a->d[i] < b->d[i] ? -1 : 1;
+    if (a->d[i] != b->d[i])
+      return a->d[i] < b->d[i] ? -1 : 1;
   }
   return 0;
 }
@@ -586,10 +692,12 @@ static void bigdifference (const BigInt *a, const BigInt *b, BigInt *out) {
   }
   for (i = 0; i < x->n; i++) {
     uint64_t d = x->d[i] - borrow;
-    if (i < y->n) d -= y->d[i];
+    if (i < y->n)
+      d -= y->d[i];
     borrow = (d > x->d[i]) ? 1 : 0;
     out->d[i] = d;
-    if (d != 0) out->n = i + 1;
+    if (d != 0)
+      out->n = i + 1;
   }
 }
 
@@ -601,7 +709,8 @@ static uint64_t parseu64 (const char *begin, const char *end) {
 
 static void bigappenddecimal64 (BigInt *b, const char *begin, const char *end) {
   uint64_t u = parseu64(begin, end);
-  if (bigiszero(b)) bigset(b, u);
+  if (bigiszero(b))
+    bigset(b, u);
   else {
     unsigned exp = (unsigned)(end - begin);
     bigmulpow5(b, exp);
@@ -618,13 +727,16 @@ static void bigfromdecimals (BigInt *b, const char *decimals, size_t length) {
     length -= 19;
     i += 19;
   }
-  if (length > 0) bigappenddecimal64(b, decimals + i, decimals + i + length);
+  if (length > 0)
+    bigappenddecimal64(b, decimals + i, decimals + i + length);
 }
 
 static int min3 (int a, int b, int c) {
   int m = a;
-  if (m > b) m = b;
-  if (m > c) m = c;
+  if (m > b)
+    m = b;
+  if (m > c)
+    m = c;
   return m;
 }
 
@@ -645,12 +757,14 @@ static int checkwithinhalfulp (double b, const BigInt *d, int dexp) {
     hs2 -= dexp;
     hs5 -= dexp;
   }
-  if (bexp >= 0) bs2 += bexp;
+  if (bexp >= 0)
+    bs2 += bexp;
   else {
     ds2 -= bexp;
     hs2 -= bexp;
   }
-  if (hexp >= 0) hs2 += hexp;
+  if (hexp >= 0)
+    hs2 += hexp;
   else {
     ds2 -= hexp;
     bs2 -= hexp;
@@ -694,10 +808,12 @@ static int strtoddiyfp (const char *decimals, int dlen, int dexp, double *result
   int64_t error;
   DiyFp v, cached, rounded;
   for (; i < dlen; i++) {
-    if (significand > UINT64_C(0x1999999999999999) || (significand == UINT64_C(0x1999999999999999) && decimals[i] >= '5')) break;
+    if (significand > UINT64_C(0x1999999999999999) || (significand == UINT64_C(0x1999999999999999) && decimals[i] >= '5'))
+      break;
     significand = significand * 10u + (unsigned)(decimals[i] - '0');
   }
-  if (i < dlen && decimals[i] >= '5') significand++;
+  if (i < dlen && decimals[i] >= '5')
+    significand++;
   remaining = dlen - i;
   error = (remaining == 0) ? 0 : ulp / 2;
   v = diynormalize(diyfp(significand, 0));
@@ -707,7 +823,8 @@ static int strtoddiyfp (const char *decimals, int dlen, int dexp, double *result
   if (actualexp != dexp) {
     int adjustment = dexp - actualexp;
     v = diymul(v, diyfp(adjf[adjustment - 1], adje[adjustment - 1]));
-    if (dlen + adjustment > 19) error += ulp / 2;
+    if (dlen + adjustment > 19)
+      error += ulp / 2;
   }
   v = diymul(v, cached);
   error += ulp + (error == 0 ? 0 : 1);
@@ -743,15 +860,19 @@ static double strtodbig (double approx, const char *decimals, int dlen, int dexp
   int cmp;
   bigfromdecimals(&dint, decimals, (size_t)dlen);
   cmp = checkwithinhalfulp(approx, &dint, dexp);
-  if (cmp < 0) return approx;
-  else if (cmp == 0) return (u & DP_SIGNIFICAND_MASK & 1) ? dfrombits(u + 1) : approx;
-  else return dfrombits(u + 1);
+  if (cmp < 0)
+    return approx;
+  else if (cmp == 0)
+    return (u & DP_SIGNIFICAND_MASK & 1) ? dfrombits(u + 1) : approx;
+  else
+    return dfrombits(u + 1);
 }
 
 static double strtodfull (double d, int p, const char *decimals, size_t length, size_t decimalpos, int exp) {
   double result = 0.0;
   int dlen, dexp;
-  if (strtodfast(d, p, &result)) return result;
+  if (strtodfast(d, p, &result))
+    return result;
   dlen = (int)length;
   dexp = exp - (int)(length - decimalpos);
   while (dlen > 0 && *decimals == '0') {
@@ -762,14 +883,18 @@ static double strtodfull (double d, int p, const char *decimals, size_t length, 
     dlen--;
     dexp++;
   }
-  if (dlen == 0) return 0.0;
+  if (dlen == 0)
+    return 0.0;
   if (dlen > 768) {
     dexp += dlen - 768;
     dlen = 768;
   }
-  if (dlen + dexp <= -324) return 0.0;
-  if (dlen + dexp > 309) return dfrombits(DP_EXPONENT_MASK);
-  if (strtoddiyfp(decimals, dlen, dexp, &result)) return result;
+  if (dlen + dexp <= -324)
+    return 0.0;
+  if (dlen + dexp > 309)
+    return dfrombits(DP_EXPONENT_MASK);
+  if (strtoddiyfp(decimals, dlen, dexp, &result))
+    return result;
   return strtodbig(result, decimals, dlen, dexp);
 }
 
@@ -839,7 +964,8 @@ static int consume (Parser *P, char c) {
 static int bufput (Parser *P, const char *s, size_t len) {
   if (P->bufsize - P->bufn < len) {
     void *block = P->buf;
-    if (!growblock(P->alloc, P->allocud, &block, P->initbuf, &P->bufsize, P->bufn + len, 1)) return seterror(P, LJSON_ERROR_MEMORY, tell(P));
+    if (!growblock(P->alloc, P->allocud, &block, P->initbuf, &P->bufsize, P->bufn + len, 1))
+      return seterror(P, LJSON_ERROR_MEMORY, tell(P));
     P->buf = (char *)block;
   }
   memcpy(P->buf + P->bufn, s, len);
@@ -848,7 +974,8 @@ static int bufput (Parser *P, const char *s, size_t len) {
 }
 
 static void skipwhitespace (Parser *P) {
-  while (P->p < P->e && (*P->p == ' ' || *P->p == '\n' || *P->p == '\r' || *P->p == '\t')) P->p++;
+  while (P->p < P->e && (*P->p == ' ' || *P->p == '\n' || *P->p == '\r' || *P->p == '\t'))
+    P->p++;
 }
 
 static int skipwhitespaceandcomments (Parser *P) {
@@ -857,17 +984,21 @@ static int skipwhitespaceandcomments (Parser *P) {
     while (consume(P, '/')) {
       if (consume(P, '*')) {
         for (;;) {
-          if (P->p >= P->e) return seterror(P, LJSON_ERROR_UNSPECIFIC_SYNTAX_ERROR, tell(P));
+          if (P->p >= P->e)
+            return seterror(P, LJSON_ERROR_UNSPECIFIC_SYNTAX_ERROR, tell(P));
           else if (consume(P, '*')) {
-            if (consume(P, '/')) break;
+            if (consume(P, '/'))
+              break;
           }
-          else P->p++;
+          else
+            P->p++;
         }
       }
       else if (consume(P, '/')) {
         while (P->p < P->e && *P->p++ != '\n') {}
       }
-      else return seterror(P, LJSON_ERROR_UNSPECIFIC_SYNTAX_ERROR, tell(P));
+      else
+        return seterror(P, LJSON_ERROR_UNSPECIFIC_SYNTAX_ERROR, tell(P));
       skipwhitespace(P);
     }
   }
@@ -878,14 +1009,22 @@ static int parseliteral (Parser *P, const char *rest, int what) {
   int ok;
   P->p++;
   for (; *rest; rest++) {
-    if (!consume(P, *rest)) return seterror(P, LJSON_ERROR_VALUE_INVALID, tell(P));
+    if (!consume(P, *rest))
+      return seterror(P, LJSON_ERROR_VALUE_INVALID, tell(P));
   }
   switch (what) {
-    case 'n': ok = P->h->null(P->ud); break;
-    case 't': ok = P->h->boolean(P->ud, 1); break;
-    default: ok = P->h->boolean(P->ud, 0); break;
+    case 'n':
+      ok = P->h->null(P->ud);
+      break;
+    case 't':
+      ok = P->h->boolean(P->ud, 1);
+      break;
+    default:
+      ok = P->h->boolean(P->ud, 0);
+      break;
   }
-  if (!ok) return seterror(P, LJSON_ERROR_TERMINATION, tell(P));
+  if (!ok)
+    return seterror(P, LJSON_ERROR_TERMINATION, tell(P));
   return 1;
 }
 
@@ -895,9 +1034,12 @@ static unsigned parsehex4 (Parser *P, size_t escoffset) {
   for (i = 0; i < 4; i++) {
     char c = peek(P);
     codepoint <<= 4;
-    if (c >= '0' && c <= '9') codepoint += (unsigned)(c - '0');
-    else if (c >= 'A' && c <= 'F') codepoint += (unsigned)(c - 'A' + 10);
-    else if (c >= 'a' && c <= 'f') codepoint += (unsigned)(c - 'a' + 10);
+    if (c >= '0' && c <= '9')
+      codepoint += (unsigned)(c - '0');
+    else if (c >= 'A' && c <= 'F')
+      codepoint += (unsigned)(c - 'A' + 10);
+    else if (c >= 'a' && c <= 'f')
+      codepoint += (unsigned)(c - 'a' + 10);
     else {
       seterror(P, LJSON_ERROR_STRING_UNICODE_ESCAPE_INVALID_HEX, escoffset);
       return 0;
@@ -957,11 +1099,13 @@ static int parsestring (Parser *P, int iskey) {
       P->p++;
       goto submit;
     }
-    if (c == '\\' || c < 0x20) break;
+    if (c == '\\' || c < 0x20)
+      break;
     P->p++;
   }
   P->bufn = 0;
-  if (!bufput(P, s, (size_t)(P->p - s))) return 0;
+  if (!bufput(P, s, (size_t)(P->p - s)))
+    return 0;
   for (;;) {
     unsigned char c = (P->p < P->e) ? (unsigned char)*P->p : 0;
     if (c == '\\') {
@@ -971,54 +1115,67 @@ static int parsestring (Parser *P, int iskey) {
       e = (unsigned char)peek(P);
       if (unescape[e]) {
         P->p++;
-        if (!bufput(P, &unescape[e], 1)) return 0;
+        if (!bufput(P, &unescape[e], 1))
+          return 0;
       }
       else if (e == 'u') {
         unsigned codepoint;
         P->p++;
         codepoint = parsehex4(P, escoffset);
-        if (P->error) return 0;
+        if (P->error)
+          return 0;
         if (codepoint >= 0xD800 && codepoint <= 0xDFFF) {
           if (codepoint <= 0xDBFF) {
             unsigned codepoint2;
-            if (!consume(P, '\\') || !consume(P, 'u')) return seterror(P, LJSON_ERROR_STRING_UNICODE_SURROGATE_INVALID, escoffset);
+            if (!consume(P, '\\') || !consume(P, 'u'))
+              return seterror(P, LJSON_ERROR_STRING_UNICODE_SURROGATE_INVALID, escoffset);
             codepoint2 = parsehex4(P, escoffset);
-            if (P->error) return 0;
-            if (codepoint2 < 0xDC00 || codepoint2 > 0xDFFF) return seterror(P, LJSON_ERROR_STRING_UNICODE_SURROGATE_INVALID, escoffset);
+            if (P->error)
+              return 0;
+            if (codepoint2 < 0xDC00 || codepoint2 > 0xDFFF)
+              return seterror(P, LJSON_ERROR_STRING_UNICODE_SURROGATE_INVALID, escoffset);
             codepoint = (((codepoint - 0xD800) << 10) | (codepoint2 - 0xDC00)) + 0x10000;
           }
-          else if (!(P->flags & LJSON_PARSE_LENIENT)) return seterror(P, LJSON_ERROR_STRING_UNICODE_SURROGATE_INVALID, escoffset);
+          else if (!(P->flags & LJSON_PARSE_LENIENT))
+            return seterror(P, LJSON_ERROR_STRING_UNICODE_SURROGATE_INVALID, escoffset);
         }
-        if (!bufpututf8(P, codepoint)) return 0;
+        if (!bufpututf8(P, codepoint))
+          return 0;
       }
-      else return seterror(P, LJSON_ERROR_STRING_ESCAPE_INVALID, escoffset);
+      else
+        return seterror(P, LJSON_ERROR_STRING_ESCAPE_INVALID, escoffset);
     }
     else if (c == '"') {
       P->p++;
       break;
     }
     else if (c < 0x20) {
-      if (c == 0) return seterror(P, LJSON_ERROR_STRING_MISS_QUOTATION_MARK, tell(P));
+      if (c == 0)
+        return seterror(P, LJSON_ERROR_STRING_MISS_QUOTATION_MARK, tell(P));
       return seterror(P, LJSON_ERROR_STRING_INVALID_ENCODING, tell(P));
     }
     else {
       const char *run = P->p;
-      while (P->p < P->e && *P->p != '"' && *P->p != '\\' && (unsigned char)*P->p >= 0x20) P->p++;
-      if (!bufput(P, run, (size_t)(P->p - run))) return 0;
+      while (P->p < P->e && *P->p != '"' && *P->p != '\\' && (unsigned char)*P->p >= 0x20)
+        P->p++;
+      if (!bufput(P, run, (size_t)(P->p - run)))
+        return 0;
     }
   }
   str = P->buf;
   len = P->bufn;
 submit:
   ok = iskey ? P->h->key(P->ud, str, len) : P->h->string(P->ud, str, len);
-  if (!ok) return seterror(P, LJSON_ERROR_TERMINATION, tell(P));
+  if (!ok)
+    return seterror(P, LJSON_ERROR_TERMINATION, tell(P));
   return 1;
 }
 
 static int takepush (Parser *P, int full) {
   char c = *P->p++;
   if (full) {
-    if (!bufput(P, &c, 1)) return -1;
+    if (!bufput(P, &c, 1))
+      return -1;
   }
   return c - '0';
 }
@@ -1035,10 +1192,12 @@ static int parsenumber (Parser *P) {
   P->bufn = 0;
   minus = consume(P, '-');
   if (peek(P) == '0') {
-    if (takepush(P, full) < 0) return 0;
+    if (takepush(P, full) < 0)
+      return 0;
   }
   else if (peek(P) >= '1' && peek(P) <= '9') {
-    if ((t = takepush(P, full)) < 0) return 0;
+    if ((t = takepush(P, full)) < 0)
+      return 0;
     i = (unsigned)t;
     if (minus) {
       while (isdigit_(peek(P))) {
@@ -1049,7 +1208,8 @@ static int parsenumber (Parser *P) {
             break;
           }
         }
-        if ((t = takepush(P, full)) < 0) return 0;
+        if ((t = takepush(P, full)) < 0)
+          return 0;
         i = i * 10 + (unsigned)t;
         sigdigits++;
       }
@@ -1063,7 +1223,8 @@ static int parsenumber (Parser *P) {
             break;
           }
         }
-        if ((t = takepush(P, full)) < 0) return 0;
+        if ((t = takepush(P, full)) < 0)
+          return 0;
         i = i * 10 + (unsigned)t;
         sigdigits++;
       }
@@ -1080,12 +1241,15 @@ static int parsenumber (Parser *P) {
       if (consume(P, 'n') && consume(P, 'f')) {
         d = dfrombits(minus ? DP_SIGN_MASK | DP_EXPONENT_MASK : DP_EXPONENT_MASK);
         usenaninf = 1;
-        if (peek(P) == 'i' && !(consume(P, 'i') && consume(P, 'n') && consume(P, 'i') && consume(P, 't') && consume(P, 'y'))) return seterror(P, LJSON_ERROR_VALUE_INVALID, tell(P));
+        if (peek(P) == 'i' && !(consume(P, 'i') && consume(P, 'n') && consume(P, 'i') && consume(P, 't') && consume(P, 'y')))
+          return seterror(P, LJSON_ERROR_VALUE_INVALID, tell(P));
       }
     }
-    if (!usenaninf) return seterror(P, LJSON_ERROR_VALUE_INVALID, tell(P));
+    if (!usenaninf)
+      return seterror(P, LJSON_ERROR_VALUE_INVALID, tell(P));
   }
-  else return seterror(P, LJSON_ERROR_VALUE_INVALID, tell(P));
+  else
+    return seterror(P, LJSON_ERROR_VALUE_INVALID, tell(P));
   if (use64) {
     if (minus) {
       while (isdigit_(peek(P))) {
@@ -1096,7 +1260,8 @@ static int parsenumber (Parser *P) {
             break;
           }
         }
-        if ((t = takepush(P, full)) < 0) return 0;
+        if ((t = takepush(P, full)) < 0)
+          return 0;
         i64 = i64 * 10 + (unsigned)t;
         sigdigits++;
       }
@@ -1110,7 +1275,8 @@ static int parsenumber (Parser *P) {
             break;
           }
         }
-        if ((t = takepush(P, full)) < 0) return 0;
+        if ((t = takepush(P, full)) < 0)
+          return 0;
         i64 = i64 * 10 + (unsigned)t;
         sigdigits++;
       }
@@ -1118,36 +1284,46 @@ static int parsenumber (Parser *P) {
   }
   if (usedouble) {
     while (isdigit_(peek(P))) {
-      if ((t = takepush(P, full)) < 0) return 0;
+      if ((t = takepush(P, full)) < 0)
+        return 0;
       d = d * 10 + t;
     }
   }
   if ((!usenaninf || lenient) && consume(P, '.')) {
     decimalpos = P->bufn;
-    if (!isdigit_(peek(P))) return seterror(P, LJSON_ERROR_NUMBER_MISS_FRACTION, tell(P));
+    if (!isdigit_(peek(P)))
+      return seterror(P, LJSON_ERROR_NUMBER_MISS_FRACTION, tell(P));
     if (!usedouble) {
-      if (!use64) i64 = i;
+      if (!use64)
+        i64 = i;
       while (isdigit_(peek(P))) {
-        if (i64 > UINT64_C(0x1FFFFFFFFFFFFF)) break;
-        if ((t = takepush(P, full)) < 0) return 0;
+        if (i64 > UINT64_C(0x1FFFFFFFFFFFFF))
+          break;
+        if ((t = takepush(P, full)) < 0)
+          return 0;
         i64 = i64 * 10 + (unsigned)t;
         --expfrac;
-        if (i64 != 0) sigdigits++;
+        if (i64 != 0)
+          sigdigits++;
       }
       d = (double)i64;
       usedouble = 1;
     }
     while (isdigit_(peek(P))) {
       if (sigdigits < 17) {
-        if ((t = takepush(P, full)) < 0) return 0;
+        if ((t = takepush(P, full)) < 0)
+          return 0;
         d = d * 10.0 + t;
         --expfrac;
-        if (d > 0.0) sigdigits++;
+        if (d > 0.0)
+          sigdigits++;
       }
-      else if (takepush(P, full) < 0) return 0;
+      else if (takepush(P, full) < 0)
+        return 0;
     }
   }
-  else decimalpos = P->bufn;
+  else
+    decimalpos = P->bufn;
   if ((!usenaninf || lenient) && (consume(P, 'e') || consume(P, 'E'))) {
     int expminus = 0;
     if (!usedouble) {
@@ -1155,7 +1331,8 @@ static int parsenumber (Parser *P) {
       usedouble = 1;
     }
     if (consume(P, '+')) {}
-    else if (consume(P, '-')) expminus = 1;
+    else if (consume(P, '-'))
+      expminus = 1;
     if (isdigit_(peek(P))) {
       exp = *P->p++ - '0';
       if (expminus) {
@@ -1163,7 +1340,8 @@ static int parsenumber (Parser *P) {
         while (isdigit_(peek(P))) {
           exp = exp * 10 + (*P->p++ - '0');
           if (exp > maxexp) {
-            while (isdigit_(peek(P))) P->p++;
+            while (isdigit_(peek(P)))
+              P->p++;
           }
         }
       }
@@ -1171,28 +1349,39 @@ static int parsenumber (Parser *P) {
         int maxexp = 308 - expfrac;
         while (isdigit_(peek(P))) {
           exp = (int)((unsigned)exp * 10u + (unsigned)(*P->p++ - '0'));
-          if (exp > maxexp && d != 0.0) return seterror(P, LJSON_ERROR_NUMBER_TOO_BIG, start);
+          if (exp > maxexp && d != 0.0)
+            return seterror(P, LJSON_ERROR_NUMBER_TOO_BIG, start);
           if (exp > maxexp) {
-            while (isdigit_(peek(P))) P->p++;
+            while (isdigit_(peek(P)))
+              P->p++;
             exp = 0;
           }
         }
       }
     }
-    else return seterror(P, LJSON_ERROR_NUMBER_MISS_EXPONENT, tell(P));
-    if (expminus) exp = -exp;
+    else
+      return seterror(P, LJSON_ERROR_NUMBER_MISS_EXPONENT, tell(P));
+    if (expminus)
+      exp = -exp;
   }
   if (usedouble) {
     const int p = exp + expfrac;
-    if (full) d = strtodfull(d, p, P->buf, P->bufn, decimalpos, exp);
-    else d = strtodnormal(d, p);
-    if (d > DBL_MAX) return seterror(P, LJSON_ERROR_NUMBER_TOO_BIG, start);
+    if (full)
+      d = strtodfull(d, p, P->buf, P->bufn, decimalpos, exp);
+    else
+      d = strtodnormal(d, p);
+    if (d > DBL_MAX)
+      return seterror(P, LJSON_ERROR_NUMBER_TOO_BIG, start);
     ok = P->h->number(P->ud, minus ? -d : d);
   }
-  else if (usenaninf) ok = P->h->number(P->ud, d);
-  else if (use64) ok = minus ? P->h->integer(P->ud, (int64_t)(~i64 + 1)) : P->h->uinteger(P->ud, i64);
-  else ok = minus ? P->h->integer(P->ud, (int32_t)(~i + 1)) : P->h->uinteger(P->ud, i);
-  if (!ok) return seterror(P, LJSON_ERROR_TERMINATION, start);
+  else if (usenaninf)
+    ok = P->h->number(P->ud, d);
+  else if (use64)
+    ok = minus ? P->h->integer(P->ud, (int64_t)(~i64 + 1)) : P->h->uinteger(P->ud, i64);
+  else
+    ok = minus ? P->h->integer(P->ud, (int32_t)(~i + 1)) : P->h->uinteger(P->ud, i);
+  if (!ok)
+    return seterror(P, LJSON_ERROR_TERMINATION, start);
   return 1;
 }
 
@@ -1227,8 +1416,10 @@ static int transit (Parser *P, int src, int dst) {
     case S_ERROR: return dst;
     case S_OBJECTINITIAL: case S_ARRAYINITIAL: {
       int n = src, ok;
-      if (src == S_ARRAYINITIAL || src == S_ELEMENTDELIMITER) n = S_ELEMENT;
-      else if (src == S_KEYVALUEDELIMITER) n = S_MEMBERVALUE;
+      if (src == S_ARRAYINITIAL || src == S_ELEMENTDELIMITER)
+        n = S_ELEMENT;
+      else if (src == S_KEYVALUEDELIMITER)
+        n = S_MEMBERVALUE;
       if (P->maxdepth > 0 && P->depth >= P->maxdepth) {
         seterror(P, LJSON_ERROR_DEPTH, tell(P));
         return S_ERROR;
@@ -1273,9 +1464,11 @@ static int transit (Parser *P, int src, int dst) {
       }
       f = &P->frames[--P->depth];
       c = f->count;
-      if (src == S_MEMBERVALUE || src == S_ELEMENT) ++c;
+      if (src == S_MEMBERVALUE || src == S_ELEMENT)
+        ++c;
       n = f->state;
-      if (n == S_START) n = S_FINISH;
+      if (n == S_START)
+        n = S_FINISH;
       ok = (dst == S_OBJECTFINISH) ? P->h->end_object(P->ud, c) : P->h->end_array(P->ud, c);
       if (!ok) {
         seterror(P, LJSON_ERROR_TERMINATION, tell(P));
@@ -1290,15 +1483,33 @@ static int transit (Parser *P, int src, int dst) {
 }
 
 static void handleerror (Parser *P, int src) {
-  if (P->error) return;
+  if (P->error)
+    return;
   switch (src) {
-    case S_START: seterror(P, LJSON_ERROR_DOCUMENT_EMPTY, tell(P)); return;
-    case S_FINISH: seterror(P, LJSON_ERROR_DOCUMENT_ROOT_NOT_SINGULAR, tell(P)); return;
-    case S_OBJECTINITIAL: case S_MEMBERDELIMITER: seterror(P, LJSON_ERROR_OBJECT_MISS_NAME, tell(P)); return;
-    case S_MEMBERKEY: seterror(P, LJSON_ERROR_OBJECT_MISS_COLON, tell(P)); return;
-    case S_MEMBERVALUE: seterror(P, LJSON_ERROR_OBJECT_MISS_COMMA_OR_CURLY_BRACKET, tell(P)); return;
-    case S_KEYVALUEDELIMITER: case S_ARRAYINITIAL: case S_ELEMENTDELIMITER: seterror(P, LJSON_ERROR_VALUE_INVALID, tell(P)); return;
-    default: seterror(P, LJSON_ERROR_ARRAY_MISS_COMMA_OR_SQUARE_BRACKET, tell(P)); return;
+    case S_START:
+      seterror(P, LJSON_ERROR_DOCUMENT_EMPTY, tell(P));
+      return;
+    case S_FINISH:
+      seterror(P, LJSON_ERROR_DOCUMENT_ROOT_NOT_SINGULAR, tell(P));
+      return;
+    case S_OBJECTINITIAL:
+    case S_MEMBERDELIMITER:
+      seterror(P, LJSON_ERROR_OBJECT_MISS_NAME, tell(P));
+      return;
+    case S_MEMBERKEY:
+      seterror(P, LJSON_ERROR_OBJECT_MISS_COLON, tell(P));
+      return;
+    case S_MEMBERVALUE:
+      seterror(P, LJSON_ERROR_OBJECT_MISS_COMMA_OR_CURLY_BRACKET, tell(P));
+      return;
+    case S_KEYVALUEDELIMITER:
+    case S_ARRAYINITIAL:
+    case S_ELEMENTDELIMITER:
+      seterror(P, LJSON_ERROR_VALUE_INVALID, tell(P));
+      return;
+    default:
+      seterror(P, LJSON_ERROR_ARRAY_MISS_COMMA_OR_SQUARE_BRACKET, tell(P));
+      return;
   }
 }
 
@@ -1321,7 +1532,8 @@ int ljson_parse (const ljson_Reader *r, const char *s, size_t len, const ljson_H
   P.depth = 0;
   P.nframes = sizeof(P.initframes) / sizeof(P.initframes[0]);
   P.maxdepth = r->maxdepth;
-  if ((P.flags & LJSON_PARSE_SKIP_BOM) && len >= 3 && memcmp(s, "\xEF\xBB\xBF", 3) == 0) P.p += 3;
+  if ((P.flags & LJSON_PARSE_SKIP_BOM) && len >= 3 && memcmp(s, "\xEF\xBB\xBF", 3) == 0)
+    P.p += 3;
   if (skipwhitespaceandcomments(&P)) {
     while (P.p < P.e) {
       int d = transit(&P, state, predict[state][tokenize(peek(&P))]);
@@ -1330,10 +1542,13 @@ int ljson_parse (const ljson_Reader *r, const char *s, size_t len, const ljson_H
         break;
       }
       state = d;
-      if ((P.flags & LJSON_PARSE_STOP_WHEN_DONE) && state == S_FINISH) break;
-      if (!skipwhitespaceandcomments(&P)) break;
+      if ((P.flags & LJSON_PARSE_STOP_WHEN_DONE) && state == S_FINISH)
+        break;
+      if (!skipwhitespaceandcomments(&P))
+        break;
     }
-    if (state != S_FINISH) handleerror(&P, state);
+    if (state != S_FINISH)
+      handleerror(&P, state);
   }
   freeblock(P.alloc, P.allocud, P.buf, P.initbuf, P.bufsize, 1);
   freeblock(P.alloc, P.allocud, P.frames, P.initframes, P.nframes, sizeof(Frame));
@@ -1408,7 +1623,8 @@ static void *arena (Builder *B, size_t n) {
     return (char *)head + BLOCKHEADER + head->used - n;
   }
   size = (head == NULL) ? BLOCKMIN : (head->size < BLOCKMAX) ? head->size * 2 : BLOCKMAX;
-  if (n > size / 2) size = n;
+  if (n > size / 2)
+    size = n;
   if ((b = (Block *)d->alloc(d->allocud, NULL, 0, BLOCKHEADER + size)) == NULL) {
     B->nomem = 1;
     return NULL;
@@ -1486,8 +1702,10 @@ static int b_string (void *ud, const char *s, size_t len) {
   Builder *B = (Builder *)ud;
   ljson_Value v;
   char *copy = (char *)arena(B, len + 1);
-  if (copy == NULL) return 0;
-  if (len > 0) memcpy(copy, s, len);
+  if (copy == NULL)
+    return 0;
+  if (len > 0)
+    memcpy(copy, s, len);
   copy[len] = '\0';
   v.type = LJSON_STRING;
   v.via.str.size = len;
@@ -1513,7 +1731,8 @@ static int b_end_object (void *ud, size_t count) {
       B->nomem = 1;
       return 0;
     }
-    if ((v.via.object.ptr = (ljson_Pair *)arena(B, count * sizeof(ljson_Pair))) == NULL) return 0;
+    if ((v.via.object.ptr = (ljson_Pair *)arena(B, count * sizeof(ljson_Pair))) == NULL)
+      return 0;
     for (i = 0; i < count; i++) {
       v.via.object.ptr[i].key = top[2 * i];
       v.via.object.ptr[i].val = top[2 * i + 1];
@@ -1534,7 +1753,8 @@ static int b_end_array (void *ud, size_t count) {
       B->nomem = 1;
       return 0;
     }
-    if ((v.via.array.ptr = (ljson_Value *)arena(B, count * sizeof(ljson_Value))) == NULL) return 0;
+    if ((v.via.array.ptr = (ljson_Value *)arena(B, count * sizeof(ljson_Value))) == NULL)
+      return 0;
     memcpy(v.via.array.ptr, B->stack + B->n - count, count * sizeof(ljson_Value));
     B->n -= count;
   }
@@ -1574,10 +1794,14 @@ int ljson_decode (ljson_Document *d, const char *s, size_t len, unsigned flags, 
   B.n = B.size = 0;
   B.nomem = 0;
   error = ljson_parse(&r, s, len, &builder, &B, offset);
-  if (B.nomem) error = LJSON_ERROR_MEMORY;
-  if (error == LJSON_OK) d->root = B.stack[0];
-  if (B.stack != NULL) d->alloc(d->allocud, B.stack, B.size * sizeof(ljson_Value), 0);
-  if (error != LJSON_OK) ljson_document_free(d);
+  if (B.nomem)
+    error = LJSON_ERROR_MEMORY;
+  if (error == LJSON_OK)
+    d->root = B.stack[0];
+  if (B.stack != NULL)
+    d->alloc(d->allocud, B.stack, B.size * sizeof(ljson_Value), 0);
+  if (error != LJSON_OK)
+    ljson_document_free(d);
   return error;
 }
 
@@ -1614,7 +1838,8 @@ const char *ljson_writer_result (const ljson_Writer *w, size_t *len) {
 }
 
 static int reserve (ljson_Writer *w, size_t k) {
-  if (w->nomem) return 0;
+  if (w->nomem)
+    return 0;
   if (w->size - w->n < k) {
     void *block = w->b;
     if (k > (size_t)-1 - w->n || !growblock(w->alloc, w->allocud, &block, w->initb, &w->size, w->n + k, 1)) {
@@ -1627,7 +1852,8 @@ static int reserve (ljson_Writer *w, size_t k) {
 }
 
 static void put (ljson_Writer *w, char c) {
-  if (reserve(w, 1)) w->b[w->n++] = c;
+  if (reserve(w, 1))
+    w->b[w->n++] = c;
 }
 
 static void putn (ljson_Writer *w, const char *s, size_t len) {
@@ -1647,15 +1873,18 @@ static void writeindent (ljson_Writer *w) {
 
 static void prefix (ljson_Writer *w) {
   ljson_Level *level;
-  if (w->depth == 0) return;
+  if (w->depth == 0)
+    return;
   level = &w->levels[w->depth - 1];
   if (!(w->flags & LJSON_WRITE_PRETTY)) {
-    if (level->count > 0) put(w, (level->inarray || level->count % 2 == 0) ? ',' : ':');
+    if (level->count > 0)
+      put(w, (level->inarray || level->count % 2 == 0) ? ',' : ':');
   }
   else if (level->inarray) {
     if (level->count > 0) {
       put(w, ',');
-      if (w->flags & LJSON_WRITE_SINGLE_LINE_ARRAY) put(w, ' ');
+      if (w->flags & LJSON_WRITE_SINGLE_LINE_ARRAY)
+        put(w, ' ');
     }
     if (!(w->flags & LJSON_WRITE_SINGLE_LINE_ARRAY)) {
       put(w, '\n');
@@ -1664,16 +1893,22 @@ static void prefix (ljson_Writer *w) {
   }
   else {
     if (level->count > 0) {
-      if (level->count % 2 == 0) putn(w, ",\n", 2);
-      else putn(w, ": ", 2);
+      if (level->count % 2 == 0)
+        putn(w, ",\n", 2);
+      else
+        putn(w, ": ", 2);
     }
-    else put(w, '\n');
-    if (level->count % 2 == 0) writeindent(w);
+    else
+      put(w, '\n');
+    if (level->count % 2 == 0)
+      writeindent(w);
   }
   level->count++;
 }
 
-static int done (ljson_Writer *w) { return w->nomem ? LJSON_ERROR_MEMORY : LJSON_OK; }
+static int done (ljson_Writer *w) {
+  return w->nomem ? LJSON_ERROR_MEMORY : LJSON_OK;
+}
 
 int ljson_write_null (ljson_Writer *w) {
   prefix(w);
@@ -1683,8 +1918,10 @@ int ljson_write_null (ljson_Writer *w) {
 
 int ljson_write_bool (ljson_Writer *w, int b) {
   prefix(w);
-  if (b) putn(w, "true", 4);
-  else putn(w, "false", 5);
+  if (b)
+    putn(w, "true", 4);
+  else
+    putn(w, "false", 5);
   return done(w);
 }
 
@@ -1704,12 +1941,16 @@ int ljson_write_uint (ljson_Writer *w, uint64_t u) {
 
 int ljson_write_double (ljson_Writer *w, double d) {
   uint64_t u = dbits(d);
-  if ((u & DP_EXPONENT_MASK) == DP_EXPONENT_MASK && !(w->flags & LJSON_WRITE_NAN_INF)) return LJSON_ERROR_NAN_INF;
+  if ((u & DP_EXPONENT_MASK) == DP_EXPONENT_MASK && !(w->flags & LJSON_WRITE_NAN_INF))
+    return LJSON_ERROR_NAN_INF;
   prefix(w);
   if ((u & DP_EXPONENT_MASK) == DP_EXPONENT_MASK) {
-    if (u & DP_SIGNIFICAND_MASK) putn(w, "NaN", 3);
-    else if (u & DP_SIGN_MASK) putn(w, "-Infinity", 9);
-    else putn(w, "Infinity", 8);
+    if (u & DP_SIGNIFICAND_MASK)
+      putn(w, "NaN", 3);
+    else if (u & DP_SIGN_MASK)
+      putn(w, "-Infinity", 9);
+    else
+      putn(w, "Infinity", 8);
   }
   else {
     char buff[32];
@@ -1732,9 +1973,11 @@ int ljson_write_string (ljson_Writer *w, const char *s, size_t len) {
     size_t run = i;
     unsigned char c;
     char seq[6];
-    while (i < len && !escape[(unsigned char)s[i]]) i++;
+    while (i < len && !escape[(unsigned char)s[i]])
+      i++;
     putn(w, s + run, i - run);
-    if (i == len) break;
+    if (i == len)
+      break;
     c = (unsigned char)s[i++];
     seq[0] = '\\';
     seq[1] = escape[c];
@@ -1748,7 +1991,9 @@ int ljson_write_string (ljson_Writer *w, const char *s, size_t len) {
   return done(w);
 }
 
-int ljson_write_key (ljson_Writer *w, const char *s, size_t len) { return ljson_write_string(w, s, len); }
+int ljson_write_key (ljson_Writer *w, const char *s, size_t len) {
+  return ljson_write_string(w, s, len);
+}
 
 static int startlevel (ljson_Writer *w, int inarray, char c) {
   prefix(w);
@@ -1769,7 +2014,8 @@ static int startlevel (ljson_Writer *w, int inarray, char c) {
 
 static int endlevel (ljson_Writer *w, int inarray, char c) {
   int empty;
-  if (w->depth == 0) return LJSON_ERROR_UNBALANCED;
+  if (w->depth == 0)
+    return LJSON_ERROR_UNBALANCED;
   empty = w->levels[--w->depth].count == 0;
   if ((w->flags & LJSON_WRITE_PRETTY) && !empty && (!inarray || !(w->flags & LJSON_WRITE_SINGLE_LINE_ARRAY))) {
     put(w, '\n');
@@ -1779,13 +2025,21 @@ static int endlevel (ljson_Writer *w, int inarray, char c) {
   return done(w);
 }
 
-int ljson_write_start_object (ljson_Writer *w) { return startlevel(w, 0, '{'); }
+int ljson_write_start_object (ljson_Writer *w) {
+  return startlevel(w, 0, '{');
+}
 
-int ljson_write_end_object (ljson_Writer *w) { return endlevel(w, 0, '}'); }
+int ljson_write_end_object (ljson_Writer *w) {
+  return endlevel(w, 0, '}');
+}
 
-int ljson_write_start_array (ljson_Writer *w) { return startlevel(w, 1, '['); }
+int ljson_write_start_array (ljson_Writer *w) {
+  return startlevel(w, 1, '[');
+}
 
-int ljson_write_end_array (ljson_Writer *w) { return endlevel(w, 1, ']'); }
+int ljson_write_end_array (ljson_Writer *w) {
+  return endlevel(w, 1, ']');
+}
 
 int ljson_write_raw (ljson_Writer *w, const char *s, size_t len) {
   prefix(w);

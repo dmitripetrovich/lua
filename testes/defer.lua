@@ -25,7 +25,7 @@ do
         defer y = y + 1 end
         defer y = y + 1 end
     end
-    check(x, 'DEFER', 'CLOSURE', 'DEFER', 'CLOSURE', 'RETURN')
+    check(x, 'CLOSURE', 'DEFER', 'CLOSURE', 'DEFER', 'RETURN')
     x()
     assert(y == 2)
     print 'Test 1 OK'

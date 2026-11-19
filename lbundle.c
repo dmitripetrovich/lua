@@ -1,26 +1,19 @@
 /*
-** Lua core, libraries, and interpreter in a single file.
-** Compiling just this file generates a complete Lua stand-alone
-** program:
+** Lua core, libraries and interpreter as one translation unit: every
+** internal function becomes static, so the compiler can inline across
+** files (the VM's hot paths especially). With -DMAKE_LIB it is just the
+** library, for embedding; otherwise it is the stand-alone interpreter:
 **
-** $ gcc -O2 -std=c99 -o lua onelua.c -lm
+** $ cc -O2 -std=c99 -DLUA_USE_LINUX -Wl,-E -I. -isystem cglm/include \
+**     -o lua lbundle.c <the .c files of libs/json and libs/msgpack> -lm -ldl
 **
-** or (for C89)
-**
-** $ gcc -O2 -std=c89 -DLUA_USE_C89 -o lua onelua.c -lm
-**
-** or (for Linux)
-**
-** gcc -O2 -o lua -DLUA_USE_LINUX -Wl,-E onelua.c -lm -ldl
-**
+** (the json and msgpack libraries are separate translation units).
 */
 
 /* default is to build the full interpreter */
 #ifndef MAKE_LIB
-#ifndef MAKE_LUAC
 #ifndef MAKE_LUA
 #define MAKE_LUA
-#endif
 #endif
 #endif
 
@@ -106,13 +99,8 @@
 /* auxiliary library -- used by all */
 #include "lauxlib.c"
 
-/* basic library -- luac too, for the iteration functions lvm.c compares */
-#if !defined(MAKE_LUAC) || defined(LUA_EXT_ITERATION)
+/* standard library */
 #include "lbaselib.c"
-#endif
-
-/* standard library  -- not used by luac */
-#ifndef MAKE_LUAC
 #include "lcorolib.c"
 #include "ldblib.c"
 #include "liolib.c"
@@ -123,7 +111,6 @@
 #include "ltablib.c"
 #include "lutf8lib.c"
 #include "linit.c"
-#endif
 
 /* test library -- used only for internal development */
 #if defined(LUA_DEBUG)
@@ -133,9 +120,4 @@
 /* lua */
 #ifdef MAKE_LUA
 #include "lua.c"
-#endif
-
-/* luac */
-#ifdef MAKE_LUAC
-#include "luac.c"
 #endif

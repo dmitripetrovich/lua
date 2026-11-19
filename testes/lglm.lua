@@ -57,6 +57,10 @@ do
   assert(tostring(vec4(1, 2, 3, 4)) == "vec4(1.000000, 2.000000, 3.000000, 4.000000)")
   assert(tostring(quat(1, 0, 0, 0)) == "quat(1.000000, {0.000000, 0.000000, 0.000000})")
   assert(tostring(mat2()) == "mat2x2((1.000000, 0.000000), (0.000000, 1.000000))")
+  local huge = vec4(-3.4e38)
+  local s = tostring(mat4(huge, huge, huge, huge))
+  assert(#s > 768 and s:sub(1, 8) == "mat4x4((" and s:sub(-2) == "))")
+  assert(select(2, s:gsub("%-33999", "")) == 16)
   assert(string.format("%s", vec2(1, 2)) == "vec2(1.000000, 2.000000)")
   if COMPAT then  -- grit-lua: vectors coerce to strings
     assert("v=" .. vec2(1, 2) == "v=vec2(1.000000, 2.000000)")
@@ -118,6 +122,10 @@ do
   assert(v / 2 == vec3(0.5, 1, 1.5) and 6 / v == vec3(6, 3, 2))
   assert(vec3(1.5, 2.5, -3.5) // 1 == vec3(1, 2, -4))
   assert(vec3(5, 6, 7) % 4 == vec3(1, 2, 3))
+  -- '%' is floored like numbers, mod truncates like math.fmod
+  assert(vec3(-5, 5, -5) % vec3(3, -3, -3) == vec3(-5 % 3, 5 % -3, -5 % -3))
+  assert(vec2(-5.5, 5.5) % 2 == vec2(-5.5 % 2, 5.5 % 2))
+  assert(mod(vec3(-5, 5, -5), vec3(3, -3, -3)) == vec3(math.fmod(-5, 3), math.fmod(5, -3), math.fmod(-5, -3)))
   assert(v ^ 2 == vec3(1, 4, 9))
   assert(-v == vec3(-1, -2, -3))
   assert(vec3(5, 6, 7) & 3 == vec3(1, 2, 3))
@@ -129,6 +137,12 @@ do
   local three = 3
   assert(three & vec3(5, 6, 7) == vec3(1, 2, 3))
   assert(1 << vec3(1, 2, 3) == vec3(2, 4, 8))
+  -- shifts follow integer semantics: negative counts reverse, 32 or more give 0
+  assert(vec3(1, 2, 4) << 32 == vec3(0) and vec3(8) >> 40 == vec3(0) and vec3(8) << 1e10 == vec3(0))
+  assert(vec3(8, 8, 8) << -2 == vec3(2) and vec3(1, 2, 4) >> -1 == vec3(2, 4, 8))
+  local sh = 33
+  assert(vec2(1, 1) << sh == vec2(0) and vec2(4, 4) >> -sh == vec2(0) and vec2(4, 4) << -(sh - 31) == vec2(1))
+  assert(vec3(1, 2, 4) << vec3(32, -1, 1) == vec3(0, 1, 8) and 1 << vec3(40, -1, 0) == vec3(0, 0, 1))
   assert(mat2(2) * 2 == mat2(4) and 2 * mat2(2) == mat2(4) and -mat2(1) == mat2(-1))
   assert(tostring(v / 0) == "vec3(inf, inf, inf)")
   check("attempt to add a", function () return vec3() + vec4() end)
@@ -185,6 +199,12 @@ do
   assert(s == mat3() and c ~= s)
   local sink = mat3()
   assert(rawequal(mat3x3(sink, r), sink) and sink == r)
+  local d = mat3(vec3(1, 2, 3))
+  local copy = mat3(d)
+  assert(copy == d and d == mat3(vec3(1, 2, 3)))
+  copy[1] = vec3(9)
+  assert(d[1] == vec3(1, 0, 0))
+  assert(mat3(mat4(2)) == mat3(2) and mat2(mat3(2)) == mat2(2))
   local n = 0
   for k, col in pairs(r) do n = n + 1; assert(col == r[k]) end
   assert(n == 3)
@@ -271,8 +291,12 @@ end
 
 -- hashing
 if joaat then
-  assert(joaat("hello") == -922937317 and `hello` == -922937317)
+  local unsigned = joaat("hello") > 0  -- GRIT_POWER_UHASH
+  local function h32 (h) return unsigned and h & 0xFFFFFFFF or h end
+  assert(joaat("hello") == h32(-922937317) and `hello` == h32(-922937317))
   assert(`hello` == `HELLO` and joaat("Hello", true) ~= joaat("hello", true))
+  -- only ASCII folds; other bytes hash as signed chars on every platform
+  assert(joaat("ÄB") == h32(-2071170799) and joaat("Äb") == joaat("ÄB") and `ÄB` == h32(-2071170799))
 end
 
 -- C API
@@ -307,6 +331,32 @@ if T then
   assert(m[1] == vec2(5, 6))
   T.testC("pushvalue 3; seti 2 2; return 0", m, vec2(7, 8))
   assert(m[2] == vec2(7, 8))
+end
+
+do  -- length, distance and dot: the fast path (global call) and a plain call agree
+  local g = { length = length, distance = distance, dot = dot }
+  local function both (name, ...)
+    local fast = load("local a, b = ... return " .. name .. "(a, b)")
+    local ok1, r1 = pcall(fast, ...)
+    local ok2, r2 = pcall(g[name], ...)
+    assert(ok1 == ok2, name)
+    if ok1 then
+      assert(r1 == r2 and math.type(r1) == math.type(r2), name)
+    end
+    return ok1, r1
+  end
+  assert(select(2, both("length", vec3(3, 4, 0))) == 5)
+  assert(select(2, both("length", -3)) == 3 and math.type(select(2, both("length", -3))) == "integer")
+  assert(select(2, both("length", -2.5)) == 2.5)
+  assert(length("abc") == 3 and length({ 1, 2 }) == 2)
+  assert(select(2, both("distance", vec2(0, 0), vec2(3, 4))) == 5)
+  assert(select(2, both("distance", 7, -3)) == 10)
+  assert(select(2, both("distance", math.mininteger, math.maxinteger)) == 2.0^64 - 1)
+  assert(select(2, both("distance", 1.5, -1)) == 2.5)
+  assert(select(2, both("dot", vec2(1, 2), vec2(3, 4))) == 11)
+  assert(select(2, both("dot", 2, 3)) == 6 and math.type(select(2, both("dot", 2, 3))) == "integer")
+  assert(select(2, both("dot", 0.5, 4)) == 2.0)
+  assert(not both("dot", {}, {}) and not both("distance", "x", 1) and not both("dot", vec2(1), vec3(1)))
 end
 
 print("OK")

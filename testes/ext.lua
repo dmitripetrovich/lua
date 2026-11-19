@@ -13,6 +13,11 @@ local function line_of (src)
   return tonumber(string.match(msg, "^src:(%d+):"))
 end
 
+local function compiles (src)
+  local f, err = load(src)
+  return f ~= nil, err
+end
+
 
 print("testing C comments and line numbers")
 
@@ -262,14 +267,18 @@ end
 do
   local f = assert(load("return |x| x + 1"))
   local g = assert(load("return function(x) return x + 1 end"))
-  assert(string.dump(f(), true) == string.dump(g(), true))
-  assert(string.dump(f, true) == string.dump(g, true))
+  local function samecode (a, b)  -- (no dumps under LUA_NO_DUMP)
+    local ok, da = pcall(string.dump, a, true)
+    return not ok or da == string.dump(b, true)
+  end
+  assert(samecode(f(), g()))
+  assert(samecode(f, g))
   f = assert(load("return |a, ...| a(...)"))
   g = assert(load("return function(a, ...) return a(...) end"))
-  assert(string.dump(f(), true) == string.dump(g(), true))
+  assert(samecode(f(), g()))
   f = assert(load("return |...t| t.n"))
   g = assert(load("return function(...t) return t.n end"))
-  assert(string.dump(f(), true) == string.dump(g(), true))
+  assert(samecode(f(), g()))
   local l = assert(load("return |a,\nb|\na +\nb\n\n"))()
   local info = debug.getinfo(l, "S")
   assert(info.linedefined == 1 and info.lastlinedefined == 4)
@@ -315,6 +324,14 @@ do
   assert(k == 10 and c == 20 and d == 30)
   local x in (t)
   assert(x == nil)
+  local k2, c2 in t  -- a plain local is indexed in place
+  assert(k2 == nil and c2 == nil)
+  local t2 = {k3 = 1, t2 = 2}
+  local k3, t2 in t2  -- the new 't2' is not visible yet: the outer one is read
+  assert(k3 == 1 and t2 == 2)
+  local up = {k4 = 5}
+  local function fromup () local k4 in up return k4 end  -- an upvalue
+  assert(fromup() == 5)
   k, c, d = 0, 0, 0
   k, c, d in (t)
   assert(k == 10 and c == 20 and d == 30)
@@ -546,6 +563,26 @@ if load('return $"x"') then
   assert(load('local s = "" for i = 1, 3 do s = s .. $"[{i}]" end return s')() == "[1][2][3]")
   local tostring = nil
   assert(load('local tostring = nil return $"{1}"')() == "1")
+  do  -- no dependency on string.format; same conversions as tostring
+    local format = string.format
+    string.format = nil
+    assert(load('return $"{1}-{nil}"')() == "1-nil")
+    string.format = format
+  end
+  assert(load('return $"{1.0}|{-0.0}|{2^63}|{math.mininteger}"')() == "1.0|-0.0|" .. _G.tostring(2^63) .. "|-9223372036854775808")
+  local named = setmetatable({}, { __name = "Thing" })
+  assert(load('local t = ... return $"{t}"')(named) == _G.tostring(named) and _G.tostring(named):find("^Thing: "))
+  local plain = {}
+  assert(load('local t = ... return $"{t}"')(plain) == _G.tostring(plain))
+  assert(load('return $"{print}"')() == _G.tostring(print))
+  assert(load('local m = ... return $"{m}"')(mat2()) == _G.tostring(mat2()))
+  assert(load('local t = ... return $"{t}"')(setmetatable({}, { __tostring = function () return 42 end })) == "42")
+  local bad = setmetatable({}, { __tostring = function () return {} end })
+  local ok, err = pcall(load('local t = ... return $"{t}"'), bad)
+  assert(not ok and err:find("'__tostring' must return a string"))
+  local calls = 0
+  local counted = setmetatable({}, { __tostring = function (...) calls = calls + select("#", ...) return "c" end })
+  assert(load('local t = ... return $"{t}{t}"')(counted) == "cc" and calls == 2)
   check_error('return $"{}"', "empty expression")
   check_error('return $"{1 2}"', "'}' expected")
   check_error('return $"abc', "unfinished string")
@@ -798,6 +835,804 @@ if load("switch 1 end") then
   assert(not load("local case = 1") and not load("local switch = 1"))
 else
   print("\n >>> switch not compiled: skipping its tests <<<\n")
+end
+
+
+print("testing a named vararg parameter as an assignment target")
+
+do
+  local f = load("local function f (...t) t.x, t.y = 1, 2 local x, y; x, y in t return x, y end return f")
+  if f then
+    local x, y = f()()
+    assert(x == 1 and y == 2)
+  end
+  f = load("local function f (...t) t[1] += 10 t.n -= 1 return t[1], t.n end return f")
+  if f then
+    local a, n = f()(5)
+    assert(a == 15 and n == 0)
+  end
+  f = load("local function f (...t) t[1] ??= 7 t[2] ??= 7 return t[1], t[2] end return f")
+  if f then
+    local a, b = f()(1)
+    assert(a == 1 and b == 7)
+  end
+end
+
+
+print("testing compound assignment")
+
+do
+  local x = 10
+  x += 5
+  assert(x == 15)
+  x -= 3
+  assert(x == 12)
+  x -= -1
+  assert(x == 13)
+  x *= 2 + 1
+  assert(x == 39)
+  x /= 6
+  assert(x == 6.5 and math.type(x) == "float")
+  x=1
+  x+=1
+  assert(x == 2)
+  local i = 3
+  i <<= 4
+  assert(i == 48)
+  i >>= 2
+  assert(i == 12)
+  i &= 10
+  assert(i == 8)
+  i |= 3
+  assert(i == 11)
+  -- '^=' is exponentiation, like '^'
+  i ^= 2
+  assert(i == 121.0 and math.type(i) == "float")
+  i = 11
+  local n = -1
+  n >>= 63
+  assert(n == 1)
+  local s = 2.0
+  s <<= 1
+  assert(s == 4 and math.type(s) == "integer")
+
+  local up = 1
+  local function bump () up += 2 end
+  bump()
+  bump()
+  assert(up == 5)
+
+  COMPOUND_GLOBAL = 5
+  COMPOUND_GLOBAL *= 3
+  COMPOUND_GLOBAL -= 1
+  assert(COMPOUND_GLOBAL == 14)
+  COMPOUND_GLOBAL = nil
+
+  local t = { a = 1, [2] = 10 }
+  t.a += 1
+  t[2] -= 4
+  assert(t.a == 2 and t[2] == 6)
+  local k = 2
+  t[k] *= 3
+  assert(t[2] == 18)
+  local calls = 0
+  local function key () calls = calls + 1 return "a" end
+  t[key()] += 10
+  assert(t.a == 12 and calls == 1)
+  local gets = 0
+  local function tab () gets = gets + 1 return t end
+  tab().a |= 1
+  tab()[2] /= 2
+  assert(t.a == 13 and t[2] == 9 and gets == 2)
+  local m = { { 1, 2 }, { 3, 4 } }
+  local rows = 0
+  local function row () rows = rows + 1 return 2 end
+  m[row()][1] += 100
+  assert(m[2][1] == 103 and m[1][1] == 1 and rows == 1)
+
+  local log = {}
+  local proxy = setmetatable({}, { __index = function (_, f) log[#log + 1] = "get " .. f return 1 end, __newindex = function (_, f, v) log[#log + 1] = "set " .. f .. "=" .. v end })
+  proxy.v += 41
+  assert(#log == 2 and log[1] == "get v" and log[2] == "set v=42")
+  local obj = setmetatable({}, { __add = function (a, b) return type(a) .. "+" .. type(b) end })
+  local o = obj
+  o += 1
+  assert(o == "table+number")
+
+  if table.freeze then
+    local frozen = table.freeze({ v = 1 })
+    assert(not pcall(assert(load("local t = ... t.v += 1")), frozen))
+    assert(not pcall(assert(load("local t = ... t.v |= 2")), frozen))
+    assert(frozen.v == 1)
+  end
+  local ok = pcall(assert(load("local t = ... t.v += 1")), nil)
+  assert(not ok)
+end
+
+check_error("local k <const> = 1 k += 1", "attempt to assign to const variable 'k'")
+check_error("local k <const> = 1 k <<= 1", "attempt to assign to const variable 'k'")
+check_error("f() += 1", "syntax error")
+check_error("(x) += 1", "syntax error")
+check_error("x += ", "unexpected symbol")
+check_error("x, y += 1", "'=' expected")
+
+
+print("testing '::' field selection and dumping")
+
+if load("local t = {} return t::x") then  -- GRIT_POWER_NAMESPACE_SEL
+  local ns = { sub = { f = function (x) return x * 2 end, v = 7 } }
+  local a, b, c = load("local ns = ... return ns::sub::v, ns::sub.v, ns.sub::f(4)")(ns)
+  assert(a == 7 and b == 7 and c == 8)
+  assert(load("local ns = ... function ns::sub::g () return 1 end return ns.sub.g()")(ns) == 1)
+  -- labels still work at the start of a statement
+  assert(load("local n = 0 ::top:: n = n + 1 if n < 3 then goto top end return n")() == 3)
+  assert(load("for i = 1, 3 do if i == 2 then goto continue end ::continue:: end return true")())
+  assert(load("local n = 0 for i = 1, 3 do n = n + i\n ::continue:: end return n")() == 6)
+  assert(load("local t = {f = function () return {g = 5} end} return t::f()::g")() == 5)
+end
+
+do  -- string.dump either works or fails cleanly (LUA_NO_DUMP), never an empty chunk
+  local ok, res = pcall(string.dump, function () return 1 end)
+  if ok then
+    assert(#res > 0)
+    -- the format byte (after "\27Lua" and the version) must match this build
+    local f = load(res, "chunk", "b")
+    if f then
+      assert(f() == 1)
+      local other = res:sub(1, 5) .. string.char(res:byte(6) ~ 0x0F) .. res:sub(7)
+      local g, msg = load(other, "chunk", "b")
+      assert(g == nil and msg:find("format mismatch"))
+    end
+  else
+    assert(res:find("cannot dump functions"))
+  end
+end
+
+
+print("testing continue, imports, fast calls, table.find and string.split")
+
+do
+  local t = {}
+  for i = 1, 10 do
+    if i % 2 == 0 then continue end
+    t[#t + 1] = i
+  end
+  assert(table.concat(t, ",") == "1,3,5,7,9")
+
+  local sum = 0
+  local i = 0
+  while i < 10 do
+    i = i + 1
+    if i % 3 == 0 then continue end
+    sum = sum + i
+  end
+  assert(sum == 37)
+
+  local r = 0
+  local seen = 0
+  repeat
+    r = r + 1
+    if r < 5 then continue end
+    seen = seen + 1
+  until r >= 7
+  assert(r == 7 and seen == 3)
+
+  local keys = 0
+  for k, v in pairs({a = 1, b = 2, c = 3}) do
+    if v == 2 then continue end
+    keys = keys + 1
+  end
+  assert(keys == 2)
+
+  local odd = 0
+  for _, v in ipairs({1, 2, 3, 4, 5}) do
+    if v % 2 == 0 then continue end
+    odd = odd + v
+  end
+  assert(odd == 9)
+
+  local pairsum = 0
+  for a = 1, 3 do
+    for b = 1, 3 do
+      if b == a then continue end
+      pairsum = pairsum + a * 10 + b
+    end
+    if a == 2 then continue end
+    pairsum = pairsum + 1000
+  end
+  assert(pairsum == 2132)
+
+  local fs = {}
+  for k = 1, 5 do
+    local x = k * 10
+    fs[#fs + 1] = function () return x end
+    if k % 2 == 0 then continue end
+    x = x + 1
+  end
+  assert(fs[1]() == 11 and fs[2]() == 20 and fs[3]() == 31 and fs[4]() == 40 and fs[5]() == 51)
+
+  local wfs = {}
+  local w = 0
+  while w < 4 do
+    w = w + 1
+    local y = w
+    wfs[w] = function () return y end
+    if w == 2 then continue end
+    y = -y
+  end
+  assert(wfs[1]() == -1 and wfs[2]() == 2 and wfs[3]() == -3 and wfs[4]() == -4)
+
+  local rfs = {}
+  local rr = 0
+  repeat
+    rr = rr + 1
+    local z = rr
+    rfs[rr] = function () return z end
+    if rr == 2 then continue end
+    z = z * 100
+  until rr == 3
+  assert(rfs[1]() == 100 and rfs[2]() == 2 and rfs[3]() == 300)
+
+  local closed = 0
+  local mt = {__close = function () closed = closed + 1 end}
+  for k = 1, 4 do
+    local c <close> = setmetatable({}, mt)
+    if k % 2 == 0 then continue end
+  end
+  assert(closed == 4)
+
+  local ok = 0
+  repeat
+    local done = ok >= 3
+    if not done then
+      ok = ok + 1
+      continue
+    end
+  until done
+  assert(ok == 3)
+end
+
+do
+  local continue = 1
+  continue = continue + 1
+  assert(continue == 2)
+  local t = {continue = 3}
+  t.continue = t.continue + 1
+  assert(t.continue == 4)
+  local function continue2 () return "called" end
+  local calls = {continue = continue2}
+  assert(calls.continue() == "called")
+  assert(compiles("local continue = function () end continue()"))
+  assert(compiles("continue = 1"))
+  assert(compiles("local t = {} t.continue = 1"))
+  assert(compiles("local continue, x = 1, 2"))
+  local okc, err = compiles("continue")
+  assert(not okc and string.find(err, "continue outside loop"))
+  okc, err = compiles("for i = 1, 2 do local f = function () continue end end")
+  assert(not okc and string.find(err, "continue outside loop"))
+  okc, err = compiles("repeat if x then continue end local y = 1 until y")
+  assert(not okc and string.find(err, "local 'y' used in the repeat..until condition"))
+  assert(compiles("repeat if x then continue end local y = 1 until x"))
+  assert(compiles("repeat local y = 1 if y then continue end until y"))
+  okc, err = compiles("repeat local a = 1 if a then continue end local b = 2 local c = 3 until c")
+  assert(not okc and string.find(err, "local 'c'"))
+  local n = 0
+  for i = 1, 5 do
+    if i == 3 then goto continue end
+    n = n + i
+    ::continue::
+  end
+  assert(n == 12)
+  local m = 0
+  for i = 1, 3 do
+    for j = 1, 3 do
+      if j == 2 then goto next end
+      m = m + 1
+      ::next::
+    end
+    if i == 2 then continue end
+    m = m + 10
+  end
+  assert(m == 26)
+end
+
+do
+  local function floor (x) return math.floor(x) end
+  local function upper (s) return string.upper(s) end
+  assert(floor(1.5) == 1 and upper("a") == "A")
+  local old = math.floor
+  math.floor = function () return 42 end
+  assert(floor(1.5) == 42)
+  math.floor = old
+  assert(floor(1.5) == 1)
+  local oldmath = math
+  math = {floor = function () return 7 end}
+  assert(floor(1.5) == 7)
+  math = oldmath
+  assert(floor(1.5) == 1)
+  rawset(math, "floor", function () return 8 end)
+  assert(floor(1.5) == 8)
+  rawset(math, "floor", old)
+  assert(floor(1.5) == 1)
+  local proxy = setmetatable({}, {__newindex = math})
+  math.floor = nil
+  proxy.floor = function () return 9 end
+  assert(floor(1.5) == 9)
+  math.floor = old
+  assert(floor(1.5) == 1)
+  _ENV.math = {floor = function () return 10 end}
+  assert(floor(1.5) == 10)
+  _ENV.math = oldmath
+  assert(floor(1.5) == 1 and upper("b") == "B")
+
+  lib = {x = {y = 1, f = function () return "f1" end}}
+  local function y () return lib.x.y end
+  local function f () return lib.x.f() end
+  assert(y() == 1 and f() == "f1")
+  lib.x.y = 2
+  assert(y() == 2)
+  lib.x = {y = 3, f = function () return "f2" end}
+  assert(y() == 3 and f() == "f2")
+  function lib.x.f () return "f3" end
+  assert(f() == "f3")
+  lib.x.y, lib.x.z = 4, 5
+  assert(y() == 4 and lib.x.z == 5)
+  lib.x.y += 1
+  assert(y() == 5)
+  table.clear(lib.x)
+  assert(y() == nil)
+  lib.x.y = 6
+  assert(y() == 6)
+  table.clear(lib)
+  assert(not pcall(y))
+  lib = nil
+
+  local function make (env)
+    local _ENV = env
+    return function () return a.b end
+  end
+  local g1 = make({a = {b = 1}})
+  local g2 = make({a = {b = 2}})
+  assert(g1() == 1 and g2() == 2 and g1() == 1 and g2() == 2)
+
+  do
+    local _ENV = {assert = assert, math = {floor = function () return "local env" end}}
+    assert(math.floor(1) == "local env")
+  end
+  assert(math.floor(1.5) == 1)
+
+  local inherit = setmetatable({}, {__index = _G})
+  local h = load("return math.floor(2.5), string.rep('a', 2)", "h", "t", inherit)
+  local a1, a2 = h()
+  assert(a1 == 2 and a2 == "aa")
+  inherit.math = {floor = function () return "own" end}
+  assert(h() == "own")
+  inherit.math = nil
+  assert(h() == 2)
+
+  local idx = setmetatable({}, {__index = function (_, k) if k == "lib2" then return {v = {w = "dynamic"}} end end})
+  local dyn = load("return lib2.v.w", "d", "t", idx)
+  assert(dyn() == "dynamic")
+
+  local weakenv = setmetatable({lib3 = {v = "weak"}}, {__mode = "k"})
+  local wk = load("return lib3.v", "w", "t", weakenv)
+  assert(wk() == "weak")
+  weakenv.lib3 = {v = "changed"}
+  assert(wk() == "changed")
+
+  local meta = {}
+  local menv = setmetatable({lib4 = {v = 1}}, meta)
+  local mk = load("return lib4.v", "m", "t", menv)
+  assert(mk() == 1)
+  meta.__mode = "v"
+  menv.lib4.v = 2
+  assert(mk() == 2)
+  setmetatable(menv, nil)
+  menv.lib4 = {v = 3}
+  assert(mk() == 3)
+
+  local envf = load("return lib5.v", "e", "t", {lib5 = {v = "first"}})
+  assert(envf() == "first")
+  debug.setupvalue(envf, 1, {lib5 = {v = "second"}})
+  assert(envf() == "second")
+
+  local frozen = table.freeze({v = {w = 1}})
+  local fz = load("return lib6.v.w", "z", "t", {lib6 = frozen})
+  assert(fz() == 1)
+
+  local co = coroutine.wrap(function ()
+    coroutine.yield(math.floor(3.5))
+    coroutine.yield(math.floor(3.5))
+  end)
+  assert(co() == 3)
+  math.floor = function () return "co" end
+  assert(co() == "co")
+  math.floor = old
+
+  counter = 0
+  local function bump () for _ = 1, 100 do counter = counter + 1 assert(math.floor(counter + 0.5) == counter) end end
+  bump()
+  assert(counter == 100)
+  counter = nil
+
+  -- writes of keys no import reads keep the cache; writes of import keys
+  -- still reach it, however the key string was made
+  local oldlen = string.len
+  local function len2 () return string.len("ab") end
+  assert(len2() == 2)
+  for i = 1, 10 do unrelated = i; string.unrelated = i end
+  assert(len2() == 2)
+  string[("le") .. ("n")] = function () return "built key" end
+  assert(len2() == "built key")
+  for i = 1, 10 do unrelated = i; string.unrelated = i end
+  rawset(string, "len", function () return "raw" end)
+  assert(len2() == "raw")
+  string.len, string.unrelated, unrelated = oldlen, nil, nil
+  assert(len2() == 2)
+
+  -- other keys (and integer keys) written into an imported table take the
+  -- fast path and keep the cache; a __newindex chain into it updates
+  -- existing keys in place and still invalidates on import keys
+  M9 = {f = function () return 1 end, g = 1}
+  local callf = load("return M9.f()")
+  assert(callf() == 1)
+  M9[1] = "one"
+  M9.other = 2
+  M9.g = 3
+  assert(callf() == 1 and M9[1] == "one" and M9.other == 2 and M9.g == 3)
+  local proxy = setmetatable({}, {__newindex = M9})
+  proxy.g = 4
+  proxy.h = 5
+  local nkeys = 0
+  for _ in pairs(M9) do nkeys = nkeys + 1 end
+  assert(M9.g == 4 and M9.h == 5 and nkeys == 5)  -- f, g, [1], other, h
+  proxy.f = function () return 2 end
+  assert(callf() == 2)
+  -- a plain value is read fresh every time (it is not cached)
+  M9.n = 1
+  local getn = load("return M9.n")
+  for i = 1, 3 do
+    assert(getn() == i)
+    M9.n = i + 1
+  end
+  M9 = nil
+
+  local meta2 = {}
+  local menv2 = setmetatable({lib9 = {v = 1}}, meta2)
+  local mk2 = load("return lib9.v", "m2", "t", menv2)
+  assert(mk2() == 1)
+  rawset(meta2, "__mode", "v")
+  collectgarbage()
+  assert(menv2.lib9 == nil and not pcall(mk2))
+
+  local okm, msg = pcall(load("return nosuch.field.deep"))
+  assert(not okm and string.find(msg, "global 'nosuch'"))
+  local okn, msgn = pcall(load("local t = {} t.a = nil return lib7.a.b"))
+  assert(not okn and string.find(msgn, "global 'lib7'"))
+  lib8 = {}
+  local okf, msgf = pcall(load("return lib8.a.b"))
+  assert(not okf and string.find(msgf, "field 'a'"))
+  lib8 = nil
+end
+
+do
+  local function norm (v)
+    if type(v) == "string" then
+      return (v:gsub("^%[string .-%]:%d+: ", ""):gsub("'[%w%.%[%]\"]+'", "'f'"))
+    end
+    return v
+  end
+  local function same (f, g, ...)
+    local a = table.pack(pcall(f, ...))
+    local b = table.pack(pcall(g, ...))
+    if a.n ~= b.n then return false end
+    for i = 1, a.n do
+      local x, y = norm(a[i]), norm(b[i])
+      if math.type(x) ~= math.type(y) or type(x) ~= type(y) then return false end
+      if x ~= y and not (x ~= x and y ~= y) then return false end
+    end
+    return true
+  end
+  local alias = {}
+  local names = {"math.abs", "math.floor", "math.ceil", "math.sqrt", "math.min", "math.max", "math.sin", "math.cos", "math.clamp", "type", "rawequal", "rawget", "string.len", "string.byte", "vec2", "vec3", "vec4", "length", "distance", "dot"}
+  for _, name in ipairs(names) do
+    alias[name] = load("return " .. name)()
+  end
+  local function pair (name, params)
+    local fast = load("return function (" .. params .. ") local t = table.pack(" .. name .. "(" .. params .. ")) return table.unpack(t, 1, t.n) end")()
+    local slow = load("local alias = ... return function (" .. params .. ") local t = table.pack(alias['" .. name .. "'](" .. params .. ")) return table.unpack(t, 1, t.n) end")(alias)
+    return fast, slow
+  end
+  local values = {0, -0.0, 1, -1, 1.5, -1.5, 2^53, -2^63, math.mininteger, math.maxinteger, math.huge, -math.huge, 0/0, "3.5", "x", true, false, {}, vec3(1, 2, 3), vec3(4, 6, 3), vec2(3, 4)}
+  for _, name in ipairs(names) do
+    local f0, s0 = pair(name, "")
+    assert(same(f0, s0), name)
+    local f1, s1 = pair(name, "x")
+    local f2, s2 = pair(name, "x, y")
+    local f3, s3 = pair(name, "x, y, z")
+    for _, v in ipairs(values) do
+      assert(same(f1, s1, v), name)
+      for _, w in ipairs(values) do
+        assert(same(f2, s2, v, w), name)
+      end
+      assert(same(f3, s3, v, 2, 3), name)
+      assert(same(f3, s3, 1, v, 3), name)
+    end
+    assert(same(f1, s1, nil), name)
+    assert(same(f2, s2, nil, nil), name)
+  end
+  local fr, sr = pair("rawget", "x, y")
+  local idx = setmetatable({}, {__index = function () return 1 end})
+  assert(same(fr, sr, {a = 1}, "a") and same(fr, sr, idx, "a") and same(fr, sr, 1, 2))
+  local fb, sb = pair("string.byte", "x, y")
+  for _, i in ipairs({-5, -3, -1, 0, 1, 2, 3, 4, 9}) do
+    assert(same(fb, sb, "abc", i) and same(fb, sb, "", i))
+  end
+  local fm, sm = pair("math.max", "x, y, z, w")
+  assert(same(fm, sm, 1, 2.5, 2, 0/0) and same(fm, sm, 0/0, 1, 2, 3))
+  assert(select("#", math.floor(1.5)) == 1)
+  assert(select("#", string.byte("abc", 10)) == 0)
+  local a, b = math.floor(1.5)
+  assert(a == 1 and b == nil)
+  local packed = {math.floor(2.5), string.byte("abc", 10)}
+  assert(#packed == 1 and packed[1] == 2)
+  local saved = math.floor
+  math.floor = function () return "replaced" end
+  local t = table.pack(math.floor(1))
+  assert(t[1] == "replaced")
+  math.floor = saved
+  local calls = 0
+  debug.sethook(function () calls = calls + 1 end, "c")
+  for _ = 1, 10 do local r = math.floor(1.5) end
+  debug.sethook()
+  assert(calls >= 10)
+end
+
+do
+  assert(table.find({10, 20, 30}, 20) == 2)
+  assert(table.find({10, 20, 30}, 40) == nil)
+  assert(table.find({10, 20, 10}, 10, 2) == 3)
+  assert(table.find({1, 2, nil, 4}, 4) == nil)
+  assert(table.find({}, nil) == nil)
+  local eq = setmetatable({}, {__eq = function () return true end})
+  assert(table.find({setmetatable({}, getmetatable(eq))}, eq) == nil)
+  assert(not pcall(table.find, {1}, 1, 0))
+  assert(not pcall(table.find, nil, 1))
+  assert(not pcall(table.find, {1}))
+  local function parts (s, sep)
+    local t = sep == nil and string.split(s) or string.split(s, sep)
+    return table.concat(t, "|"), #t
+  end
+  local s, n = parts("a,b,,c")
+  assert(s == "a|b||c" and n == 4)
+  s, n = parts("a--b--c", "--")
+  assert(s == "a|b|c" and n == 3)
+  s, n = parts("abc", "")
+  assert(s == "a|b|c" and n == 3)
+  s, n = parts("", ",")
+  assert(s == "" and n == 1)
+  s, n = parts("", "")
+  assert(n == 0)
+  s, n = parts("a,", ",")
+  assert(s == "a|" and n == 2)
+  s, n = parts("abc", "x")
+  assert(s == "abc" and n == 1)
+  s, n = parts("a\0b\0c", "\0")
+  assert(n == 3)
+  s, n = parts("aaa", "aa")
+  assert(s == "|a" and n == 2)
+  assert(not pcall(string.split))
+  assert(("x;y"):split(";")[2] == "y")
+end
+
+if table.clone then
+  -- cloning into a metatable refreshes its cache of absent metamethods
+  local mt = {}
+  local obj = setmetatable({}, mt)
+  assert(obj.missing == nil)
+  table.clone({ __index = function () return "hit" end }, mt)
+  assert(obj.missing == "hit")
+end
+
+if utf8.strcmputf8i then
+  local cmp = utf8.strcmputf8i
+  assert(cmp("ab", "ac") == -1 and cmp("ac", "ab") == 1)
+  assert(cmp("ABC", "abc") == 0 and cmp("abc", "ABD") == -1)
+  assert(cmp("a", "ab") == -1 and cmp("ab", "a") == 1 and cmp("", "") == 0)
+  assert(cmp("ÄÖÜ", "äöü") == 0 and cmp("Привет", "привет") == 0 and cmp("ΣΩ", "σω") == 0)
+  assert(cmp("é", "f") == 1 and cmp("a\0b", "a\0c") == -1)
+  assert(cmp("\xff", "\xfe") == 1)
+end
+
+if string.strsplit then
+  local a, b = string.strsplit(",", "a\0b,c")
+  assert(a == "a\0b" and b == "c" and select("#", string.strsplit(",", "a\0b,c")) == 2)
+  local x, y, z = string.strsplit(",;", "1,2;3")
+  assert(x == "1" and y == "2" and z == "3")
+  local first, rest = string.strsplit(",", "1,2,3", 2)
+  assert(first == "1" and rest == "2,3")
+  assert(string.strjoin(",") == "" and string.strjoin(",", 5) == "5" and string.strjoin("", "a", 1) == "a1")
+  assert(string.strjoin("-", "a", "b") == "a-b" and string.strjoin("-", "a\0b", "c") == "a\0b-c")
+  assert(not pcall(string.strjoin, ",", {}) and not pcall(string.strjoin, ",", "a", {}))
+  assert(select("#", string.strsplit(",", "abc")) == 1 and string.strsplit(",", "") == "")
+  local p, q, r = string.strsplit(",", "a,,b")
+  assert(p == "a" and q == "" and r == "b")
+  local head, tail = string.strsplit(",", "a,")
+  assert(head == "a" and tail == "" and string.strsplit(",", "a,b", 1) == "a,b")
+end
+
+if string.strconcat then
+  assert(string.strconcat() == "" and string.strconcat("x") == "x")
+  assert(string.strconcat("a", 1, "b", 2.5) == "a1b2.5")
+  local cat = setmetatable({}, { __concat = function (a, b) return "<" .. type(a) .. "," .. type(b) .. ">" end })
+  assert(string.strconcat("a", cat) == "<string,table>")
+  assert(not pcall(string.strconcat, "a", {}) and not pcall(string.strconcat, "a", nil))
+end
+
+if string.tostringall then
+  local named = setmetatable({}, { __tostring = function () return "named" end })
+  local a, b, c, d, e = string.tostringall(1, nil, true, "s", named)
+  assert(a == "1" and b == "nil" and c == "true" and d == "s" and e == "named")
+  assert(select("#", string.tostringall()) == 0 and select("#", string.tostringall(nil, nil)) == 2)
+  assert(string.find(string.tostringall({}), "^table: "))
+end
+
+if string.blob then
+  local b = string.blob(4)
+  assert(type(b) == "string" and #b == 4 and string.isblob(b))
+  assert(not string.isblob("abcd") and not string.isblob(4) and not string.isblob())
+  assert(b:byte(1) == 0 and b:byte(4) == 0)
+  -- a blob never equals a regular string, even with the same contents
+  assert(b ~= "\0\0\0\0" and b == string.blob(4))
+  assert(not pcall(string.blob, 0) and not pcall(string.blob, -1) and not pcall(string.blob, {}))
+  local s = "abc"
+  local c = string.blob(s)
+  assert(string.isblob(c) and #c == 3 and c:sub(1) == "abc" and not string.isblob(s))
+  -- packing in place when the result fits
+  local r = string.blob_pack(b, "<i2", 0x0102)
+  assert(r == b and string.isblob(r) and string.unpack("<i2", b) == 0x0102)
+  r = string.blob_pack(b, 3, "<i2", 7)
+  assert(r == b and string.unpack("<i2", b, 3) == 7 and string.unpack("<i2", b) == 0x0102)
+  -- a result that does not fit makes a new, longer blob; the original keeps its size
+  local g = string.blob_pack(b, 4, "<i4", 9)
+  assert(string.isblob(g) and #g == 7 and #b == 4)
+  assert(string.unpack("<i2", g) == 0x0102 and string.unpack("<i4", g, 4) == 9)
+  local v, nextpos = string.blob_unpack(g, 4, "<i4")
+  assert(v == 9 and nextpos == 8)
+  v, nextpos = string.blob_unpack(g, "<i2")
+  assert(v == 0x0102 and nextpos == 3)
+  assert(string.blob_unpack("\5\0", "<i2") == 5)
+  assert(not pcall(string.blob_pack, "abcd", "i2", 1))
+  assert(not pcall(string.blob_pack, b, 6, "i2", 1) and not pcall(string.blob_unpack, g, 9, "i2"))
+end
+
+if utf8.len16 then
+  assert(utf8.len16("") == 0 and utf8.len16("abc") == 3)
+  assert(utf8.len16("é€") == 2 and utf8.len16("😀") == 2 and utf8.len16("a😀b") == 4)
+  assert(utf8.len16("a😀b", 2, 5) == 2 and utf8.len16("abc", 2) == 2 and utf8.len16("abc", 3, 2) == 0)
+  assert(utf8.len16("\xe2\x82") == -1 and utf8.len16("a\xf0\x9f") == -1)
+  assert(not pcall(utf8.len16, "abc", 5) and not pcall(utf8.len16, "abc", 1, 4))
+end
+
+if scrub then
+  local co = coroutine.create(print)
+  local n = select("#", scrub(1, "a", true, nil, {}, print, co, io.stdout))
+  assert(n == 8)
+  local a, b, c, d, e, f, g, h = scrub(1, "a", true, nil, {}, print, co, io.stdout)
+  assert(a == 1 and b == "a" and c == true and d == nil)
+  assert(e == nil and f == nil and g == nil and h == nil)
+  assert(select("#", scrub()) == 0)
+  if vec3 then
+    assert(scrub(vec3(1, 2, 3)) == vec3(1, 2, 3) and scrub(mat3()) == nil)
+  end
+end
+
+if each then
+  local t = { 10, 20, x = 30 }
+  local f, s, c = each(t)
+  assert(f == next and s == t and c == nil)
+  local sum = 0
+  for _, v in each(t) do sum = sum + v end
+  assert(sum == 60)
+  local counted = setmetatable({}, { __iter = function (self) return function (_, i) if i < 3 then return i + 1 end end, self, 0 end })
+  local seen = {}
+  for i in each(counted) do seen[#seen + 1] = i end
+  assert(#seen == 3 and seen[1] == 1 and seen[3] == 3)
+  local paired = setmetatable({}, { __pairs = function (self) return function (_, k) if not k then return 1, "a" end end, self, nil end })
+  local keys = 0
+  for k, v in each(paired) do
+    keys = keys + 1
+    assert(k == 1 and v == "a")
+  end
+  assert(keys == 1)
+  assert(not pcall(each))
+end
+
+if os.microtime then
+  local m1 = os.microtime()
+  local n = os.nanotime and os.nanotime()
+  local m2 = os.microtime()
+  assert(math.type(m1) == "integer" and m1 <= m2)
+  if n then
+    -- one clock: a nanosecond sample taken between two microsecond samples lies between them
+    assert(math.type(n) == "integer" and m1 <= n // 1000 and n // 1000 <= m2)
+    assert(os.nanotime() >= n)
+  end
+  assert(os.deltatime(10, 3) == 7 and os.deltatime(3, 10) == 7 and os.deltatime(5, 5) == 0)
+  assert(os.deltatime(m2, m1) == m2 - m1)
+  assert(not pcall(os.deltatime, 1) and not pcall(os.deltatime, 1.5, 1))
+  if os.rdtsc then
+    assert(math.type(os.rdtsc()) == "integer" and math.type(os.rdtscp()) == "integer")
+  end
+end
+
+if math.cbrt then
+  local inf = math.huge
+  local function isnan (x) return x ~= x end
+  local function near (a, b) return math.abs(a - b) <= 1e-12 * math.max(1, math.abs(b)) end
+  assert(math.eps == 2.0^-52 and math.feps == 2.0^-23)
+  assert(near(math.cbrt(27), 3) and near(math.cbrt(-8), -2) and math.cbrt(0) == 0)
+  assert(math.trunc(-2.7) == -2 and math.trunc(2.7) == 2 and math.type(math.trunc(2)) == "float")
+  assert(math.round(2.5) == 3 and math.round(-2.5) == -3 and math.round(2.4) == 2)
+  assert(math.nearbyint(2.5) == 2 and math.nearbyint(3.5) == 4 and math.nearbyint(-2.5) == -2)
+  assert(math.copysign(3, -0.0) == -3 and math.copysign(-3, 1) == 3 and 1 / math.copysign(0, -1) == -inf)
+  assert(math.fdim(5, 3) == 2 and math.fdim(3, 5) == 0)
+  assert(math.hypot(3, 4) == 5 and math.hypot(inf, 0 / 0) == inf)
+  assert(math.exp2(10) == 1024 and math.exp2(-1) == 0.5 and math.logb(1024) == 10 and math.logb(0) == -inf)
+  assert(math.scalbn(1, 10) == 1024 and math.scalbn(3, -1) == 1.5 and not pcall(math.scalbn, 1, 0.5))
+  assert(math.expm1(0) == 0 and near(math.expm1(1), math.exp(1) - 1))
+  assert(math.log1p(0) == 0 and near(math.log1p(math.exp(1) - 1), 1) and math.log1p(-1) == -inf)
+  assert(math.erf(0) == 0 and math.erfc(0) == 1 and near(math.erf(1), 0.8427007929497149))
+  assert(math.erf(inf) == 1 and math.erfc(inf) == 0)
+  assert(near(math.gamma(5), 24) and near(math.gamma(0.5), math.sqrt(math.pi)) and math.gamma(0) == inf)
+  assert(math.lgamma(1) == 0 and math.lgamma(2) == 0 and near(math.lgamma(10), math.log(362880)))
+  assert(math.remainder(5, 3) == -1 and math.remainder(7, 2) == -1 and math.remainder(8, 3) == -1)
+  assert(math.nextafter(1, 2) == 1 + math.eps and math.nextafter(1, 0) == 1 - math.eps / 2 and math.nextafter(1, 1) == 1)
+  assert(math.asinh(0) == 0 and math.acosh(1) == 0 and math.atanh(0) == 0 and math.atanh(1) == inf)
+  assert(near(math.asinh(1), math.log(1 + math.sqrt(2))) and isnan(math.acosh(0.5)))
+  assert(math.isnan(0 / 0) and not math.isnan(1) and not math.isnan(inf))
+  assert(math.isinf(inf) and math.isinf(-inf) and not math.isinf(1) and not math.isinf(0 / 0))
+  assert(math.isfinite(1) and math.isfinite(0) and not math.isfinite(inf) and not math.isfinite(0 / 0))
+  assert(math.isnormal(1) and not math.isnormal(0) and not math.isnormal(inf) and not math.isnormal(math.scalbn(1, -1074)))
+  assert(isnan(math.cbrt(0 / 0)) and isnan(math.round(0 / 0)) and math.trunc(-inf) == -inf)
+  assert(not pcall(math.cbrt, "x") and not pcall(math.hypot, 1))
+end
+
+
+do  -- a local alias of a library function takes the fast path too
+  local sqrt, floor, len, max = math.sqrt, math.floor, string.len, math.max
+  assert(sqrt(16) == 4.0 and floor(2.5) == 2 and len("abc") == 3 and max(1, 3, 2) == 3)
+  assert(math.type(floor(2.5)) == "integer" and select("#", max(1)) == 1)
+  local min = string.len  -- the name of another fast function: an ordinary call
+  assert(min("abcd") == 4)
+  local abs = function (x) return "mine", x end  -- not the library function
+  local r, x = abs(-1)
+  assert(r == "mine" and x == -1)
+end
+
+
+do  -- defer(fn) / func2close(fn): a to-be-closed object that calls 'fn'
+  local df = rawget(_G, "defer") or rawget(_G, "func2close")
+  if df then
+    local log = {}
+    do
+      local a <close> = df(function (obj, err) log[#log + 1] = type(obj) .. tostring(err) end)
+      local b <close> = df(function () log[#log + 1] = "b" end)
+    end
+    assert(log[1] == "b" and log[2] == "tablenil")
+    local ok, msg = pcall(function ()
+      local c <close> = df(function (_, err) log[#log + 1] = err end)
+      error("boom", 0)
+    end)
+    assert(not ok and msg == "boom" and log[3] == "boom")
+    local co = coroutine.wrap(function ()  -- the function may yield
+      local d <close> = df(function () coroutine.yield("in close") end)
+    end)
+    assert(co() == "in close")
+    co()
+    assert(not pcall(df, 1))
+    assert(getmetatable(df(print)) == getmetatable(df(print)))
+  end
 end
 
 print("OK")

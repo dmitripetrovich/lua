@@ -335,9 +335,6 @@ OP_TFORLOOP,/*	A Bx	if R[A+2] ~= nil then { R[A]=R[A+2]; pc -= Bx }	*/
 OP_SETLIST,/*	A vB vC k	R[A][vC+i] := R[A+i], 1 <= i <= vB	*/
 
 OP_CLOSURE,/*	A Bx	R[A] := closure(KPROTO[Bx])			*/
-#if defined(GRIT_POWER_DEFER)
-OP_DEFER, /*	A Bx	R[A] := closure(KPROTO[Bx]); mark variable R[A] "is deferred" */
-#endif
 
 OP_VARARG,/*	A B C k	R[A], ..., R[A+C-2] = varargs  			*/
 
@@ -352,6 +349,12 @@ OP_FASTCALL,
 #endif
 #if defined(GRIT_POWER_IMPORT)
 OP_GETIMPORT,
+#endif
+#if defined(GRIT_POWER_INTERP)
+OP_TOSTRING,/*	A	R[A] := tostring(R[A]) (as luaL_tolstring)		*/
+#endif
+#if defined(GRIT_POWER_DEFER)
+OP_DEFER,/*	A	mark variable R[A] "is deferred" (to-be-closed)	*/
 #endif
 
 OP_EXTRAARG/*	Ax	extra (larger) argument for previous opcode	*/

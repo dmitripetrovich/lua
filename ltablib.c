@@ -94,12 +94,13 @@ static int tinsert (lua_State *L) {
     }
     case 3: {
       lua_Integer i;
+      size_t steps = 0;
       pos = luaL_checkinteger(L, 2);  /* 2nd argument is the position */
       /* check whether 'pos' is in [1, e] */
       luaL_argcheck(L, (lua_Unsigned)pos - 1u < (lua_Unsigned)e, 2,
                        "position out of bounds");
       for (i = e; i > pos; i--) {  /* move up elements */
-        lua_checkhook(L, 1);
+        luaL_hooksteps(L, &steps, 1);
         lua_geti(L, 1, i - 1);
         lua_seti(L, 1, i);  /* t[i] = t[i - 1] */
       }
@@ -117,13 +118,14 @@ static int tinsert (lua_State *L) {
 static int tremove (lua_State *L) {
   lua_Integer size = aux_getn(L, 1, TAB_RW);
   lua_Integer pos = luaL_optinteger(L, 2, size);
+  size_t steps = 0;
   if (pos != size)  /* validate 'pos' if given */
     /* check whether 'pos' is in [1, size + 1] */
     luaL_argcheck(L, (lua_Unsigned)pos - 1u <= (lua_Unsigned)size, 2,
                      "position out of bounds");
   lua_geti(L, 1, pos);  /* result = t[pos] */
   for ( ; pos < size; pos++) {
-    lua_checkhook(L, 1);
+    luaL_hooksteps(L, &steps, 1);
     lua_geti(L, 1, pos + 1);
     lua_seti(L, 1, pos);  /* t[pos] = t[pos + 1] */
   }
@@ -148,6 +150,7 @@ static int tmove (lua_State *L) {
   checktab(L, tt, TAB_W);
   if (e >= f) {  /* otherwise, nothing to move */
     lua_Integer n, i;
+    size_t steps = 0;
     luaL_argcheck(L, f > 0 || e < LUA_MAXINTEGER + f, 3,
                   "too many elements to move");
     n = e - f + 1;  /* number of elements to move */
@@ -155,14 +158,14 @@ static int tmove (lua_State *L) {
                   "destination wrap around");
     if (t > e || t <= f || (tt != 1 && !lua_compare(L, 1, tt, LUA_OPEQ))) {
       for (i = 0; i < n; i++) {
-        lua_checkhook(L, 1);
+        luaL_hooksteps(L, &steps, 1);
         lua_geti(L, 1, f + i);
         lua_seti(L, tt, t + i);
       }
     }
     else {
       for (i = n - 1; i >= 0; i--) {
-        lua_checkhook(L, 1);
+        luaL_hooksteps(L, &steps, 1);
         lua_geti(L, 1, f + i);
         lua_seti(L, tt, t + i);
       }
@@ -188,10 +191,11 @@ static int tconcat (lua_State *L) {
   size_t lsep;
   const char *sep = luaL_optlstring(L, 2, "", &lsep);
   lua_Integer i = luaL_optinteger(L, 3, 1);
+  size_t steps = 0;
   last = luaL_optinteger(L, 4, last);
   luaL_buffinit(L, &b);
   for (; i < last; i++) {
-    lua_checkhook(L, 1);
+    luaL_hooksteps(L, &steps, 1);
     addfield(L, &b, i);
     luaL_addlstring(&b, sep, lsep);
   }
@@ -431,7 +435,7 @@ static int sort (lua_State *L) {
 }
 
 #if defined(GRIT_POWER_WOW)
-static int type (lua_State *L) {
+static int tab_type (lua_State *L) {
   if (lua_type(L, 1) == LUA_TTABLE) {
     switch (lua_tabletype(L, 1)) {
       case LUA_TTEMPTY: lua_pushstring(L, "empty"); break;
@@ -547,7 +551,7 @@ static const luaL_Reg tab_funcs[] = {
   {"move", tmove},
   {"sort", sort},
 #if defined(GRIT_POWER_WOW)
-  {"type", type},
+  {"type", tab_type},
   {"new", tcreate},
   {"wipe", treset}, {"clear", treset},
   {"clone", tclone},

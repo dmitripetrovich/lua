@@ -93,25 +93,40 @@ typedef enum {
   else { luaH_fastgeti(hvalue(t), k, res, tag); }
 
 
+/*
+** A write leaves the fast path when the table is read-only, or imported
+** and the key is one that some import looks up (only those writes can
+** change a cached import; integer keys never are). 'k' is a TValue for
+** luaV_fastset and a TString for luaV_fastsetstr.
+*/
 #if defined(GRIT_POWER_IMPORT)
-#define isguarded(h)	(isreadonly(h) || isimported(h))
+#define isguardedkey(h,k)	(isreadonly(h) || (isimported(h) && isimportkey(k)))
+#define isguardedstr(h,ts)	(isreadonly(h) || (isimported(h) && isimportstr(ts)))
 #elif defined(GRIT_POWER_READONLY)
-#define isguarded(h)	isreadonly(h)
+#define isguardedkey(h,k)	isreadonly(h)
+#define isguardedstr(h,ts)	isreadonly(h)
 #endif
 
 #if defined(GRIT_POWER_READONLY)
 #define luaV_fastset(t,k,val,hres,f) \
   (hres = (!ttistable(t) ? HNOTATABLE : \
-           l_unlikely(isguarded(hvalue(t))) ? HNOTFOUND : \
+           l_unlikely(isguardedkey(hvalue(t), k)) ? HNOTFOUND : \
+           f(hvalue(t), k, val)))
+
+#define luaV_fastsetstr(t,k,val,hres,f) \
+  (hres = (!ttistable(t) ? HNOTATABLE : \
+           l_unlikely(isguardedstr(hvalue(t), k)) ? HNOTFOUND : \
            f(hvalue(t), k, val)))
 
 #define luaV_fastseti(t,k,val,hres) \
   if (!ttistable(t)) hres = HNOTATABLE; \
-  else if (l_unlikely(isguarded(hvalue(t)))) hres = HNOTFOUND; \
+  else if (l_unlikely(isreadonly(hvalue(t)))) hres = HNOTFOUND; \
   else { luaH_fastseti(hvalue(t), k, val, hres); }
 #else
 #define luaV_fastset(t,k,val,hres,f) \
   (hres = (!ttistable(t) ? HNOTATABLE : f(hvalue(t), k, val)))
+
+#define luaV_fastsetstr(t,k,val,hres,f)	luaV_fastset(t,k,val,hres,f)
 
 #define luaV_fastseti(t,k,val,hres) \
   if (!ttistable(t)) hres = HNOTATABLE; \
@@ -144,9 +159,13 @@ LUAI_FUNC lu_byte luaV_finishget (lua_State *L, const TValue *t, TValue *key,
                                                 StkId val, lu_byte tag);
 LUAI_FUNC void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
                                              TValue *val, int aux);
+LUAI_FUNC void luaV_finishsetglm (lua_State *L, const TValue *t, TValue *key, TValue *val, int hres);
 LUAI_FUNC void luaV_finishOp (lua_State *L);
 LUAI_FUNC void luaV_execute (lua_State *L, CallInfo *ci);
 LUAI_FUNC void luaV_concat (lua_State *L, int total);
+#if defined(GRIT_POWER_INTERP)
+LUAI_FUNC void luaV_tostring (lua_State *L, StkId ra);
+#endif
 LUAI_FUNC lua_Integer luaV_idiv (lua_State *L, lua_Integer x, lua_Integer y);
 LUAI_FUNC lua_Integer luaV_mod (lua_State *L, lua_Integer x, lua_Integer y);
 LUAI_FUNC lua_Number luaV_modf (lua_State *L, lua_Number x, lua_Number y);

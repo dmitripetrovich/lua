@@ -59,17 +59,9 @@ static unsigned luaS_hash (const char *str, size_t l, unsigned seed) {
 
 
 unsigned luaS_hashlongstr (TString *ts) {
-#if defined(GRIT_POWER_BLOB)
-  lua_assert(islongstring(ts->tt));
-#else
   lua_assert(ts->tt == LUA_VLNGSTR);
-#endif
   if (ts->extra == 0) {  /* no hash? */
     size_t len = ts->u.lnglen;
-#if defined(GRIT_POWER_BLOB)
-    if (ts->tt == LUA_VBLOBSTR)
-      return luaS_hash(getlngstr(ts), len, ts->hash);
-#endif
     ts->hash = luaS_hash(getlngstr(ts), len, ts->hash);
     ts->extra = 1;  /* now it has its hash */
   }
@@ -268,21 +260,16 @@ TString *luaS_newlstr (lua_State *L, const char *str, size_t l) {
 }
 
 #if defined(GRIT_POWER_BLOB)
-TString *luaS_newblob (lua_State *L, const char* str, size_t l) {
+TString *luaS_newblob (lua_State *L, const char *str, size_t l) {
   TString *ts;
-  if (l_unlikely(l * sizeof(char) >= (MAX_SIZE - sizeof(TString))))
+  if (l_unlikely(l >= (MAX_SIZE - sizeof(TString))))
     luaM_toobig(L);
-  ts = createstrobj(L, luaS_sizelngstr(l, LSTRREG), LUA_VBLOBSTR, G(L)->seed);
-  ts->u.lnglen = l;
-  ts->shrlen = LSTRREG;  /* signals that it is a regular long string */
-  ts->contents = cast_charp(ts) + offsetof(TString, falloc);
-  if (str) {
-    memcpy(getlngstr(ts), str, l * sizeof(char));
-  }
-  else {
-    memset(getlngstr(ts), 0, l * sizeof(char));
-  }
-  ts->contents[l] = '\0';  /* ending 0 */
+  ts = luaS_createlngstrobj(L, l);
+  ts->tt = LUA_VBLOBSTR;  /* a long string that is not interned or hashed */
+  if (str != NULL)
+    memcpy(getlngstr(ts), str, l);
+  else
+    memset(getlngstr(ts), 0, l);
   return ts;
 }
 #endif
@@ -345,6 +332,7 @@ static void f_newext (lua_State *L, void *ud) {
 TString *luaS_newextlstr (lua_State *L,
 	          const char *s, size_t len, lua_Alloc falloc, void *ud) {
   struct NewExt ne;
+  ne.ts = NULL;  /* (set by 'f_newext') */
   if (!falloc) {
     ne.kind = LSTRFIX;
     f_newext(L, &ne);  /* just create header */

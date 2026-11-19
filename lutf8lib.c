@@ -235,103 +235,69 @@ static int byteoffset (lua_State *L) {
 
 
 #if defined(GRIT_POWER_WOW)
-static LUA_INLINE size_t utf8_codepointlen(char ch) {
-  return ((0xe5000000 >> ((((unsigned char)ch) >> 3) & 0x1e)) & 3) + 1;
-}
-
-static LUA_INLINE void utf8_shiftmask(l_uint32 *codePoint, const char byte) {
-  *codePoint <<= 6;
-  *codePoint |= 0x3F & ((unsigned char)byte);
-}
-
-static l_uint32 utf8_to_utf32(const char *src, size_t length) {
-  l_uint32 codepoint = 0;
-  switch (length) {
-    case 1:
-      return cast_uchar(src[0]);
-    case 2:
-      codepoint = src[0] & 0x1f;
-      utf8_shiftmask(&codepoint, src[1]);
-      return codepoint;
-    case 3:
-      codepoint = src[0] & 0x0f;
-      utf8_shiftmask(&codepoint, src[1]);
-      utf8_shiftmask(&codepoint, src[2]);
-      return codepoint;
-    case 4:
-      codepoint = src[0] & 0x07;
-      utf8_shiftmask(&codepoint, src[1]);
-      utf8_shiftmask(&codepoint, src[2]);
-      utf8_shiftmask(&codepoint, src[3]);
-      return codepoint;
-    default:
-      return 0xFFFF;
+/*
+** Number of UTF-16 code units needed for 's[0 .. len-1]', or -1 if it is
+** not well-formed UTF-8 (code points beyond the BMP take a surrogate pair)
+*/
+static lua_Integer utf8_to_utf16_length(const char *s, size_t len) {
+  const char *end = s + len;
+  lua_Integer n = 0;
+  while (s < end) {
+    l_uint32 code;
+    const char *next = utf8_decode(s, &code, 1);
+    if (next == NULL || next > end)
+      return -1;
+    n += (code > 0xFFFF) ? 2 : 1;
+    s = next;
   }
-}
-
-static lua_Integer utf8_to_utf16_length(const char *u8str, size_t u8len) {
-  const char *const u8end = u8str + u8len;
-  const char *u8cur = u8str;
-
-  size_t u16measuredLen = 0;
-  while (u8cur < u8end) {
-    size_t u8charLen;
-
-    u16measuredLen++;
-    u8charLen = utf8_codepointlen(*u8cur);
-    if (u8charLen > (size_t)(u8end - u8cur))
-      return -1;  /* Malformed UTF8 */
-    else {
-      const l_uint32 codepoint = utf8_to_utf32(u8cur, u8charLen);
-      if (codepoint > 0xFFFF)
-        u16measuredLen++;  /* UTF16 surrogate pair */
-
-      u8cur += u8charLen;
-    }
-  }
-
-  return (u8cur != u8end) ? -1 : (lua_Integer)u16measuredLen; /* Ensure string end has been reached */
-}
-
-static size_t strskip(const char *s, size_t len, size_t n) {
-  while (n < len && iscontp(s + n))
-    n++;
-
   return n;
+}
+
+/* Simple case folding: ASCII, Latin-1, basic Greek and Cyrillic capitals */
+static l_uint32 utf8_fold(l_uint32 c) {
+  if ((c >= 'A' && c <= 'Z') || (c >= 0xC0 && c <= 0xDE && c != 0xD7) || (c >= 0x391 && c <= 0x3AB && c != 0x3A2) || (c >= 0x410 && c <= 0x42F))
+    return c + 0x20;
+  if (c >= 0x400 && c <= 0x40F)
+    return c + 0x50;
+  return c;
+}
+
+/* Decode the code point at 's'; an invalid sequence counts as one byte */
+static size_t utf8_foldnext(const char *s, l_uint32 *c) {
+  const char *e = utf8_decode(s, c, 0);
+  if (e == NULL) {
+    *c = (unsigned char)*s;
+    return 1;
+  }
+  *c = utf8_fold(*c);
+  return (size_t)(e - s);
 }
 
 static int strcmputf8i(lua_State *L) {
   size_t l1 = 0, l2 = 0;
   const char *s1 = luaL_checklstring(L, 1, &l1);
   const char *s2 = luaL_checklstring(L, 2, &l2);
-
-  size_t i, n1 = 0, n2 = 0;
-  for (i = 0; i < ((l1 < l2) ? l1 : l2); ++i) {
-    l_uint32 c1 = 0, c2 = 0;
-    utf8_decode(s1 + n1, &c1, 0);
-    utf8_decode(s2 + n2, &c2, 0);
-    if (c1 == 0 && c2 == 0) {
-      lua_pushinteger(L, 0);
-      return 1;
-    }
-    else if (c1 != c2) {
+  size_t n1 = 0, n2 = 0;
+  lua_Unsigned steps = 0;
+  while (n1 < l1 && n2 < l2) {
+    l_uint32 c1, c2;
+    n1 += utf8_foldnext(s1 + n1, &c1);
+    n2 += utf8_foldnext(s2 + n2, &c2);
+    steps++;
+    if (c1 != c2) {
+      luaL_checkhook(L, steps);
       lua_pushinteger(L, c1 < c2 ? -1 : 1);
       return 1;
     }
-
-    n1 = strskip(s1, l1, n1++);  /* skip to next byte sequence */
-    n2 = strskip(s2, l2, n2++);
   }
-  luaL_checkhook(L, i);
-
-  lua_pushinteger(L, (l1 == l2) ? 0 : ((l1 < l2) ? -1 : 1));
+  luaL_checkhook(L, steps);
+  lua_pushinteger(L, (n1 < l1) ? 1 : ((n2 < l2) ? -1 : 0));
   return 1;
 }
 
 /*
-** utf16len(s [, i [, j]]) --> number of characters that
-** start in the range [i,j], or nil + current position if 's' is not
-** well formed in that interval
+** utf16len(s [, i [, j]]) --> number of UTF-16 code units for the
+** characters in the range [i,j], or -1 if 's' is not well formed there
 */
 static int utf16len (lua_State *L) {
   size_t len;  /* string length in bytes */

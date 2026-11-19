@@ -198,11 +198,12 @@ LUALIB_API int luaL_argerror (lua_State *L, int arg, const char *extramsg) {
 LUALIB_API int luaL_typeerror (lua_State *L, int arg, const char *tname) {
   const char *msg;
   const char *typearg;  /* name for the type of the actual argument */
+  int rawtype = lua_rawtype(L, arg);
   if (luaL_getmetafield(L, arg, "__name") == LUA_TSTRING)
     typearg = lua_tostring(L, -1);  /* use the given type name */
   else if (lua_type(L, arg) == LUA_TLIGHTUSERDATA)
     typearg = "light userdata";  /* special name for messages */
-  else if (lua_rawtype(L, arg) == LUA_TVECTOR || lua_rawtype(L, arg) == LUA_TMATRIX)
+  else if (rawtype == LUA_TVECTOR || rawtype == LUA_TMATRIX)
     typearg = luaglm_typename(L, arg); /* @LuaGLM: use vecN/quat/matX labels */
   else
     typearg = luaL_typename(L, arg);  /* standard name */
@@ -1323,7 +1324,7 @@ LUALIB_API lua_State *(luaL_newstate) (void) {
 
 
 #if defined(GRIT_POWER_CHECKHOOK) || defined(GRIT_POWER_BUDGET)
-LUALIB_API void luaL_checkhook (lua_State *L, lua_Unsigned steps) {
+LUALIB_API void (luaL_checkhook) (lua_State *L, lua_Unsigned steps) {
   lua_checkhook(L, (steps > (lua_Unsigned)INT_MAX) ? INT_MAX : (int)steps);
 }
 #endif

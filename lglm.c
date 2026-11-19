@@ -16,7 +16,6 @@
 #include "lauxlib.h"
 
 #include <string.h>
-#include <ctype.h>
 #include <cglm/cglm.h>
 #if defined(_MSC_VER)
   #include <intrin.h>
@@ -42,33 +41,8 @@
 /* test for a valid index (one that is not the 'nilvalue') */
 #define glm_isvalid(L, o) (!ttisnil(o) || ((o) != &G(L)->nilvalue))
 
-/* index2value copied from lapi.c */
-static const TValue *glm_index2value(const lua_State *L, int idx) {
-  CallInfo *ci = L->ci;
-  if (idx > 0) {
-    StkId o = ci->func.p + idx;
-    api_check(L, idx <= ci->top.p - (ci->func.p + 1), "unacceptable index");
-    return l_likely(o < L->top.p) ? s2v(o) : &G(L)->nilvalue;
-  }
-  else if (idx > LUA_REGISTRYINDEX) { /* negative index */
-    api_check(L, idx != 0 && -idx <= L->top.p - (ci->func.p + 1), "invalid index");
-    return s2v(L->top.p + idx);
-  }
-  else if (idx == LUA_REGISTRYINDEX)
-    return &G(L)->l_registry;
-  else { /* upvalues */
-    idx = LUA_REGISTRYINDEX - idx;
-    api_check(L, idx <= MAXUPVAL + 1, "upvalue index too large");
-    if (ttisCclosure(s2v(ci->func.p))) { /* C closure? */
-      CClosure *func = clCvalue(s2v(ci->func.p));
-      return (idx <= func->nupvalues) ? &func->upvalue[idx - 1] : &G(L)->nilvalue;
-    }
-    else { /* light C function or Lua function (through a hook)?) */
-      api_check(L, ttislcf(s2v(ci->func.p)), "caller not a C function");
-      return &G(L)->nilvalue; /* no upvalues */
-    }
-  }
-}
+/* any stack index, pseudo-indices included */
+#define glm_index2value(L, idx) luaA_index2value(L, idx)
 
 /* index2value for only positive stack indexes. Intended for places where the
 ** compiler cannot recognize idx is always positive. */
@@ -233,7 +207,6 @@ static void glm_pushnumint(lua_State *L, lua_Number d) {
 ** create a matrix it and push it onto the stack. The resulting matrix is used
 ** as the destination to the given function.
 */
-#define glm_mat2_recycle(Idx, Func, ...) glm_mat_recycle(Idx, LUA_VMATRIX2, m2, 1, Func, __VA_ARGS__)
 #define glm_mat3_recycle(Idx, Func, ...) glm_mat_recycle(Idx, LUA_VMATRIX3, m3, 1, Func, __VA_ARGS__)
 #define glm_mat4_recycle(Idx, Func, ...) glm_mat_recycle(Idx, LUA_VMATRIX4, m4, 0, Func, __VA_ARGS__)
 #define glm_mid_recycle(Idx, Tag, Func, ...) glm_mat_recycle(Idx, Tag, m4, 0, Func, __VA_ARGS__)
@@ -564,22 +537,13 @@ int lmat_rawgeti(const TValue *obj, lua_Integer n, StkId res) {
     setnilvalue(s2v(res));
     return LUA_TNIL;
   }
-#if defined(LUAGLM_COMPAT_5_4)
-  return LUA_TTABLE; /* @TypeCompat */
-#else
-  return LUA_TVECTOR;
-#endif
+  return LUA_TVECTOR;  /* lua_rawgeti applies the @TypeCompat filter */
 }
 
 int lmat_rawget(const TValue *obj, TValue *key, StkId res) {
   lua_Integer idx; /* Allow float-to-int coercion */
-  if (tointegerns(key, &idx) && lmat_fastgeti(obj, idx, res)) {
-#if defined(LUAGLM_COMPAT_5_4)
-    return LUA_TTABLE; /* @TypeCompat */
-#else
-    return LUA_TVECTOR;
-#endif
-  }
+  if (tointegerns(key, &idx) && lmat_fastgeti(obj, idx, res))
+    return LUA_TVECTOR;  /* lua_rawget applies the @TypeCompat filter */
   else {
     setnilvalue(s2v(res));
     return LUA_TNIL;
@@ -599,12 +563,6 @@ void lmat_get(lua_State *L, const TValue *obj, TValue *key, StkId res) {
 
 void lmat_set(lua_State *L, const TValue *obj, TValue *key, TValue *val) {
   lmat_auxset(L, obj, key, val, 0);
-}
-
-void lmat_seti(lua_State *L, const TValue *obj, lua_Integer c, TValue *val) {
-  TValue key;
-  setivalue(&key, c);
-  lmat_auxset(L, obj, &key, val, 0);
 }
 
 void lmat_len(const TValue *obj, StkId res) {
@@ -672,7 +630,11 @@ lua_Integer luaO_HashString(const char *string, size_t length, int ignore_case) 
   size_t i;
   unsigned int hash = 0;
   for (i = 0; i < length; ++i) {
-    hash += cast_uint(ignore_case ? string[i] : tolower(string[i]));
+    /* fold ASCII only: 'tolower' depends on the locale and is undefined for negative chars */
+    int c = (signed char)string[i];  /* bytes add as signed chars on every platform, as on x86 */
+    if (!ignore_case && c >= 'A' && c <= 'Z')
+      c += 'a' - 'A';
+    hash += cast_uint(c);
     hash += (hash << 10);
     hash ^= (hash >> 6);
   }
@@ -887,8 +849,9 @@ LUA_API int lua_tomat4(lua_State *L, int idx, lua_mat4 m4) {
 LUA_API void lua_pushvector(lua_State *L, const float *v, int length) {
   int i;
   vec4 v4 = GLM_VEC4_ZERO_INIT;
-  lu_byte tag = vvaltag(length);
-  lua_assert(length >= 2 && length <= 4);
+  lu_byte tag;
+  api_check(L, length >= 2 && length <= 4, "invalid vector length");
+  tag = vvaltag(length);
   for (i = 0; i < length; ++i)
     v4[i] = v[i];
   glm_pushvid(tag, glm_vec4_copy, v4);
@@ -949,14 +912,17 @@ static int lgrit_tablevector(lua_State *L, const TValue *o, lua_Float4 *f4) {
   int i, count = 0;
   for (i = 0; i < 4; ++i) {
     TValue slot;
-    TString *key = luaS_newlstr(L, dims[i], 1);
-    if (!tagisempty(luaH_getstr(hvalue(o), key, &slot)) && ttisnumber(&slot)) {
+    TString *key = luaS_new(L, dims[i]);  /* string cache: no hashing per call */
+    if (!tagisempty(luaH_getshortstr(hvalue(o), key, &slot)) && ttisnumber(&slot)) {
       v[i] = glm_cf(nvalue(&slot));
       count++;
     }
   }
   if (f4 != NULL && count > 0) {
-    f4->x = v[0]; f4->y = v[1]; f4->z = v[2]; f4->w = v[3];
+    f4->x = v[0];
+    f4->y = v[1];
+    f4->z = v[2];
+    f4->w = v[3];
   }
   return (count == 1) ? LUA_VVECTOR1 : (count > 1) ? vvaltag(count) : LUA_TNIL;
 }
@@ -1168,7 +1134,7 @@ static int glm_constructVector(lua_State *L, int desired, vec4 v) {
   int top = lua_gettop(L);
   if (top == 0) /* No arguments: zero vector */
     glm_vec4_zero(v);
-  else if (top == 1 && glm_castvalue(glm_index2value(L, 1), &v[0])) /* One argument: broadcast */
+  else if (top == 1 && glm_castvalue(glm_fasti2v(L, 1), &v[0])) /* One argument: broadcast */
     glm_vec4_broadcast(v[0], v);
   else { /* Parse objects on stack up to 'desired' */
     int i, max_len = (desired ? desired : 4);
@@ -1209,8 +1175,9 @@ static int glm_createVectorBool(lua_State *L, int desired) {
 static int glm_createMatrix(lua_State *L, int desired) {
   CGLM_ALIGN_MAT lua_Matrix r; /* @MatLayout: Realign */
   CGLM_ALIGN_MAT lua_Matrix m = { GLM_MAT4_ZERO_INIT };
-  const TValue *o1 = glm_index2value(L, 1);
-  int length = glm_populateMatrix(L, 1 + ttismatrix(o1), desired, m.m4);
+  const TValue *o1 = glm_fasti2v(L, 1);
+  int sink = lua_gettop(L) > 1 && ttismatrix(o1); /* a lone matrix is the source, not the sink */
+  int length = glm_populateMatrix(L, 1 + sink, desired, m.m4);
   switch (length) {
     case 2: glm_mat4_pick2(m.m4, r.m2); glm_mat2_copy(r.m2, m.m2); break;
     case 3: glm_mat4_pick3(m.m4, r.m3); glm_mat3_copy(r.m3, m.m3); break;
@@ -1219,7 +1186,10 @@ static int glm_createMatrix(lua_State *L, int desired) {
       return length < 0 ? luaL_argerror(L, -length, "unexpected argument") : luaL_error(L, GLM_UNEXPECTED);
     }
   }
-  glm_mid_recycle(1, mvaltag(length), glm_mat4_copy, m.m4);
+  if (sink)
+    glm_mid_recycle(1, mvaltag(length), glm_mat4_copy, m.m4);
+  else
+    glm_pushmat(mvaltag(length), m4, glm_mat4_copy, m.m4);
   return 1;
 }
 
@@ -1241,7 +1211,7 @@ int luaglm_mat4x4(lua_State *L) { return glm_createMatrix(L, 4); }
 int luaglm_mat(lua_State *L) {
   int desired = 4;
   int top = lua_gettop(L);
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
   int first = (top > 1 && ttismatrix(o1)) ? 2 : 1;
   int args = top - first + 1;
   if (top == 1 && ttismatrix(o1)) { /* copy */
@@ -1263,11 +1233,11 @@ int luaglm_mat(lua_State *L) {
 }
 int luaglm_quat(lua_State *L) {
   versor q;
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
   if (!glm_isvalid(L, o1)) /* No arguments: return the identity */
     glm_quat_identity(q);
   else if (ttisnumber(o1)) {
-    TValue *o2 = (TValue *)glm_index2value(L, 2);
+    TValue *o2 = (TValue *)glm_fasti2v(L, 2);
     if (ttisvector3(o2)) /* <angle, axis> */
 #if defined(LUAGLM_COMPAT_GLM_CPP) /* degrees for grit-lua compatibility */
       glm_quatv(q, glm_rad(glm_fv(o1)), glm_v3(o2));
@@ -1286,8 +1256,8 @@ int luaglm_quat(lua_State *L) {
     }
   }
   else if (ttisvector3(o1)) {
-    TValue *o2 = (TValue *)glm_index2value(L, 2);
-    TValue *o3 = (TValue *)glm_index2value(L, 3);
+    TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+    TValue *o3 = (TValue *)glm_fasti2v(L, 3);
     if (ttisnumber(o2)) /* <xyz, w> */
       glm_vec4(glm_v3(o1), glm_fv(o2), q);
     else if (ttisvector3(o2) && !glm_isvalid(L, o3)) /* <from, to> */
@@ -1329,7 +1299,7 @@ int luaglm_quat(lua_State *L) {
 /* F(Vec|Number) */
 #define COMPONENT_FUNC3(VF, NF, NP)             \
   LUA_MLM_BEGIN                                 \
-  TValue *O1 = (TValue *)glm_index2value(L, 1); \
+  TValue *O1 = (TValue *)glm_fasti2v(L, 1); \
   if (ttisnumber(O1))                           \
     NP(L, NF(nvalue(O1)));                      \
   else if (ttisvector(O1))                      \
@@ -1342,7 +1312,7 @@ int luaglm_quat(lua_State *L) {
 /* F(Vec|Quat|Number) */
 #define COMPONENT_FUNC4(VF, QF, NF, NP)         \
   LUA_MLM_BEGIN                                 \
-  TValue *O1 = (TValue *)glm_index2value(L, 1); \
+  TValue *O1 = (TValue *)glm_fasti2v(L, 1); \
   if (ttisnumber(O1))                           \
     NP(L, NF(nvalue(O1)));                      \
   else if (ttisvector(O1) && !ttisquat(O1))     \
@@ -1357,7 +1327,7 @@ int luaglm_quat(lua_State *L) {
 /* F(Vec|Float|Integer) */
 #define COMPONENT_FUNC5(VF, NF, NP, IF, IP)     \
   LUA_MLM_BEGIN                                 \
-  TValue *O1 = (TValue *)glm_index2value(L, 1); \
+  TValue *O1 = (TValue *)glm_fasti2v(L, 1); \
   if (ttisfloat(O1))                            \
     NP(L, NF(fltvalue(O1)));                    \
   else if (ttisinteger(O1))                     \
@@ -1372,8 +1342,8 @@ int luaglm_quat(lua_State *L) {
 /* F(Vec|Number, Vec|Number) */
 #define COMPONENT_BFUNC3(VF, NF, NP)                       \
   LUA_MLM_BEGIN                                            \
-  TValue *O1 = (TValue *)glm_index2value(L, 1);            \
-  TValue *O2 = (TValue *)glm_index2value(L, 2);            \
+  TValue *O1 = (TValue *)glm_fasti2v(L, 1);            \
+  TValue *O2 = (TValue *)glm_fasti2v(L, 2);            \
   if (ttisnumber(O1) && ttisnumber(O2))                    \
     NP(L, NF(nvalue(O1), nvalue(O2)));                     \
   else if (ttisvector(O1) && tteq(O1, O2))                 \
@@ -1391,8 +1361,8 @@ int luaglm_quat(lua_State *L) {
 /* F(Vec|Float|Integer, Vec|Float|Integer) */
 #define COMPONENT_BFUNC5(VF, NF, NP, IF, IP)               \
   LUA_MLM_BEGIN                                            \
-  TValue *O1 = (TValue *)glm_index2value(L, 1);            \
-  TValue *O2 = (TValue *)glm_index2value(L, 2);            \
+  TValue *O1 = (TValue *)glm_fasti2v(L, 1);            \
+  TValue *O2 = (TValue *)glm_fasti2v(L, 2);            \
   if (ttisinteger(O1) && ttisinteger(O2))                  \
     IP(L, IF(ivalue(O1), ivalue(O2)));                     \
   else if (ttisnumber(O1) && ttisnumber(O2))               \
@@ -1464,8 +1434,8 @@ int luaglm_log(lua_State *L) {
 }
 
 int luaglm_pow(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   if (ttisquat(o1) && ttisnumber(o2)) {
     glm_pushquat(glm_quat_pow, glm_q(o1), glm_fv(o2));
     return 1;
@@ -1486,8 +1456,8 @@ int luaglm_isinf(lua_State *L) { COMPONENT_FUNC5(glm_vec4_isinfv, isinf, glm_pus
 int luaglm_min(lua_State *L) { COMPONENT_BFUNC5(glm_vec4_minv, l_mathop(fmin), glm_pushnumber, GLM_MIN, glm_pushinteger); }
 int luaglm_max(lua_State *L) { COMPONENT_BFUNC5(glm_vec4_maxv, l_mathop(fmax), glm_pushnumber, GLM_MAX, glm_pushinteger); }
 int luaglm_mod(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   if (ttisinteger(o1) && ttisinteger(o2)) { /* math_fmod */
     lua_Integer d = ivalue(o2);
     luaL_argcheck(L, d != 0, 2, "zero");
@@ -1498,11 +1468,11 @@ int luaglm_mod(lua_State *L) {
     return 1;
   }
   /* Implementation different from GLSL to be consistent with lmathlib */
-  COMPONENT_BFUNC3(glm_vec4_mod_simd, l_mathop(fmod), glm_pushnumber);
+  COMPONENT_BFUNC3(glm_vec4_fmod, l_mathop(fmod), glm_pushnumber);
 }
 
 int luaglm_modf(lua_State *L) { /* math_modf compatible */
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
   if (ttisvector(o1)) {
     vec4 integral, fract;
     glm_vec4_modf(glm_vid(o1), integral, fract);
@@ -1523,9 +1493,9 @@ int luaglm_modf(lua_State *L) { /* math_modf compatible */
 }
 
 int luaglm_clamp(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
   int both_nil = ttisnil(o2) && ttisnil(o3); /* saturate(...) */
   if (ttisvector(o1) && tteq(o1, o2) && tteq(o2, o3))
     glm_pushvid(vvaltt(o1), glm_vec4_clampv, glm_vid(o1), glm_vid(o2), glm_vid(o3));
@@ -1551,9 +1521,9 @@ int luaglm_clamp(lua_State *L) {
 }
 
 int luaglm_mix(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
   if (ttisvector(o1) && tteq(o1, o2) && tteq(o2, o3)) /* mix(vec, vec, vec) */
     glm_pushvid(vvaltt(o1), glm_vec4_mixv, glm_vid(o1), glm_vid(o2), glm_vid(o3));
   else if (ttisvector(o1) && tteq(o1, o2) && ttisnumber(o3)) /* mix(vec, vec, scalar) */
@@ -1568,8 +1538,8 @@ int luaglm_mix(lua_State *L) {
 }
 
 int luaglm_step(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   if (ttisvector(o1) && tteq(o1, o2))
     glm_pushvid(vvaltt(o1), glm_vec4_step_simd, glm_vid(o1), glm_vid(o2));
   else if (ttisnumber(o1) && ttisvector(o2))
@@ -1582,9 +1552,9 @@ int luaglm_step(lua_State *L) {
 }
 
 int luaglm_smoothstep(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
   if (ttisvector(o1) && tteq(o1, o2) && tteq(o2, o3))
     glm_pushvid(vvaltt(o1), glm_vec4_smoothstep_simd, glm_vid(o1), glm_vid(o2), glm_vid(o3));
   else if (ttisnumber(o1) && ttisnumber(o2) && ttisvector(o3))
@@ -1603,9 +1573,9 @@ int luaglm_smoothstep(lua_State *L) {
 }
 
 int luaglm_fma(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
   if (ttisvector(o1) && tteq(o1, o2) && tteq(o2, o3))
     glm_pushvid(vvaltt(o1), glm_vec4_fma, glm_vid(o1), glm_vid(o2), glm_vid(o3));
   else if (ttisinteger(o1) && ttisinteger(o2) && ttisinteger(o3)) {
@@ -1621,7 +1591,7 @@ int luaglm_fma(lua_State *L) {
 
 int luaglm_frexp(lua_State *L) {
   CGLM_ALIGN(16) ivec4 exp;
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
   glm_ivec4_broadcast(0, exp);
   if (ttisvector(o1)) {
     glm_pushvid(vvaltt(o1), glm_vec4_frexp, glm_vid(o1), exp);
@@ -1639,8 +1609,8 @@ int luaglm_frexp(lua_State *L) {
 int luaglm_ldexp(lua_State *L) {
   CGLM_ALIGN(16) ivec4 exp;
   lua_Integer r, i;
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   if (ttisvector(o1) && tteq(o1, o2)) {
     glm_ivec4f(glm_vid(o2), exp);
     glm_pushvid(vvaltt(o1), glm_vec4_ldexp, glm_vid(o1), exp);
@@ -1672,52 +1642,99 @@ static void glm_intdistance (TValue *res, lua_Integer a, lua_Integer b) {
   }
 }
 
-static void glm_pushintdistance (lua_State *L, lua_Integer a, lua_Integer b) {
-  lua_lock(L);
-  glm_intdistance(s2v(L->top.p), a, b);
-  api_incr_top(L);
-  lua_unlock(L);
+/*
+** length/distance/dot of the values 'o1'/'o2' into 'res', shared by the
+** library functions and OP_FASTCALL. They return 0 when the operands do
+** not fit (the caller then falls back or raises an error).
+*/
+static int glm_lengthTV (StkId res, const TValue *o1) {
+  if (ttisinteger(o1))
+    glm_intdistance(s2v(res), ivalue(o1), 0);
+  else if (ttisnumber(o1)) {
+    setfltvalue(s2v(res), l_mathop(fabs)(nvalue(o1)));
+  }
+  else if (ttisvector(o1))
+    lvec_len(o1, res, 0);
+  else
+    return 0;
+  return 1;
+}
+
+static int glm_distanceTV (StkId res, const TValue *o1, const TValue *o2) {
+  if (ttisvector(o1) && tteq(o1, o2)) {
+    float result;
+    TValue *v1 = (TValue *)o1;
+    TValue *v2 = (TValue *)o2;
+    switch (vvaltt(v1)) {
+      case LUA_VVECTOR2:
+        result = glm_vec2_distance(glm_v2(v1), glm_v2(v2));
+        break;
+      case LUA_VVECTOR3:
+        result = glm_vec3_distance(glm_v3(v1), glm_v3(v2));
+        break;
+      default:
+        result = glm_vec4_distance(glm_vid(v1), glm_vid(v2));
+        break;
+    }
+    setfltvalue(s2v(res), cast_num(result));
+  }
+  else if (ttisinteger(o1) && ttisinteger(o2))
+    glm_intdistance(s2v(res), ivalue(o1), ivalue(o2));
+  else if (ttisnumber(o1) && ttisnumber(o2)) {  /* integer coercion */
+    setfltvalue(s2v(res), l_mathop(fabs)(nvalue(o1) - nvalue(o2)));
+  }
+  else
+    return 0;
+  return 1;
+}
+
+static int glm_dotTV (StkId res, const TValue *o1, const TValue *o2) {
+  if (ttisvector(o1) && tteq(o1, o2)) {
+    float dot;
+    TValue *v1 = (TValue *)o1;
+    TValue *v2 = (TValue *)o2;
+    switch (vvaltt(v1)) {
+      case LUA_VVECTOR2:
+        dot = glm_vec2_dot(glm_v2(v1), glm_v2(v2));
+        break;
+      case LUA_VVECTOR3:
+        dot = glm_vec3_dot(glm_v3(v1), glm_v3(v2));
+        break;
+      default:
+        dot = glm_vec4_dot(glm_vid(v1), glm_vid(v2));
+        break;
+    }
+    setfltvalue(s2v(res), cast_num(dot));
+  }
+  else if (ttisinteger(o1) && ttisinteger(o2)) {
+    setivalue(s2v(res), luaL_intop(*, ivalue(o1), ivalue(o2)));
+  }
+  else if (ttisnumber(o1) && ttisnumber(o2)) {  /* integer coercion */
+    setfltvalue(s2v(res), nvalue(o1) * nvalue(o2));
+  }
+  else
+    return 0;
+  return 1;
 }
 
 int luaglm_length(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  if (ttisinteger(o1))
-    glm_pushintdistance(L, ivalue(o1), 0);
-  else if (ttisnumber(o1))
-    glm_pushnumber(L, l_mathop(fabs)(nvalue(o1)));
-  else {
-    lua_lock(L);
-    luaV_objlen(L, L->top.p, o1, 0);
-    api_incr_top(L);
-    lua_unlock(L);
-  }
+  const TValue *o1 = glm_fasti2v(L, 1);
+  lua_lock(L);
+  if (!glm_lengthTV(L->top.p, o1))
+    luaV_objlen(L, L->top.p, o1, 0);  /* strings, tables, '__len' */
+  api_incr_top(L);
+  lua_unlock(L);
   return 1;
 }
 
 int luaglm_distance(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  if (ttisvector(o1) && tteq(o1, o2)) {
-    float result;
-    switch (vvaltt(o1)) {
-      case LUA_VVECTOR2: result = glm_vec2_distance(glm_v2(o1), glm_v2(o2)); break;
-      case LUA_VVECTOR3: result = glm_vec3_distance(glm_v3(o1), glm_v3(o2)); break;
-      case LUA_VVECTOR4:
-      case LUA_VQUAT:
-      default: {
-        result = glm_vec4_distance(glm_vid(o1), glm_vid(o2));
-        break;
-      }
-    }
-    glm_pushnumber(L, cast_num(result));
-  }
-  else if (ttisinteger(o1) && ttisinteger(o2))
-    glm_pushintdistance(L, ivalue(o1), ivalue(o2));
-  else if (ttisnumber(o1) && ttisnumber(o2)) /* integer coercion */
-    glm_pushnumber(L, l_mathop(fabs)(nvalue(o1) - nvalue(o2)));
-  else
-    return luaL_error(L, GLM_UNEXPECTED);
-  return 1;
+  int ok;
+  lua_lock(L);
+  ok = glm_distanceTV(L->top.p, glm_fasti2v(L, 1), glm_fasti2v(L, 2));
+  if (ok)
+    api_incr_top(L);
+  lua_unlock(L);
+  return ok ? 1 : luaL_error(L, GLM_UNEXPECTED);
 }
 
 #if defined(GRIT_POWER_FASTCALL)
@@ -1749,63 +1766,12 @@ int luaglm_fastcall (lua_State *L, int id, StkId ra, int nargs) {
     case LUA_FASTVEC2: return glm_fastvector(ra, nargs, 2);
     case LUA_FASTVEC3: return glm_fastvector(ra, nargs, 3);
     case LUA_FASTVEC4: return glm_fastvector(ra, nargs, 4);
-    case LUA_FASTLENGTH: {
-      if (nargs < 1)
-        return -1;
-      if (ttisinteger(o1))
-        glm_intdistance(s2v(ra), ivalue(o1), 0);
-      else if (ttisnumber(o1)) {
-        setfltvalue(s2v(ra), l_mathop(fabs)(nvalue(o1)));
-      }
-      else if (ttisvector(o1))
-        lvec_len(o1, ra, 0);
-      else
-        return -1;
-      return 1;
-    }
-    case LUA_FASTDISTANCE: {
-      if (nargs < 2)
-        return -1;
-      if (ttisvector(o1) && tteq(o1, o2)) {
-        float result;
-        switch (vvaltt(o1)) {
-          case LUA_VVECTOR2: result = glm_vec2_distance(glm_v2(o1), glm_v2(o2)); break;
-          case LUA_VVECTOR3: result = glm_vec3_distance(glm_v3(o1), glm_v3(o2)); break;
-          default: result = glm_vec4_distance(glm_vid(o1), glm_vid(o2)); break;
-        }
-        setfltvalue(s2v(ra), cast_num(result));
-      }
-      else if (ttisinteger(o1) && ttisinteger(o2))
-        glm_intdistance(s2v(ra), ivalue(o1), ivalue(o2));
-      else if (ttisnumber(o1) && ttisnumber(o2)) {
-        setfltvalue(s2v(ra), l_mathop(fabs)(nvalue(o1) - nvalue(o2)));
-      }
-      else
-        return -1;
-      return 1;
-    }
-    case LUA_FASTDOT: {
-      if (nargs < 2)
-        return -1;
-      if (ttisvector(o1) && tteq(o1, o2)) {
-        float dot;
-        switch (vvaltt(o1)) {
-          case LUA_VVECTOR2: dot = glm_vec2_dot(glm_v2(o1), glm_v2(o2)); break;
-          case LUA_VVECTOR3: dot = glm_vec3_dot(glm_v3(o1), glm_v3(o2)); break;
-          default: dot = glm_vec4_dot(glm_vid(o1), glm_vid(o2)); break;
-        }
-        setfltvalue(s2v(ra), cast_num(dot));
-      }
-      else if (ttisinteger(o1) && ttisinteger(o2)) {
-        setivalue(s2v(ra), luaL_intop(*, ivalue(o1), ivalue(o2)));
-      }
-      else if (ttisnumber(o1) && ttisnumber(o2)) {
-        setfltvalue(s2v(ra), nvalue(o1) * nvalue(o2));
-      }
-      else
-        return -1;
-      return 1;
-    }
+    case LUA_FASTLENGTH:
+      return (nargs >= 1 && glm_lengthTV(ra, o1)) ? 1 : -1;
+    case LUA_FASTDISTANCE:
+      return (nargs >= 2 && glm_distanceTV(ra, o1, o2)) ? 1 : -1;
+    case LUA_FASTDOT:
+      return (nargs >= 2 && glm_dotTV(ra, o1, o2)) ? 1 : -1;
     default:
       return -1;
   }
@@ -1814,34 +1780,18 @@ int luaglm_fastcall (lua_State *L, int id, StkId ra, int nargs) {
 
 
 int luaglm_dot(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  if (ttisvector(o1) && tteq(o1, o2)) {
-    float dot;
-    switch (vvaltt(o1)) {
-      case LUA_VVECTOR2: dot = glm_vec2_dot(glm_v2(o1), glm_v2(o2)); break;
-      case LUA_VVECTOR3: dot = glm_vec3_dot(glm_v3(o1), glm_v3(o2)); break;
-      case LUA_VVECTOR4:
-      case LUA_VQUAT:
-      default: {
-        dot = glm_vec4_dot(glm_vid(o1), glm_vid(o2));
-        break;
-      }
-    }
-    glm_pushnumber(L, cast_num(dot));
-  }
-  else if (ttisinteger(o1) && ttisinteger(o2))
-    glm_pushinteger(L, luaL_intop(*, ivalue(o1), ivalue(o2)));
-  else if (ttisnumber(o1) && ttisnumber(o2)) /* integer coercion */
-    glm_pushnumber(L, nvalue(o1) * nvalue(o2));
-  else
-    return luaL_error(L, GLM_UNEXPECTED);
-  return 1;
+  int ok;
+  lua_lock(L);
+  ok = glm_dotTV(L->top.p, glm_fasti2v(L, 1), glm_fasti2v(L, 2));
+  if (ok)
+    api_incr_top(L);
+  lua_unlock(L);
+  return ok ? 1 : luaL_error(L, GLM_UNEXPECTED);
 }
 
 int luaglm_cross(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   if (ttisvector3(o1) && ttisvector3(o2))
     glm_pushvec3(glm_vec3_cross_simd, glm_v3(o1), glm_v3(o2));
   else if (ttisvector3(o1) && ttisquat(o2))
@@ -1858,7 +1808,7 @@ int luaglm_cross(lua_State *L) {
 }
 
 int luaglm_normalize(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
   switch (vvaltt(o1)) {
     case LUA_VNUMINT: glm_pushinteger(L, 1); break;
     case LUA_VNUMFLT: glm_pushnumber(L, l_mathop(1.0)); break;
@@ -1874,9 +1824,9 @@ int luaglm_normalize(lua_State *L) {
 }
 
 int luaglm_faceforward(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
   if (ttisvector(o1) && tteq(o1, o2) && tteq(o2, o3)) {
     vec4 n, i, nr;
     glm_vec4_copy(glm_vid(o1), n);
@@ -1903,8 +1853,8 @@ int luaglm_faceforward(lua_State *L) {
 }
 
 int luaglm_reflect(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   if (ttisvector(o1) && tteq(o1, o2)) {
     vec4 i, n;
     glm_vec4_copy(glm_vid(o1), i);
@@ -1930,9 +1880,9 @@ int luaglm_reflect(lua_State *L) {
 }
 
 int luaglm_refract(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
   if (ttisvector(o1) && ttisnumber(o3) && tteq(o1, o2)) {
     vec4 i, n;
     glm_vec4_copy(glm_vid(o1), i);
@@ -1964,8 +1914,8 @@ int luaglm_refract(lua_State *L) {
 
 /* 8.6. Matrix Functions */
 int luaglm_matrixcompmult(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   if (ttismatrix(o1) && tteq(o1, o2)) {
     glm_mid_recycle(3, mvaltt(o1), glm_mat4_compmult, glm_mid(o1), glm_mid(o2));
     return 1;
@@ -1974,8 +1924,8 @@ int luaglm_matrixcompmult(lua_State *L) {
 }
 
 int luaglm_outerproduct(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   if (ttisvector(o1) && tteq(o1, o2)) {
     CGLM_ALIGN_MAT lua_Matrix m = { GLM_MAT4_ZERO_INIT };
     lu_byte len = ttvlen(o1);
@@ -1996,7 +1946,7 @@ int luaglm_outerproduct(lua_State *L) {
 
 int luaglm_transpose(lua_State *L) {
   CGLM_ALIGN_MAT lua_Matrix m = { GLM_MAT4_ZERO_INIT };
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
   switch (mvaltt(o1)) {
     case LUA_VMATRIX2: glm_mat2_transpose_to(glm_m2(o1), m.m2); break;
     case LUA_VMATRIX3: glm_mat3_transpose_to(glm_m3(o1), m.m3); break;
@@ -2011,7 +1961,7 @@ int luaglm_transpose(lua_State *L) {
 
 int luaglm_det(lua_State *L) {
   float det;
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
   switch (mvaltt(o1)) {
     case LUA_VMATRIX2: det = glm_mat2_det(glm_m2(o1)); break;
     case LUA_VMATRIX3: det = glm_mat3_det(glm_m3(o1)); break;
@@ -2026,7 +1976,7 @@ int luaglm_det(lua_State *L) {
 
 int luaglm_inverse(lua_State *L) {
   lua_Number n1 = l_mathop(0.0);
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
   if (ttisquat(o1))
     glm_pushquat(glm_quat_inv_simd, glm_q(o1));
   else if (ttismatrix(o1)) {
@@ -2057,8 +2007,8 @@ int luaglm_lessThanEqual(lua_State *L) { COMPONENT_BFUNC5(glm_vec4_lessthaneq, l
 int luaglm_greaterThan(lua_State *L) { COMPONENT_BFUNC5(glm_vec4_greaterthan, luai_numgt, glm_pushboolean, luai_numgt, glm_pushboolean); }
 int luaglm_greaterThanEqual(lua_State *L) { COMPONENT_BFUNC5(glm_vec4_greaterthaneq, luai_numge, glm_pushboolean, luai_numge, glm_pushboolean); }
 int luaglm_equal(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   if (ttisvector(o1) && tteq(o1, o2)) {
     lu_byte tag = ttisquat(o1) ? LUA_VVECTOR4 : vvaltt(o1);
     glm_pushvid(tag, glm_vec4_eqto, glm_vid(o1), glm_vid(o2));
@@ -2080,8 +2030,8 @@ int luaglm_equal(lua_State *L) {
 }
 
 int luaglm_notEqual(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   if (ttisvector(o1) && tteq(o1, o2)) {
     lu_byte tag = ttisquat(o1) ? LUA_VVECTOR4 : vvaltt(o1);
     glm_pushvid(tag, glm_vec4_neqto, glm_vid(o1), glm_vid(o2));
@@ -2103,7 +2053,7 @@ int luaglm_notEqual(lua_State *L) {
 }
 
 int luaglm_not(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
   if (ttisboolean(o1) || ttisnil(o1)) {
     glm_pushboolean(L, l_isfalse(o1));
     return 1;
@@ -2115,7 +2065,7 @@ int luaglm_not(lua_State *L) {
 
 int luaglm_any(lua_State *L) {
   int any;
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
   switch (vvaltt(o1)) {
     case LUA_VFALSE: any = 0; break;
     case LUA_VTRUE: any = 1; break;
@@ -2136,7 +2086,7 @@ int luaglm_any(lua_State *L) {
 
 int luaglm_all(lua_State *L) {
   int all;
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
   switch (vvaltt(o1)) {
     case LUA_VFALSE: all = 0; break;
     case LUA_VTRUE: all = 1; break;
@@ -2275,8 +2225,8 @@ int luaglm_findMSB(lua_State *L) {
 
 /* 8.X. Extensions */
 int luaglm_approx(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   lua_Number eps = luaL_optnumber(L, 3, cast_num(GLM_FLT_EPSILON));
   if (ttisvector(o1) && tteq(o1, o2)) {
     lu_byte tag = ttisquat(o1) ? LUA_VVECTOR4 : vvaltt(o1);
@@ -2296,7 +2246,7 @@ int luaglm_approx(lua_State *L) {
     glm_pushvid(vvaltag(ttmlen(o1)), glm_vec4_copy, f4.v4);
   }
   else if (ttisnumber(o1) && ttisnumber(o2)) {
-    TValue *o3 = (TValue *)glm_index2value(L, 3);
+    TValue *o3 = (TValue *)glm_fasti2v(L, 3);
     if (ttisinteger(o1) && ttisinteger(o2) && ttisinteger(o3)) {
       lua_Integer i = luaL_intop(-, ivalue(o1), ivalue(o2));
       glm_pushboolean(L, l_absI(i) <= ivalue(o3));
@@ -2311,8 +2261,8 @@ int luaglm_approx(lua_State *L) {
 
 int luaglm_angle(lua_State *L) {
   float angle;
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   if (ttisvector3(o1) && ttisvector3(o2))
     angle = glm_vec3_angle(glm_v3(o1), glm_v3(o2));
   else if (ttisvector2(o1) && ttisvector2(o2))
@@ -2326,7 +2276,7 @@ int luaglm_angle(lua_State *L) {
 }
 
 int luaglm_quat_axis(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
   if (ttisquat(o1)) {
     glm_pushvec3(glm_quat_axis, glm_q(o1));
     return 1;
@@ -2335,8 +2285,8 @@ int luaglm_quat_axis(lua_State *L) {
 }
 
 int luaglm_quat_for(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   if (ttisvector3(o1) && ttisvector3(o2)) {
     glm_pushquat(glm_quat_for, glm_v3(o1), glm_v3(o2));
     return 1;
@@ -2345,9 +2295,9 @@ int luaglm_quat_for(lua_State *L) {
 }
 
 int luaglm_slerp(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
   if (ttisquat(o1) && ttisquat(o2) && ttisnumber(o3))
     glm_pushquat(glm_quat_slerp, glm_q(o1), glm_q(o2), glm_fv(o3));
   else if (ttisvector3(o1) && ttisvector3(o2) && ttisnumber(o3))
@@ -2359,8 +2309,8 @@ int luaglm_slerp(lua_State *L) {
 
 int luaglm_translate(lua_State *L) {
   CGLM_ALIGN_MAT lua_Matrix m;
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   if (ttismatrix4(o1) && ttisvector3(o2))
     glm_translate_to(glm_m4(o1), glm_v3(o2), m.m4);
   else if (ttismatrix3(o1) && ttisvector2(o2))
@@ -2373,8 +2323,8 @@ int luaglm_translate(lua_State *L) {
 
 int luaglm_scale(lua_State *L) {
   CGLM_ALIGN_MAT lua_Matrix m;
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
   if (ttismatrix4(o1) && ttisvector3(o2))
     glm_scale_to(glm_m4(o1), glm_v3(o2), m.m4);
   else if (ttismatrix3(o1) && ttisvector2(o2))
@@ -2386,9 +2336,9 @@ int luaglm_scale(lua_State *L) {
 }
 
 int luaglm_rotate(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
   if (ttismatrix4(o1) && ttisnumber(o2) && ttisvector3(o3)) {
     mat4 rot;
     glm_rotate_make_simd(rot, glm_fv(o2), glm_v3(o3));
@@ -2449,9 +2399,9 @@ int luaglm_perspective(lua_State *L) {
 }
 
 int luaglm_project(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
   if (ttisvector3(o1) && ttismatrix4(o2) && ttisvector4(o3))
     glm_pushvec3(glm_project, glm_v3(o1), glm_m4(o2), glm_v4(o3));
   else if (ttisvector3(o1) && ttisvector3(o2))
@@ -2462,9 +2412,9 @@ int luaglm_project(lua_State *L) {
 }
 
 int luaglm_unproject(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
   if (ttisvector3(o1) && ttismatrix4(o2) && ttisvector4(o3)) {
     glm_pushvec3(glm_unproject, glm_v3(o1), glm_m4(o2), glm_v4(o3));
     return 1;
@@ -2475,9 +2425,9 @@ int luaglm_unproject(lua_State *L) {
 int luaglm_lookat(lua_State *L) {
   int idx;
   mat4 m;
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
   if (ttisvector3(o1) && ttisvector3(o2) && ttisvector3(o3))
     idx = 4, glm_lookat(glm_v3(o1), glm_v3(o2), glm_v3(o3), m);
   else if (ttisvector3(o1) && ttisquat(o2))
@@ -2489,10 +2439,10 @@ int luaglm_lookat(lua_State *L) {
 }
 
 int luaglm_billboard(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
-  TValue *o4 = (TValue *)glm_index2value(L, 4);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
+  TValue *o4 = (TValue *)glm_fasti2v(L, 4);
   if (ttisvector3(o1) && ttisvector3(o2) && ttisvector3(o3) && ttisvector3(o4)) {
     glm_mat4_recycle(5, glm_billboard, glm_v3(o1), glm_v3(o2), glm_v3(o3), glm_v3(o4));
     return 1;
@@ -2501,9 +2451,9 @@ int luaglm_billboard(lua_State *L) {
 }
 
 int luaglm_compose(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
   if (ttisvector3(o1) && ttisquat(o2) && ttisvector3(o3)) {
     glm_mat4_recycle(4, glm_compose_trs, glm_v3(o1), glm_q(o2), glm_v3(o3));
     return 1;
@@ -2512,7 +2462,7 @@ int luaglm_compose(lua_State *L) {
 }
 
 int luaglm_decompose(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
   if (ttismatrix4(o1)) {
     mat4 rotation;
     vec4 translation;
@@ -2527,9 +2477,9 @@ int luaglm_decompose(lua_State *L) {
 }
 
 int luaglm_from_euler(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
   if (ttisvector3(o1) && ttisstring(o2) && tsslen(tsvalue(o2)) == 3) {
     glm_euler_seq order = glm_parse_euler(getstr(tsvalue(o2)), ttistrue(o3));
     glm_pushquat(glm_euler_by_orderq, glm_v3(o1), order);
@@ -2539,9 +2489,9 @@ int luaglm_from_euler(lua_State *L) {
 }
 
 int luaglm_to_euler(lua_State *L) {
-  TValue *o1 = (TValue *)glm_index2value(L, 1);
-  TValue *o2 = (TValue *)glm_index2value(L, 2);
-  TValue *o3 = (TValue *)glm_index2value(L, 3);
+  TValue *o1 = (TValue *)glm_fasti2v(L, 1);
+  TValue *o2 = (TValue *)glm_fasti2v(L, 2);
+  TValue *o3 = (TValue *)glm_fasti2v(L, 3);
   if (ttisstring(o2) && tsslen(tsvalue(o2)) == 3) {
     mat4 m;
     glm_euler_seq order = glm_parse_euler(getstr(tsvalue(o2)), ttistrue(o3));
@@ -2989,16 +2939,16 @@ int lglm_IDIV(lua_State *L, StkId ra, TValue *rb, TValue *rc) {
 }
 
 /*
-** OP_MOD for vector, quaternion, and matrix types. Using fmod for the same
-** reasons described in llimits.h:
+** OP_MOD for vector, quaternion, and matrix types. Floored like luai_nummod
+** in llimits.h, whatever the SIMD setting:
 **   A B C   R[A] := R[B] % R[C]
 */
 int lglm_MOD(lua_State *L, StkId ra, TValue *rb, TValue *rc) {
   if (ttisvector(rb)) {
     if (tteq(rb, rc)) /* vec % vec */
-      glm_vid_op(ra, vvaltt(rb), glm_vec4_mod_simd, glm_vid(rb), glm_vid(rc));
+      glm_vid_op(ra, vvaltt(rb), glm_vec4_floormod, glm_vid(rb), glm_vid(rc));
     else if (ttisnumber(rc)) /* vec % scalar */
-      glm_vid_op(ra, vvaltt(rb), glm_vec4_mods_simd, glm_vid(rb), glm_fv(rc));
+      glm_vid_op(ra, vvaltt(rb), glm_vec4_floormods, glm_vid(rb), glm_fv(rc));
     else
       return 0;
   }
@@ -3090,8 +3040,32 @@ int lglm_BNOT(lua_State *L, StkId ra, TValue *rb) {
 int lglm_BAND(lua_State *L, StkId ra, TValue *rb, TValue *rc) { lglm_BitOp(L, ra, rb, rc, glm_ivec4_band); }
 int lglm_BOR(lua_State *L, StkId ra, TValue *rb, TValue *rc) { lglm_BitOp(L, ra, rb, rc, glm_ivec4_bor); }
 int lglm_BXOR(lua_State *L, StkId ra, TValue *rb, TValue *rc) { lglm_BitOp(L, ra, rb, rc, glm_ivec4_bxor); }
-int lglm_BSHL(lua_State *L, StkId ra, TValue *rb, TValue *rc) { lglm_BitOp(L, ra, rb, rc, glm_ivec4_shl); }
-int lglm_BSHR(lua_State *L, StkId ra, TValue *rb, TValue *rc) { lglm_BitOp(L, ra, rb, rc, glm_ivec4_shr); }
+static int glm_BSHL(lua_State *L, StkId ra, TValue *rb, TValue *rc) { lglm_BitOp(L, ra, rb, rc, glm_ivec4_shl); }
+static int glm_BSHR(lua_State *L, StkId ra, TValue *rb, TValue *rc) { lglm_BitOp(L, ra, rb, rc, glm_ivec4_shr); }
+
+/*
+** Shift a vector by a scalar count with luaV_shiftl semantics: a negative
+** count shifts the other way and a count of 32 or more gives 0.
+*/
+static int glm_shiftop(lua_State *L, StkId ra, TValue *rb, TValue *rc, int left) {
+  const lua_Integer nbits = cast(lua_Integer, sizeof(unsigned int) * CHAR_BIT);
+  lua_Integer i;
+  TValue count;
+  if (ttisvector(rb) && tointegerns(rc, &i)) {
+    if (i < 0) {
+      left = !left;
+      i = (i <= -nbits) ? nbits : -i;
+    }
+    else if (i > nbits)
+      i = nbits;
+    setivalue(&count, i);
+    rc = &count;
+  }
+  return left ? glm_BSHL(L, ra, rb, rc) : glm_BSHR(L, ra, rb, rc);
+}
+
+int lglm_BSHL(lua_State *L, StkId ra, TValue *rb, TValue *rc) { return glm_shiftop(L, ra, rb, rc, 1); }
+int lglm_BSHR(lua_State *L, StkId ra, TValue *rb, TValue *rc) { return glm_shiftop(L, ra, rb, rc, 0); }
 
 /*
 ** OP_SHRI for vector types.
@@ -3099,26 +3073,13 @@ int lglm_BSHR(lua_State *L, StkId ra, TValue *rb, TValue *rc) { lglm_BitOp(L, ra
 **   A B sC  R[A] := R[B] << sC
 */
 int lglm_SHRI(lua_State *L, StkId ra, TValue *rb, int imm) {
-  const int nbits = cast_int(sizeof(unsigned int) * CHAR_BIT);
-  if (ttisvector(rb) && !ttisquat(rb)) {
-    CGLM_ALIGN(16) ivec4 lhs, rhs, dest;
-    glm_ivec4f(glm_vid(rb), lhs);
-    if (imm < 0 && imm > -nbits) { /* shift right */
-      glm_ivec4_broadcast(-imm, rhs);
-      glm_ivec4_shr(lhs, rhs, dest);
-    }
-    else if (imm >= 0 && imm < nbits) { /* shift left */
-      glm_ivec4_broadcast(imm, rhs);
-      glm_ivec4_shl(lhs, rhs, dest);
-    }
-    else {
-      glm_ivec4_copy(lhs, dest);
-    }
-    glm_vid_op(ra, vvaltt(rb), glm_vec4i, dest);
-    return 1;
+  TValue count;
+  if (!ttisvector(rb) || ttisquat(rb)) {
+    UNUSED(L);
+    return 0;
   }
-  UNUSED(L);
-  return 0;
+  setivalue(&count, imm); /* 'imm' is the left-shift count (negative shifts right) */
+  return glm_shiftop(L, ra, rb, &count, 1);
 }
 
 /*

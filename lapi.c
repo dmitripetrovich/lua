@@ -91,6 +91,11 @@ static TValue *index2value (lua_State *L, int idx) {
 }
 
 
+const TValue *luaA_index2value (lua_State *L, int idx) {
+  return index2value(L, idx);
+}
+
+
 
 /*
 ** Convert a valid actual index (not a pseudo-index) to its address.
@@ -841,6 +846,7 @@ static int finishrawget (lua_State *L, lu_byte tag) {
 
 
 l_sinline Table *ensuretable (lua_State *L, const TValue *t) {
+  UNUSED(L);  /* (when api_check ignores it) */
   api_check(L, ttistable(t), "table expected");
   return hvalue(t);
 }
@@ -861,7 +867,7 @@ LUA_API int lua_rawget (lua_State *L, int idx) {
   if (ttisvector(o) || ttismatrix(o)) {
     int result = ttisvector(o) ? lvec_rawget(o, s2v(L->top.p - 1), L->top.p - 1) : lmat_rawget(o, s2v(L->top.p - 1), L->top.p - 1);
     lua_unlock(L);
-    return result;
+    return lglm_filter(result);
   }
   t = ensuretable(L, o);
   tag = luaH_get(t, s2v(L->top.p - 1), s2v(L->top.p - 1));
@@ -880,7 +886,7 @@ LUA_API int lua_rawgeti (lua_State *L, int idx, lua_Integer n) {
     int result = ttisvector(o) ? lvec_rawgeti(o, n, L->top.p) : lmat_rawgeti(o, n, L->top.p);
     api_incr_top(L);
     lua_unlock(L);
-    return result;
+    return lglm_filter(result);
   }
   t = ensuretable(L, o);
   luaH_fastgeti(t, n, s2v(L->top.p), tag);
@@ -924,10 +930,13 @@ LUA_API void lua_createtable (lua_State *L, int narray, int nrec) {
   { if (l_unlikely(isreadonly(t))) luaG_readonlyerror(L); if (l_unlikely(isimported(t))) luaC_unimport(G(L), t); }
 #define api_checkwritablekey(L,t,k)  \
   { if (l_unlikely(isreadonly(t))) luaG_readonlyerror(L); if (l_unlikely(isimported(t))) luaC_unimportkey(G(L), t, k); }
+#define api_checkwritableint(L,t)  \
+  if (l_unlikely(isreadonly(t))) luaG_readonlyerror(L)  /* (integer keys are never import keys) */
 #elif defined(GRIT_POWER_READONLY)
 #define api_checkwritable(L,t)  \
   if (l_unlikely(isreadonly(t))) luaG_readonlyerror(L)
 #define api_checkwritablekey(L,t,k)	api_checkwritable(L,t)
+#define api_checkwritableint(L,t)	api_checkwritable(L,t)
 #endif
 #if defined(GRIT_POWER_READONLY)
 
@@ -952,6 +961,7 @@ LUA_API void lua_setreadonly (lua_State *L, int idx, int value) {
 #else
 #define api_checkwritable(L,t)	((void)0)
 #define api_checkwritablekey(L,t,k)	((void)0)
+#define api_checkwritableint(L,t)	((void)0)
 #endif
 
 
@@ -1085,7 +1095,7 @@ static void auxsetstr (lua_State *L, const TValue *t, const char *k) {
   int hres;
   TString *str = luaS_new(L, k);
   api_checkpop(L, 1);
-  luaV_fastset(t, str, s2v(L->top.p - 1), hres, luaH_psetstr);
+  luaV_fastsetstr(t, str, s2v(L->top.p - 1), hres, luaH_psetstr);
   if (hres == HOK) {
     luaV_finishfastset(L, t, s2v(L->top.p - 1));
     L->top.p--;  /* pop value */
@@ -1093,10 +1103,7 @@ static void auxsetstr (lua_State *L, const TValue *t, const char *k) {
   else {
     setsvalue2s(L, L->top.p, str);  /* push 'str' (to make it a TValue) */
     api_incr_top(L);
-    if (ttismatrix(t))
-      lmat_set(L, t, s2v(L->top.p - 1), s2v(L->top.p - 2));
-    else
-      luaV_finishset(L, t, s2v(L->top.p - 1), s2v(L->top.p - 2), hres);
+    luaV_finishsetglm(L, t, s2v(L->top.p - 1), s2v(L->top.p - 2), hres);
     L->top.p -= 2;  /* pop value and key */
   }
   lua_unlock(L);  /* lock done by caller */
@@ -1117,15 +1124,11 @@ LUA_API void lua_settable (lua_State *L, int idx) {
   lua_lock(L);
   api_checkpop(L, 2);
   t = index2value(L, idx);
-  if (ttismatrix(t))
-    lmat_set(L, t, s2v(L->top.p - 2), s2v(L->top.p - 1));
-  else {
-    luaV_fastset(t, s2v(L->top.p - 2), s2v(L->top.p - 1), hres, luaH_pset);
-    if (hres == HOK)
-      luaV_finishfastset(L, t, s2v(L->top.p - 1));
-    else
-      luaV_finishset(L, t, s2v(L->top.p - 2), s2v(L->top.p - 1), hres);
-  }
+  luaV_fastset(t, s2v(L->top.p - 2), s2v(L->top.p - 1), hres, luaH_pset);
+  if (hres == HOK)
+    luaV_finishfastset(L, t, s2v(L->top.p - 1));
+  else
+    luaV_finishsetglm(L, t, s2v(L->top.p - 2), s2v(L->top.p - 1), hres);
   L->top.p -= 2;  /* pop index and value */
   lua_unlock(L);
 }
@@ -1143,17 +1146,13 @@ LUA_API void lua_seti (lua_State *L, int idx, lua_Integer n) {
   lua_lock(L);
   api_checkpop(L, 1);
   t = index2value(L, idx);
-  if (ttismatrix(t))
-    lmat_seti(L, t, n, s2v(L->top.p - 1));
+  luaV_fastseti(t, n, s2v(L->top.p - 1), hres);
+  if (hres == HOK)
+    luaV_finishfastset(L, t, s2v(L->top.p - 1));
   else {
-    luaV_fastseti(t, n, s2v(L->top.p - 1), hres);
-    if (hres == HOK)
-      luaV_finishfastset(L, t, s2v(L->top.p - 1));
-    else {
-      TValue temp;
-      setivalue(&temp, n);
-      luaV_finishset(L, t, &temp, s2v(L->top.p - 1), hres);
-    }
+    TValue temp;
+    setivalue(&temp, n);
+    luaV_finishsetglm(L, t, &temp, s2v(L->top.p - 1), hres);
   }
   L->top.p--;  /* pop value */
   lua_unlock(L);
@@ -1209,7 +1208,7 @@ LUA_API void lua_rawseti (lua_State *L, int idx, lua_Integer n) {
 #endif
   else {
     Table *t = ensuretable(L, v);
-    api_checkwritable(L, t);
+    api_checkwritableint(L, t);
     luaH_setint(L, t, n, s2v(L->top.p - 1));
     luaC_barrierback(L, obj2gco(t), s2v(L->top.p - 1));
   }

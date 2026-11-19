@@ -93,9 +93,6 @@ static const char *const opnames[] = {
   "TFORLOOP",
   "SETLIST",
   "CLOSURE",
-#if defined(GRIT_POWER_DEFER)
-  "DEFER",
-#endif
   "VARARG",
   "GETVARG",
   "ERRNNIL",
@@ -105,6 +102,12 @@ static const char *const opnames[] = {
 #endif
 #if defined(GRIT_POWER_IMPORT)
   "GETIMPORT",
+#endif
+#if defined(GRIT_POWER_INTERP)
+  "TOSTRING",
+#endif
+#if defined(GRIT_POWER_DEFER)
+  "DEFER",
 #endif
   "EXTRAARG",
   NULL

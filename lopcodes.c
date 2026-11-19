@@ -101,9 +101,6 @@ LUAI_DDEF const lu_byte luaP_opmodes[NUM_OPCODES] = {
  ,opmode(0, 0, 0, 0, 1, iABx)		/* OP_TFORLOOP */
  ,opmode(0, 0, 1, 0, 0, ivABC)		/* OP_SETLIST */
  ,opmode(0, 0, 0, 0, 1, iABx)		/* OP_CLOSURE */
-#if defined(GRIT_POWER_DEFER)
- ,opmode(0, 0, 0, 0, 1, iABC)		/* OP_DEFER */
-#endif
  ,opmode(0, 1, 0, 0, 1, iABC)		/* OP_VARARG */
  ,opmode(0, 0, 0, 0, 1, iABC)		/* OP_GETVARG */
  ,opmode(0, 0, 0, 0, 0, iABx)		/* OP_ERRNNIL */
@@ -113,6 +110,12 @@ LUAI_DDEF const lu_byte luaP_opmodes[NUM_OPCODES] = {
 #endif
 #if defined(GRIT_POWER_IMPORT)
  ,opmode(0, 0, 0, 0, 1, iABx)
+#endif
+#if defined(GRIT_POWER_INTERP)
+ ,opmode(0, 0, 0, 0, 1, iABC)		/* OP_TOSTRING */
+#endif
+#if defined(GRIT_POWER_DEFER)
+ ,opmode(0, 0, 0, 0, 1, iABC)		/* OP_DEFER */
 #endif
  ,opmode(0, 0, 0, 0, 0, iAx)		/* OP_EXTRAARG */
 };

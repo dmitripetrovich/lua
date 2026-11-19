@@ -94,6 +94,7 @@
 #define luaC_setimport(t)	((t)->imported = 1)
 #define luaC_unimport(g,t)	((t)->imported = 0, (g)->importepoch++)
 #define isimportkey(k)	ttisshrstring(k)
+#define isimportstr(ts)	strisshr(ts)
 #define luaC_setimportkey(ts)	((void)(ts))
 #else
 #define IMPORTBIT	TESTBIT
@@ -102,6 +103,7 @@
 #define luaC_unimport(g,t)	(resetbit((t)->marked, IMPORTBIT), (g)->importepoch++)
 /* import keys are short strings, which are interned: a write finds the mark */
 #define isimportkey(k)	(ttisshrstring(k) && testbit(tsvalue(k)->marked, IMPORTBIT))
+#define isimportstr(ts)	testbit((ts)->marked, IMPORTBIT)  /* (only short strings get it) */
 #define luaC_setimportkey(ts)	l_setbit((ts)->marked, IMPORTBIT)
 #endif
 /* only writing a key that some import looks up can change a cached value */

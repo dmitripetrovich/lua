@@ -1,350 +1,133 @@
 # Developer's makefile for building Lua
 # see luaconf.h for further customization
 
-# == CHANGE THE SETTINGS BELOW TO SUIT YOUR ENVIRONMENT =======================
+FEATURES= \
+	-DLUA_C99_MATHLIB \
+	-DGRIT_COMPAT_IPAIRS \
+	-DGRIT_COMPAT_GETN \
+	-DGRIT_COMPAT_NUMFMT \
+	-DGRIT_COMPAT_GLM \
+	-DGRIT_POWER_DEFER_OLD \
+	-DGRIT_POWER_COMPOUND \
+	-DGRIT_POWER_INTABLE \
+	-DGRIT_POWER_TABINIT \
+	-DGRIT_POWER_SAFENAV \
+	-DGRIT_POWER_CCOMMENT \
+	-DGRIT_POWER_IFEXPR \
+	-DGRIT_POWER_LAMBDA \
+	-DGRIT_POWER_LITERAL \
+	-DGRIT_POWER_JOAAT \
+	-DGRIT_POWER_EACH \
+	-DGRIT_POWER_WOW \
+	-DGRIT_POWER_READONLY \
+	-DGRIT_POWER_CHRONO \
+	-DGRIT_POWER_BLOB \
+	-DGRIT_POWER_BUDGET \
+	-DGRIT_POWER_GCPACE \
+	-DGRIT_POWER_ALLOWANCE \
+	-DGRIT_POWER_CONTINUE \
+	-DGRIT_POWER_IMPORT \
+	-DGRIT_POWER_FASTCALL \
+	-DGRIT_POWER_FINDSPLIT \
+	-DGRIT_POWER_CHECKHOOK \
+	-DGRIT_POWER_COHOOK \
+	-DGRIT_POWER_GAMELUA \
+	-DGRIT_POWER_UNDUMPHOOK \
+	-DGRIT_POWER_READLINE_HISTORY \
+	-DGRIT_POWER_LIBS \
+	-DGRIT_POWER_INTERP \
+	-DGRIT_POWER_STRBUF \
+	-DGRIT_POWER_STDEXT \
+	-DGRIT_POWER_COALESCE \
+	-DGRIT_POWER_DEFAULTS \
+	-DGRIT_POWER_SWITCH \
+	-DLUA_EXT_ITERATION \
+	-DLUA_EXT_ITOA
 
-# Warnings valid for both C and C++
-CWARNSCPP= \
-	-Wfatal-errors \
-	-Wextra \
-	-Wshadow \
-	-Wundef \
-	-Wwrite-strings \
-	-Wredundant-decls \
-	-Wdisabled-optimization \
-	-Wdouble-promotion \
-	-Wmissing-declarations \
-	-Wconversion \
-        # the next warnings might be useful sometimes,
-	# but usually they generate too much noise
-	# -Wstrict-overflow=2 \
-	# -Werror \
-	# -pedantic   # warns if we use jump tables \
-	# -Wformat=2 \
-	# -Wcast-qual \
+ALT_FEATURES= $(filter-out -DGRIT_POWER_DEFER_OLD,$(FEATURES)) \
+	-DGRIT_POWER_DEFER \
+	-DGRIT_POWER_NAMESPACE_SEL \
+	-DGRIT_POWER_UHASH \
+	-DLUA_NO_DUMP
 
+WARNINGS= -Wall -Wfatal-errors -Wextra -Wshadow -Wundef -Wwrite-strings \
+	-Wredundant-decls -Wdisabled-optimization -Wdouble-promotion \
+	-Wmissing-declarations -Wconversion -Wdeclaration-after-statement \
+	-Wmissing-prototypes -Wnested-externs -Wstrict-prototypes -Wc++-compat \
+	-Wold-style-definition
+ifneq ($(findstring clang,$(shell $(CC) --version 2>/dev/null)),clang)
+WARNINGS+= -Wlogical-op
+endif
 
-# Warnings for gcc, not valid for clang
-CWARNGCC= \
-	-Wlogical-op \
-	-Wno-aggressive-loop-optimizations \
-
-
-# The next warnings are neither valid nor needed for C++
-CWARNSC= -Wdeclaration-after-statement \
-	-Wmissing-prototypes \
-	-Wnested-externs \
-	-Wstrict-prototypes \
-	-Wc++-compat \
-	-Wold-style-definition \
-
-# Some useful compiler options for internal tests:
-# -DLUAI_ASSERT turns on all assertions inside Lua.
-# -DHARDSTACKTESTS forces a reallocation of the stack at every point where
-# the stack can be reallocated.
-# -DHARDMEMTESTS forces a full collection at all points where the collector
-# can run.
-# -DEMERGENCYGCTESTS forces an emergency collection at every single allocation.
-# -DEXTERNMEMCHECK removes internal consistency checking of blocks being
-# deallocated (useful when an external tool like valgrind does the check).
-# -DMAXINDEXRK=k limits range of constants in RK instruction operands.
-# -DLUA_COMPAT_5_3
-
-# -pg -malign-double
-# -DLUA_USE_CTYPE -DLUA_USE_APICHECK
-
-# The following options help detect "undefined behavior"s that seldom
-# create problems; some are only available in newer gcc versions. To
-# use some of them, we also have to define an environment variable
-# ASAN_OPTIONS="detect_invalid_pointer_pairs=2".
-# -fsanitize=undefined  (you may need to add "-lubsan" to libs)
-# -fsanitize=pointer-subtract -fsanitize=address -fsanitize=pointer-compare
-
-# Test mode: Add test library, turn on asserts, redefine several
-# constants ("to give some bugs a chance"), track memory use, and add
-# debug information.
-# TESTS= -DLUA_USER_H='"ltests.h"' -Og -g
-
-PLAT= guess
-
-CWARNS= $(CWARNSCPP) $(CWARNSC) $(CWARNGCC)
-
-CC= gcc -std=c99 $(CWARNS)
-# (Optionally we can use -march=native -mno-avx512f.)
-CFLAGS= -O2 -Wall -Wextra -DNDEBUG $(SYSCFLAGS) $(MYCFLAGS)
-CPERF_FLAGS = -O3 -march=native -fno-plt -fno-stack-protector -ffast-math -fno-finite-math-only
-LDFLAGS= $(SYSLDFLAGS) $(MYLDFLAGS)
-LIBS= -lm $(SYSLIBS) $(MYLIBS)
-
-AR= ar rc
-RANLIB= ranlib
-RM= rm -f
-UNAME= uname
-
-SYSCFLAGS=
-SYSLDFLAGS=
+ifeq ($(shell uname),Darwin)
+SYSTEM= -DLUA_USE_POSIX -DLUA_USE_DLOPEN -DLUA_READLINELIB='"libedit.3.dylib"'
 SYSLIBS=
+SOFLAGS= -shared -undefined dynamic_lookup
+else
+SYSTEM= -DLUA_USE_LINUX
+SYSLIBS= -Wl,-E -ldl
+SOFLAGS= -shared -fPIC
+endif
 
-LUA_PATCHES = -DLUA_C99_MATHLIB  \
-		-DLUA_USE_LONGJMP \
-		-DGRIT_COMPAT_IPAIRS \
-		-DGRIT_COMPAT_GETN \
-		-DGRIT_COMPAT_NUMFMT \
-		-DGRIT_COMPAT_GLM \
-		-DGRIT_POWER_DEFER_OLD \
-		-DGRIT_POWER_COMPOUND \
-		-DGRIT_POWER_INTABLE \
-		-DGRIT_POWER_TABINIT \
-		-DGRIT_POWER_SAFENAV \
-		-DGRIT_POWER_CCOMMENT \
-		-DGRIT_POWER_IFEXPR \
-		-DGRIT_POWER_LAMBDA \
-		-DGRIT_POWER_LITERAL \
-		-DGRIT_POWER_JOAAT \
-		-DGRIT_POWER_EACH \
-		-DGRIT_POWER_WOW \
-		-DGRIT_POWER_READONLY \
-		-DGRIT_POWER_CHRONO \
-		-DGRIT_POWER_BLOB \
-		-DGRIT_POWER_BUDGET \
-		-DGRIT_POWER_GCPACE \
-		-DGRIT_POWER_ALLOWANCE \
-		-DGRIT_POWER_CONTINUE \
-		-DGRIT_POWER_IMPORT \
-		-DGRIT_POWER_FASTCALL \
-		-DGRIT_POWER_FINDSPLIT \
-		-DGRIT_POWER_CHECKHOOK \
-		-DGRIT_POWER_COHOOK \
-		-DGRIT_POWER_GAMELUA \
-		-DGRIT_POWER_UNDUMPHOOK \
-		-DGRIT_POWER_READLINE_HISTORY \
-		-DGRIT_POWER_LIBS \
-		-DGRIT_POWER_INTERP \
-		-DGRIT_POWER_STRBUF \
-		-DGRIT_POWER_STDEXT \
-		-DGRIT_POWER_COALESCE \
-		-DGRIT_POWER_DEFAULTS \
-		-DGRIT_POWER_SWITCH \
-		-DLUA_EXT_ITERATION \
-		-DLUA_EXT_ITOA \
+CFLAGS= -std=c99 -O2 $(SYSTEM) $(WARNINGS) -I. -isystem cglm/include -MMD -MP
+LDLIBS= -lm $(SYSLIBS)
 
-CGLM_DIR ?= cglm
+SRC= lapi lcode lctype ldebug ldo ldump lfunc lgc llex lmem lobject \
+	lopcodes lparser lstate lstring ltable ltm lundump lvm lzio ltests lglm \
+	lauxlib lbaselib ldblib liolib lmathlib loslib ltablib lstrlib lutf8lib \
+	loadlib lcorolib linit \
+	libs/json/ljson libs/json/ljsonlib libs/msgpack/lmsgpack \
+	libs/msgpack/lmsgpacklib
+objs= $(addprefix $(1)/,$(addsuffix .o,$(SRC)))
 
-# To enable Linux goodies, -DLUA_USE_LINUX
-# For C89, "-std=c89 -DLUA_USE_C89"
-# Note that Linux/Posix options are not compatible with C89
-# (For 32-bit, add option "-m32" to MYCFLAGS and MYLDFLAGS.)
-MYCFLAGS= $(TESTS) $(LUA_PATCHES) -I. -isystem $(CGLM_DIR)/include
-MYLDFLAGS= $(TESTS)
-MYLIBS=
-MYOBJS= libs/json/ljson.o libs/json/ljsonlib.o libs/msgpack/lmsgpack.o libs/msgpack/lmsgpacklib.o
+FLAGS= $(FEATURES)
+build/alt/%: FLAGS= $(ALT_FEATURES)
+build/tests/%: FLAGS= $(FEATURES) -DLUA_USER_H='"ltests.h"' -Og -g
 
-# == END OF USER SETTINGS. NO NEED TO CHANGE ANYTHING BELOW THIS LINE =========
+build: build/lua
 
-PLATS= guess aix bsd freebsd generic linux linux-readline macos mingw posix solaris
+export LUA_HISTORY= $(CURDIR)/build/lua_history
 
-LUA_A=	liblua.a
-CORE_O=	lapi.o lcode.o lctype.o ldebug.o ldo.o ldump.o lfunc.o lgc.o llex.o lmem.o lobject.o lopcodes.o lparser.o lstate.o lstring.o ltable.o ltm.o lundump.o lvm.o lzio.o ltests.o lglm.o
-LIB_O=	lauxlib.o lbaselib.o lcorolib.o ldblib.o liolib.o lmathlib.o loadlib.o loslib.o lstrlib.o ltablib.o lutf8lib.o linit.o
-BASE_O= $(CORE_O) $(LIB_O) $(MYOBJS)
+TESTLIBS= testes/libs/lib1.so testes/libs/lib11.so testes/libs/lib2.so \
+	testes/libs/lib21.so testes/libs/lib2-v2.so
 
-LUA_T=	lua
-LUA_O=	lua.o
+ifeq ($(TEST),)
+test: build build/alt/lua build/tests/lua $(TESTLIBS)
+	cd testes && ulimit -S -s 1100 && ../build/lua -W -e"_port=true" all.lua
+	cd testes && ulimit -S -s 1100 && for f in ext defer lglm readonly json msgpack; do ../build/alt/lua -W $$f.lua || exit 1; done
+	cd testes && ulimit -S -s 1100 && ../build/tests/lua -W -e"_port=true" all.lua
+else
+test: build $(if $(filter defer defer.lua,$(TEST)),build/alt/lua) $(TESTLIBS)
+	cd testes && ulimit -S -s 1100 && for f in $(TEST); do f=$${f%.lua}; lua=../build/lua; if [ $$f = defer ]; then lua=../build/alt/lua; fi; $$lua -W $$f.lua || exit 1; done
+endif
 
-LUAC_T=	luac
-LUAC_O=	luac.o
+testes/libs/lib2-v2.so: testes/libs/lib22.c
+	$(CC) -std=c99 -Wall -O2 -I. $(SOFLAGS) -o $@ $<
 
-ALL_O= $(BASE_O) $(LUA_O) $(LUAC_O)
-ALL_T= $(LUA_A) $(LUA_T) $(LUAC_T)
-ALL_A= $(LUA_A)
+testes/libs/%.so: testes/libs/%.c
+	$(CC) -std=c99 -Wall -O2 -I. $(SOFLAGS) -o $@ $<
 
-default: $(PLAT)
+build/lua: $(call objs,build) build/lua.o
+	$(CC) -o $@ $^ $(LDLIBS)
 
-all:	$(ALL_T)
+build/alt/lua: $(call objs,build/alt) build/alt/lua.o
+	$(CC) -o $@ $^ $(LDLIBS)
 
-o:	$(ALL_O)
+build/tests/lua: $(call objs,build/tests) build/tests/lua.o
+	$(CC) -o $@ $^ $(LDLIBS)
 
-a:	$(ALL_A)
+build/%.o: %.c makefile
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(FLAGS) -c -o $@ $<
 
-$(LUA_A): $(BASE_O)
-	$(AR) $@ $(BASE_O)
-	$(RANLIB) $@
+build/alt/%.o: %.c makefile
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(FLAGS) -c -o $@ $<
 
-$(LUA_T): $(LUA_O) $(LUA_A)
-	$(CC) -o $@ $(LDFLAGS) $(LUA_O) $(LUA_A) $(LIBS)
+build/tests/%.o: %.c makefile
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(FLAGS) -c -o $@ $<
 
-$(LUAC_T): $(LUAC_O) $(LUA_A)
-	$(CC) -o $@ $(LDFLAGS) $(LUAC_O) $(LUA_A) $(LIBS)
+-include $(shell find build -name '*.d' 2>/dev/null)
 
-clean:
-	$(RM) $(ALL_T) $(ALL_O) onelua.o
-
-depend:
-	@$(CC) $(CFLAGS) -MM l*.c
-
-echo:
-	@echo "PLAT= $(PLAT)"
-	@echo "CC= $(CC)"
-	@echo "CFLAGS= $(CFLAGS)"
-	@echo "LDFLAGS= $(SYSLDFLAGS)"
-	@echo "LIBS= $(LIBS)"
-	@echo "AR= $(AR)"
-	@echo "RANLIB= $(RANLIB)"
-	@echo "RM= $(RM)"
-	@echo "UNAME= $(UNAME)"
-
-$(ALL_O): makefile ltests.h
-
-ALL= all
-
-help:
-	@echo "Do 'make PLATFORM' where PLATFORM is one of these:"
-	@echo "   $(PLATS)"
-	@echo "See doc/readme.html for complete instructions."
-
-guess:
-	@echo Guessing `$(UNAME)`
-	@$(MAKE) `$(UNAME)`
-
-AIX aix:
-	$(MAKE) $(ALL) CC="xlc" CFLAGS="-O2 -DLUA_USE_POSIX -DLUA_USE_DLOPEN" SYSLIBS="-ldl" SYSLDFLAGS="-brtl -bexpall"
-
-bsd:
-	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_POSIX -DLUA_USE_DLOPEN" SYSLIBS="-Wl,-E"
-
-FreeBSD NetBSD OpenBSD freebsd:
-	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_LINUX -DLUA_USE_READLINE -I/usr/include/edit" SYSLIBS="-Wl,-E -ledit" CC="cc"
-
-generic: $(ALL)
-
-Linux linux:	linux-noreadline
-
-linux-noreadline:
-	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_LINUX" SYSLIBS="-Wl,-E -ldl"
-
-linux-readline:
-	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_LINUX -DLUA_USE_READLINE" SYSLIBS="-Wl,-E -ldl -lreadline"
-
-linux-one:
-	$(MAKE) linux-readline LUA_O="onelua.o" BASE_O="onelua.o $(MYOBJS)" CORE_O="" LIB_O="" LUAC_T="" MYCFLAGS="$(MYCFLAGS) $(CPERF_FLAGS) -I."
-
-Darwin macos macosx macos-readline:
-	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_MACOSX" SYSLIBS="-lreadline" CWARNGCC=
-
-mingw:
-	$(MAKE) "LUA_A=lua55.dll" "LUA_T=lua.exe" \
-	"AR=$(CC) -shared -o" "RANLIB=strip --strip-unneeded" \
-	"SYSCFLAGS=-Wno-attributes -DLUA_BUILD_AS_DLL" "SYSLIBS=" "SYSLDFLAGS=-s" lua.exe
-	$(MAKE) "LUAC_T=luac.exe" luac.exe
-
-posix:
-	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_POSIX"
-
-SunOS solaris:
-	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_POSIX -DLUA_USE_DLOPEN -D_REENTRANT" SYSLIBS="-ldl"
-
-.PHONY: all $(PLATS) help test clean default o a depend echo
-
-# DO NOT EDIT
-# automatically made with 'gcc -MM l*.c'
-
-lapi.o: lapi.c lprefix.h lua.h luaconf.h lapi.h llimits.h lstate.h \
- lobject.h ltm.h lzio.h lmem.h ldebug.h ldo.h lfunc.h lgc.h lglmcore.h \
- lstring.h ltable.h lundump.h lvm.h
-lauxlib.o: lauxlib.c lprefix.h lua.h luaconf.h lauxlib.h llimits.h \
- lglmaux.h
-lbaselib.o: lbaselib.c lprefix.h lua.h luaconf.h lauxlib.h lualib.h \
- llimits.h lglmaux.h
-lcode.o: lcode.c lprefix.h lua.h luaconf.h lcode.h llex.h lobject.h \
- llimits.h lzio.h lmem.h lopcodes.h lparser.h ldebug.h lstate.h ltm.h \
- ldo.h lgc.h lstring.h ltable.h lvm.h lopnames.h
-lcorolib.o: lcorolib.c lprefix.h lua.h luaconf.h lauxlib.h lualib.h \
- llimits.h
-lctype.o: lctype.c lprefix.h lctype.h lua.h luaconf.h llimits.h
-ldblib.o: ldblib.c lprefix.h lua.h luaconf.h lauxlib.h lualib.h llimits.h
-ldebug.o: ldebug.c lprefix.h lua.h luaconf.h lapi.h llimits.h lstate.h \
- lobject.h ltm.h lzio.h lmem.h lcode.h llex.h lopcodes.h lparser.h \
- ldebug.h ldo.h lfunc.h lstring.h lgc.h ltable.h lvm.h
-ldo.o: ldo.c lprefix.h lua.h luaconf.h lapi.h llimits.h lstate.h \
- lobject.h ltm.h lzio.h lmem.h lglmaux.h ldebug.h ldo.h lfunc.h lgc.h \
- lopcodes.h lparser.h lstring.h ltable.h lundump.h lvm.h
-ldump.o: ldump.c lprefix.h lua.h luaconf.h lapi.h llimits.h lstate.h \
- lobject.h ltm.h lzio.h lmem.h lgc.h ltable.h lundump.h
-lfunc.o: lfunc.c lprefix.h lua.h luaconf.h ldebug.h lstate.h lobject.h \
- llimits.h ltm.h lzio.h lmem.h ldo.h lfunc.h lgc.h
-lgc.o: lgc.c lprefix.h lua.h luaconf.h ldebug.h lstate.h lobject.h \
- llimits.h ltm.h lzio.h lmem.h ldo.h lfunc.h lgc.h lstring.h ltable.h
-lglm.o: lglm.c lprefix.h lua.h luaconf.h lauxlib.h lglmext.h lglmaux.h \
- lglmcore.h lobject.h llimits.h lgrit_lib.h lstate.h ltm.h lzio.h lmem.h \
- lapi.h ldebug.h lfunc.h lgc.h ltable.h lvm.h ldo.h
-linit.o: linit.c lprefix.h lua.h luaconf.h lualib.h lauxlib.h llimits.h \
- libs/json/ljsonlib.h libs/msgpack/lmsgpacklib.h
-liolib.o: liolib.c lprefix.h lua.h luaconf.h lauxlib.h lualib.h llimits.h
-llex.o: llex.c lprefix.h lua.h luaconf.h lctype.h llimits.h ldebug.h \
- lstate.h lobject.h ltm.h lzio.h lmem.h ldo.h lgc.h llex.h lparser.h \
- lstring.h ltable.h
-lmathlib.o: lmathlib.c lprefix.h lua.h luaconf.h lauxlib.h lualib.h \
- llimits.h lglmaux.h
-lmem.o: lmem.c lprefix.h lua.h luaconf.h ldebug.h lstate.h lobject.h \
- llimits.h ltm.h lzio.h lmem.h ldo.h lgc.h
-loadlib.o: loadlib.c lprefix.h lua.h luaconf.h lauxlib.h lualib.h \
- llimits.h
-lobject.o: lobject.c lprefix.h lua.h luaconf.h lctype.h llimits.h \
- ldebug.h lstate.h lobject.h ltm.h lzio.h lmem.h ldo.h lstring.h lgc.h \
- lvm.h lglmaux.h
-lopcodes.o: lopcodes.c lprefix.h lopcodes.h llimits.h lua.h luaconf.h \
- lobject.h
-loslib.o: loslib.c lprefix.h lua.h luaconf.h lauxlib.h lualib.h llimits.h
-lparser.o: lparser.c lprefix.h lua.h luaconf.h lcode.h llex.h lobject.h \
- llimits.h lzio.h lmem.h lopcodes.h lparser.h ldebug.h lstate.h ltm.h \
- ldo.h lfunc.h lstring.h lgc.h ltable.h
-lstate.o: lstate.c lprefix.h lua.h luaconf.h lapi.h llimits.h lstate.h \
- lobject.h ltm.h lzio.h lmem.h ldebug.h ldo.h lfunc.h lgc.h llex.h \
- lstring.h ltable.h
-lstring.o: lstring.c lprefix.h lua.h luaconf.h ldebug.h lstate.h \
- lobject.h llimits.h ltm.h lzio.h lmem.h ldo.h lstring.h lgc.h
-lstrlib.o: lstrlib.c lprefix.h lua.h luaconf.h lauxlib.h lualib.h \
- llimits.h
-ltable.o: ltable.c lprefix.h lua.h luaconf.h ldebug.h lstate.h lobject.h \
- llimits.h ltm.h lzio.h lmem.h ldo.h lgc.h lglmcore.h lstring.h ltable.h \
- lvm.h
-ltablib.o: ltablib.c lprefix.h lua.h luaconf.h lauxlib.h lualib.h \
- llimits.h lglmaux.h
-ltests.o: ltests.c lprefix.h lua.h luaconf.h lapi.h llimits.h lstate.h \
- lobject.h ltm.h lzio.h lmem.h lauxlib.h lcode.h llex.h lopcodes.h \
- lparser.h lctype.h ldebug.h ldo.h lfunc.h lopnames.h lstring.h lgc.h \
- ltable.h lualib.h
-ltm.o: ltm.c lprefix.h lua.h luaconf.h ldebug.h lstate.h lobject.h \
- llimits.h ltm.h lzio.h lmem.h ldo.h lgc.h lglmcore.h lstring.h ltable.h \
- lvm.h
-lua.o: lua.c lprefix.h lua.h luaconf.h lauxlib.h lualib.h llimits.h
-luac.o: luac.c lprefix.h lua.h luaconf.h lauxlib.h lapi.h llimits.h \
- lstate.h lobject.h ltm.h lzio.h lmem.h ldebug.h lopcodes.h lopnames.h \
- lundump.h
-lundump.o: lundump.c lprefix.h lua.h luaconf.h ldebug.h lstate.h \
- lobject.h llimits.h ltm.h lzio.h lmem.h ldo.h lfunc.h lstring.h lgc.h \
- ltable.h lundump.h
-lutf8lib.o: lutf8lib.c lprefix.h lua.h luaconf.h lauxlib.h lualib.h \
- llimits.h
-lvm.o: lvm.c lprefix.h lua.h luaconf.h lapi.h llimits.h lstate.h \
- lobject.h ltm.h lzio.h lmem.h ldebug.h ldo.h lfunc.h lgc.h lglmcore.h \
- lopcodes.h lstring.h ltable.h lvm.h ljumptab.h
-lzio.o: lzio.c lprefix.h lua.h luaconf.h lapi.h llimits.h lstate.h \
- lobject.h ltm.h lzio.h lmem.h
-onelua.o: onelua.c lprefix.h luaconf.h lzio.c lua.h lapi.h llimits.h \
- lstate.h lobject.h ltm.h lzio.h lmem.h lctype.c lctype.h lopcodes.c \
- lopcodes.h lmem.c ldebug.h ldo.h lgc.h lundump.c lfunc.h lstring.h \
- ltable.h lundump.h ldump.c lstate.c llex.h lgc.c llex.c lparser.h \
- lcode.c lcode.h lvm.h lopnames.h lparser.c ldebug.c lfunc.c lobject.c \
- lglmaux.h ltm.c lglmcore.h lstring.c ltable.c ldo.c lvm.c ljumptab.h \
- lapi.c lglm.c lauxlib.h lglmext.h lgrit_lib.h lauxlib.c lbaselib.c \
- lualib.h lcorolib.c ldblib.c liolib.c lmathlib.c loadlib.c loslib.c \
- lstrlib.c ltablib.c lutf8lib.c linit.c lua.c
-libs/json/ljson.o: libs/json/ljson.c libs/json/ljson.h
-libs/json/ljsonlib.o: libs/json/ljsonlib.c lua.h luaconf.h lauxlib.h \
- lualib.h lgrit_lib.h libs/json/ljson.h libs/json/ljsonlib.h
-libs/msgpack/lmsgpack.o: libs/msgpack/lmsgpack.c libs/msgpack/lmsgpack.h
-libs/msgpack/lmsgpacklib.o: libs/msgpack/lmsgpacklib.c lua.h luaconf.h \
- lauxlib.h lgrit_lib.h libs/msgpack/lmsgpack.h libs/msgpack/lmsgpacklib.h
-
-# (end of Makefile)
+.PHONY: build test

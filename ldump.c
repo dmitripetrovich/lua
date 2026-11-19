@@ -24,13 +24,15 @@
 
 
 #if defined(LUA_NO_DUMP)
+#include "ldebug.h"
+
 int luaU_dump(lua_State *L, const Proto *f, lua_Writer w, void *data, int strip) {
   UNUSED(L);
   UNUSED(f);
   UNUSED(w);
   UNUSED(data);
   UNUSED(strip);
-  return 0;
+  luaG_runerror(L, "cannot dump functions (built with LUA_NO_DUMP)");
 }
 #else
 

@@ -201,7 +201,6 @@ dofile('files.lua')
 
 -- LuaGLM extensions
 dofile('ext.lua')
-dofile('extensions.lua')
 if package.preload.json then   -- json and msgpack libraries (GRIT_POWER_LIBS)
   dofile('json.lua')
   dofile('msgpack.lua')

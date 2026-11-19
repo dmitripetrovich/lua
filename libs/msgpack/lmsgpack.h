@@ -12,6 +12,14 @@ extern "C" {
   #define LMSGPACK_MAX_DEPTH 32
 #endif
 
+#if !defined(LMSGPACK_DEPTH_LIMIT)
+  #define LMSGPACK_DEPTH_LIMIT 1000
+#endif
+
+#if LMSGPACK_MAX_DEPTH > LMSGPACK_DEPTH_LIMIT
+  #error "LMSGPACK_MAX_DEPTH must not exceed LMSGPACK_DEPTH_LIMIT"
+#endif
+
 typedef void *(*lmsgpack_Alloc) (void *ud, void *ptr, size_t osize, size_t nsize);
 
 enum {
@@ -104,6 +112,7 @@ int lmsgpack_write_bytes (lmsgpack_Writer *w, const void *p, size_t n);
 int lmsgpack_write_value (lmsgpack_Writer *w, const lmsgpack_Value *v);
 
 int lmsgpack_check (const char *s, size_t len, size_t *offset);
+int lmsgpack_checkdepth (const char *s, size_t len, size_t *offset, int maxdepth);
 int lmsgpack_read (const char *s, size_t len, size_t *offset, lmsgpack_Value *v);
 
 typedef struct lmsgpack_Document {

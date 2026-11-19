@@ -14,6 +14,7 @@
 
 #include <stdio.h>
 #include <stddef.h>
+#include <limits.h>
 #include <cglm/cglm.h>
 
 /*!
@@ -21,14 +22,6 @@
  */
 CGLM_INLINE float glm_roundf(float x) {
   return isfinite(x) ? x - remainderf(x, 1.0f) : x;
-}
-
-/*!
- * @brief calculate sin and cos
- */
-CGLM_INLINE void glm_sincos(float x, float *sin, float *cos) {
-  *sin = sinf(x);
-  *cos = cosf(x);
 }
 
 /*!
@@ -68,37 +61,6 @@ CGLM_INLINE float glm_log(float x, float base) {
   return logf(x) / logf(base);
 }
 
-/*
-** {==================================================================
-** type_half.h
-** ===================================================================
-*/
-
-/* types.h */
-typedef uint16_t float16;
-typedef float16 hvec4[4];
-
-/* On non-GNU compilers assume AVX2 implies F16C */
-#if !defined(CGLM_SIMD_FP16)
-#if defined(CGLM_SIMD_x86) \
-  && (defined(__F16C__) || (!defined(__GNUC__) && defined(__AVX2__)))
-  #define CGLM_SIMD_FP16 1
-#elif defined(CGLM_SIMD_ARM) && (__ARM_FP & 2) \
-  && (defined(__ARM_FP16_FORMAT_IEEE) || defined(__ARM_FP16_FORMAT_ALTERNATIVE))
-  #define CGLM_SIMD_FP16 1
-#endif
-#endif
-
-/* _mm_storeu_si64: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=87558 */
-#if (defined(__GNUC__) && __GNUC__ >= 9)          \
-  || (defined(__clang__) && __clang_major__ >= 8) \
-  || (defined(_MSC_VER) && _MSC_VER >= 1910)      \
-  || (defined(__INTEL_COMPILER) && defined(__x86_64__))
-  #define CGLM_HALF_INTRINSICS_x86 1
-#else
-  #define CGLM_HALF_INTRINSICS_x86 0
-#endif
-
 /*!
  * @brief float to u32 bitcast.
  * @TODO: compliance++
@@ -107,120 +69,6 @@ static inline uint32_t glmm_bitcast_fu32(float f) {
   union { float f; uint32_t u; } var = { f };
   return var.u;
 }
-
-/*!
- * @brief u32 to float bitcast.
- * @TODO: compliance++
- */
-static inline float glmm_bitcast_u32f(uint32_t u) {
-  union { uint32_t u; float f; } var = { u };
-  return var.f;
-}
-
-/*!
- * @brief convert float to half float
- */
-CGLM_INLINE float16 glm_to_half(float v) {
-#if defined(CGLM_SIMD_x86) && defined(CGLM_SIMD_FP16)
-#if defined(_MSC_VER)
-  __m128i cvt0 = _mm_cvtps_ph(_mm_set_ss(v), _MM_FROUND_TO_NEAREST_INT);
-  return (float16)_mm_extract_epi16(cvt0, 0);
-#else
-  return _cvtss_sh(v, _MM_FROUND_TO_NEAREST_INT);
-#endif
-#elif defined(CGLM_SIMD_ARM) && defined(CGLM_SIMD_FP16)
-  return vget_lane_u16(vreinterpret_u16_f16(vcvt_f16_f32(glmm_set1(v))), 0);
-#else
-  uint32_t half;
-  uint32_t bits = glmm_bitcast_fu32(v);
-  uint32_t sign = (bits & 0x80000000U) >> 16U;
-  uint32_t a = bits & 0x7FFFFFFFU;
-  if (a >= 0x47800000) /* Exponent overflow/NaN -> Signed Inf/NaN */
-    half = 0x7C00U | ((a > 0x7F800000) ? (0x200 | ((a >> 13U) & 0x3FFU)) : 0U);
-  else if (a <= 0x33000000U) /* Exponent underflow -> Signed zero */
-    half = 0;
-  else if (a < 0x38800000U) { /* Exponent underflow -> Subnormal */
-    uint32_t shift = 125U - (a >> 23U);
-    uint32_t sig = 0x800000U | (a & 0x7FFFFFU);
-    uint32_t last = (sig & ((1U << shift) - 1)) != 0;
-    half = ((sig >> (shift + 1)) | last) & ((sig >> shift) & 1U);
-  }
-  else {
-    uint32_t sig = a + 0xC8000000U;
-    half = ((sig + 0x0FFFU + ((sig >> 13U) & 1U)) >> 13U) & 0x7FFFU;
-  }
-  return (float16)(sign | half);
-#endif
-}
-
-/*!
- * @brief convert half float to float
- */
-CGLM_INLINE float glm_from_half(float16 v) {
-#if defined(CGLM_SIMD_x86) && defined(CGLM_SIMD_FP16)
-#if defined(_MSC_VER)
-  return _mm_cvtss_f32(_mm_cvtph_ps(_mm_cvtsi32_si128((int)v)));
-#else
-  return _cvtsh_ss(v);
-#endif
-#elif defined(CGLM_SIMD_ARM) && defined(CGLM_SIMD_FP16)
-  return vgetq_lane_f32(vcvt_f32_f16(vreinterpret_f16_u16(vdup_n_u16(v))), 0);
-#else
-  uint32_t a;
-  uint32_t sign = ((uint32_t)v & 0x8000u) << 16;
-  uint32_t exponent = (uint32_t)(v & 0x7C00u);
-  uint32_t mantissa = (uint32_t)(v & 0x03FFu);
-  if (exponent == 0x7C00u) /* Signed Inf/NaN */
-    a = 0x7F800000u | (mantissa << 13);
-  else if (exponent != 0x0000u) /* Normalized */
-    a = (uint32_t)((v & 0x7FFFu) + 0x1C000u) << 13;
-  else if (mantissa == 0) /* Signed-Zero */
-    a = 0;
-  else { /* Subnormal */
-    mantissa <<= 1;
-    while ((mantissa & 0x0400u) == 0) {
-      mantissa <<= 1;
-      exponent++;
-    }
-    a = ((0x70 - exponent) << 23) | ((mantissa & 0x03FFu) << 13);
-  }
-  return glmm_bitcast_u32f(sign | a);
-#endif
-}
-
-/*!
- * @brief initialize a packed vector.
- */
-CGLM_INLINE void glm_vec4_pack(vec4 input, hvec4 dest) {
-#if defined(CGLM_SIMD_x86) && defined(CGLM_SIMD_FP16) && CGLM_HALF_INTRINSICS_x86
-  _mm_storeu_si64(dest, _mm_cvtps_ph(glmm_load(input), _MM_FROUND_TO_NEAREST_INT));
-#elif defined(CGLM_SIMD_ARM) && defined(CGLM_SIMD_FP16)
-  vst1_u16(dest, vreinterpret_u16_f16(vcvt_f16_f32(glmm_load(input))));
-#else
-  dest[0] = glm_to_half(input[0]);
-  dest[1] = glm_to_half(input[1]);
-  dest[2] = glm_to_half(input[2]);
-  dest[3] = glm_to_half(input[3]);
-#endif
-}
-
-/*!
- * @brief unpack a packed vector.
- */
-CGLM_INLINE void glm_vec4_unpack(hvec4 input, vec4 dest) {
-#if defined(CGLM_SIMD_x86) && defined(CGLM_SIMD_FP16) && CGLM_HALF_INTRINSICS_x86
-  glmm_store(dest, _mm_cvtph_ps(_mm_loadu_si64(input)));
-#elif defined(CGLM_SIMD_ARM) && defined(CGLM_SIMD_FP16)
-  glmm_store(dest, vcvt_f32_f16(vreinterpret_f16_u16(vld1_u16(input))));
-#else
-  dest[0] = glm_from_half(input[0]);
-  dest[1] = glm_from_half(input[1]);
-  dest[2] = glm_from_half(input[2]);
-  dest[3] = glm_from_half(input[3]);
-#endif
-}
-
-/* }================================================================== */
 
 /*
 ** {==================================================================
@@ -1711,24 +1559,33 @@ CGLM_INLINE void glm_vec4_fract_simd(vec4 v, vec4 dest) {
 #endif
 }
 
-CGLM_INLINE void glm_vec4_mod_simd(vec4 a, vec4 b, vec4 dest) {
-#if defined(CGLM_SIMD)
-  glmm_128 x = glmm_load(a);
-  glmm_128 y = glmm_load(b);
-  glmm_128 flr0 = glmm_floor(glmm_div(x, y));
-  glmm_store(dest, glmm_fnmadd(flr0, y, x));
-#else
+/* Truncated remainder per component, as math.fmod */
+CGLM_INLINE void glm_vec4_fmod(vec4 a, vec4 b, vec4 dest) {
   dest[0] = fmodf(a[0], b[0]);
   dest[1] = fmodf(a[1], b[1]);
   dest[2] = fmodf(a[2], b[2]);
   dest[3] = fmodf(a[3], b[3]);
-#endif
 }
 
-CGLM_INLINE void glm_vec4_mods_simd(vec4 a, float s, vec4 dest) {
+/* Floored remainder, as luai_nummod: the result takes the sign of the divisor */
+CGLM_INLINE float glm_floormodf(float a, float b) {
+  float m = fmodf(a, b);
+  if ((m > 0.0f) ? b < 0.0f : (m < 0.0f && b > 0.0f))
+    m += b;
+  return m;
+}
+
+CGLM_INLINE void glm_vec4_floormod(vec4 a, vec4 b, vec4 dest) {
+  dest[0] = glm_floormodf(a[0], b[0]);
+  dest[1] = glm_floormodf(a[1], b[1]);
+  dest[2] = glm_floormodf(a[2], b[2]);
+  dest[3] = glm_floormodf(a[3], b[3]);
+}
+
+CGLM_INLINE void glm_vec4_floormods(vec4 a, float s, vec4 dest) {
   CGLM_ALIGN(16) vec4 b;
   glm_vec4_broadcast(s, b);
-  glm_vec4_mod_simd(a, b, dest);
+  glm_vec4_floormod(a, b, dest);
 }
 
 CGLM_INLINE void glm_vec4_modf(vec4 v, vec4 integral, vec4 dest) {
@@ -2049,41 +1906,6 @@ CGLM_INLINE void glm_quat_from_basis(vec3 x, vec3 y, vec3 z, versor dest) {
 }
 
 /*!
- * @brief convert quaternion to mat4 (@NOTE: Does not implicitly normalize 'v')
- */
-CGLM_INLINE void glm_quat_mat4_simd(versor v, mat4 dest) {
-#if defined(CGLM_SIMD_x86) && !defined(CGLM_SIMD_WASM)
-  __m128 q = glmm_load(v);
-  __m128 q2 = _mm_add_ps(q, q);
-  __m128 q_yzxw = glmm_shuff1(q, 3, 0, 2, 1);
-  __m128 q_zxyw = glmm_shuff1(q, 3, 1, 0, 2);
-  __m128 q_wwww = glmm_shuff1(q, 3, 3, 3, 3);
-  __m128 q2_yzxw = glmm_shuff1(q2, 3, 0, 2, 1);
-  __m128 q2_zxyw = glmm_shuff1(q2, 3, 1, 0, 2);
-
-  __m128 sub0 = glmm_fnmadd(q_yzxw, q2_yzxw, glmm_set1_rval(1.0f));
-  __m128 tmp0 = glmm_fnmadd(q_zxyw, q2_zxyw, sub0);
-  __m128 tmp1 = glmm_fmadd(q2, q_zxyw, _mm_mul_ps(q2_yzxw, q_wwww));
-  __m128 tmp2 = glmm_fnmadd(q2_zxyw, q_wwww, _mm_mul_ps(q2, q_yzxw));
-  __m128 fp1 = glmm_setbits(0, 0, GLMM_MASK_ALL, 0);
-  __m128 fp2 = glmm_setbits(0, GLMM_MASK_ALL, 0, 0);
-  __m128 nfp3 = glmm_setbits(0, GLMM_MASK_ALL, GLMM_MASK_ALL, GLMM_MASK_ALL);
-  tmp0 = _mm_and_ps(tmp0, nfp3); /* Ensure last row is zeroed (improve this) */
-  tmp1 = _mm_and_ps(tmp1, nfp3);
-  tmp2 = _mm_and_ps(tmp2, nfp3);
-
-  #define q_select(X, Y, Z) glmm_select(glmm_select((X), (Y), fp1), (Z), fp2)
-  glmm_store(dest[0], q_select(tmp0, tmp1, tmp2)); /* 1 - 2yy - 2zz, 2zw + 2xy, 2xz - 2yw, 0 */
-  glmm_store(dest[1], q_select(tmp2, tmp0, tmp1)); /* 2xy - 2zw, 1 - 2zz - 2xx, 2xw + 2yz, 0 */
-  glmm_store(dest[2], q_select(tmp1, tmp2, tmp0)); /* 2yw + 2zx, 2yz - 2xw, 1 - 2xx - 2yy, 0 */
-  glmm_store(dest[3], _mm_set_ps(1.0f, 0.0f, 0.0f, 0.0f));
-  #undef q_select
-#else
-  glm_quat_mat4(v, dest);
-#endif
-}
-
-/*!
  * @brief conjugate of quaternion
  */
 CGLM_INLINE void glm_quat_conjugate_simd(versor q, versor dest) {
@@ -2305,18 +2127,38 @@ CGLM_INLINE void glm_ivec4_bxor(ivec4 x, ivec4 y, ivec4 dest) {
   dest[3] = glm_intop(^, x[3], y[3]);
 }
 
+/* Shift x left by y (right when y is negative); shifts of 32 or more give 0 */
+CGLM_INLINE int glm_int_shiftl(int x, int y) {
+  const int nbits = (int)(sizeof(unsigned int) * CHAR_BIT);
+  if (y <= -nbits || y >= nbits)
+    return 0;
+  if (y < 0)
+    return glm_intop(>>, x, -y);
+  return glm_intop(<<, x, y);
+}
+
+/* Shift x right by y (left when y is negative); shifts of 32 or more give 0 */
+CGLM_INLINE int glm_int_shiftr(int x, int y) {
+  const int nbits = (int)(sizeof(unsigned int) * CHAR_BIT);
+  if (y <= -nbits || y >= nbits)
+    return 0;
+  if (y < 0)
+    return glm_intop(<<, x, -y);
+  return glm_intop(>>, x, y);
+}
+
 CGLM_INLINE void glm_ivec4_shl(ivec4 x, ivec4 y, ivec4 dest) {
-  dest[0] = glm_intop(<<, x[0], y[0]);
-  dest[1] = glm_intop(<<, x[1], y[1]);
-  dest[2] = glm_intop(<<, x[2], y[2]);
-  dest[3] = glm_intop(<<, x[3], y[3]);
+  dest[0] = glm_int_shiftl(x[0], y[0]);
+  dest[1] = glm_int_shiftl(x[1], y[1]);
+  dest[2] = glm_int_shiftl(x[2], y[2]);
+  dest[3] = glm_int_shiftl(x[3], y[3]);
 }
 
 CGLM_INLINE void glm_ivec4_shr(ivec4 x, ivec4 y, ivec4 dest) {
-  dest[0] = glm_intop(>>, x[0], y[0]);
-  dest[1] = glm_intop(>>, x[1], y[1]);
-  dest[2] = glm_intop(>>, x[2], y[2]);
-  dest[3] = glm_intop(>>, x[3], y[3]);
+  dest[0] = glm_int_shiftr(x[0], y[0]);
+  dest[1] = glm_int_shiftr(x[1], y[1]);
+  dest[2] = glm_int_shiftr(x[2], y[2]);
+  dest[3] = glm_int_shiftr(x[3], y[3]);
 }
 
 /* }================================================================== */
@@ -3026,11 +2868,7 @@ CGLM_INLINE void glm_billboard(vec3 obj_pos, vec3 eye, vec3 up, vec3 fwd, mat4 d
 
 /* Formatting helpers */
 #define glm_cast(x) (double)(x)
-#if defined(__STDC_WANT_SECURE_LIB__) && __STDC_WANT_SECURE_LIB__
-  #define glm_sprintf sprintf_s
-#else
-  #define glm_sprintf snprintf
-#endif
+#define glm_sprintf snprintf /* truncates; sprintf_s aborts the process on overflow */
 
 /*!
  * @brief format the argument as a string
@@ -3133,30 +2971,6 @@ CGLM_INLINE size_t glm_quat_hash(versor v) {
   Hash = glmm_hash_combine(Hash, glmm_hashf(v[0]));
   Hash = glmm_hash_combine(Hash, glmm_hashf(v[1]));
   Hash = glmm_hash_combine(Hash, glmm_hashf(v[2]));
-  return Hash;
-}
-
-CGLM_INLINE size_t glm_mat2_hash(mat2 m) {
-  size_t Hash = 0x7ABED661; /* joaat("mat2") */
-  Hash = glmm_hash_combine(Hash, glm_vec2_hash(m[0]));
-  Hash = glmm_hash_combine(Hash, glm_vec2_hash(m[1]));
-  return Hash;
-}
-
-CGLM_INLINE size_t glm_mat3_hash(mat3 m) {
-  size_t Hash = 0x898473EC;
-  Hash = glmm_hash_combine(Hash, glm_vec3_hash(m[0]));
-  Hash = glmm_hash_combine(Hash, glm_vec3_hash(m[1]));
-  Hash = glmm_hash_combine(Hash, glm_vec3_hash(m[2]));
-  return Hash;
-}
-
-CGLM_INLINE size_t glm_mat4_hash(mat4 m) {
-  size_t Hash = 0xA644AD6C;
-  Hash = glmm_hash_combine(Hash, glm_vec4_hash(m[0]));
-  Hash = glmm_hash_combine(Hash, glm_vec4_hash(m[1]));
-  Hash = glmm_hash_combine(Hash, glm_vec4_hash(m[2]));
-  Hash = glmm_hash_combine(Hash, glm_vec4_hash(m[3]));
   return Hash;
 }
 

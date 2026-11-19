@@ -782,22 +782,6 @@
   #define LUA_INLINE inline
 #endif
 
-#if defined(__cplusplus) && __cplusplus >= 201703
-  #define LUA_FALLTHROUGH [[fallthrough]]
-#elif __has_attribute(__fallthrough__)
-  #define LUA_FALLTHROUGH __attribute__((__fallthrough__))
-#else
-  #define LUA_FALLTHROUGH /* FALLTHROUGH */
-#endif
-
-#if defined(_MSC_VER) && _MSC_VER >= 1400
-  #define LUA_RESTRICT __restrict
-#elif defined(__GNUC__) && ((__GNUC__ > 3) || (__GNUC__ == 3 && __GNUC_MINOR__ >= 1))
-  #define LUA_RESTRICT __restrict
-#else
-  #define LUA_RESTRICT
-#endif
-
 /* Compiler-specific multi-line macro definitions */
 #if defined(_MSC_VER)
   #define LUA_MLM_BEGIN do {
@@ -820,6 +804,63 @@
 #else
   #define LUA_HAS_BUILTIN(x) 0
 #endif
+
+/* Language */
+/* #define GRIT_POWER_CCOMMENT */          /* C comments: slash-star ... star-slash */
+/* #define GRIT_POWER_COMPOUND */          /* += -= *= /= <<= >>= &= |= ^= */
+/* #define GRIT_POWER_INTABLE */           /* 'a, b in t' assigns t.a and t.b */
+/* #define GRIT_POWER_TABINIT */           /* '{ .x = 1 }' table field initialisers */
+/* #define GRIT_POWER_SAFENAV */           /* 'a?.b' and 'a?:m()' stop at nil */
+/* #define GRIT_POWER_IFEXPR */            /* 'if c then a else b' as an expression */
+/* #define GRIT_POWER_LAMBDA */            /* '|x| x + 1' short functions */
+/* #define GRIT_POWER_LITERAL */           /* 0b101 binary and 1.5f float literals */
+/* #define GRIT_POWER_JOAAT */             /* backtick `name` hashes at compile time, joaat() */
+/* #define GRIT_POWER_CONTINUE */          /* 'continue' in loops */
+/* #define GRIT_POWER_IMPORT */            /* cached resolution of global 'a.b.c' chains */
+/* #define GRIT_POWER_FASTCALL */          /* OP_FASTCALL for common library functions */
+/* #define GRIT_POWER_INTERP */            /* $"text {expr}" string interpolation */
+/* #define GRIT_POWER_COALESCE */          /* 'a ?? b' and 'a ??= b' */
+/* #define GRIT_POWER_DEFAULTS */          /* default parameter values: function f (a = 1) */
+/* #define GRIT_POWER_SWITCH */            /* switch / case statement */
+/* #define GRIT_POWER_DEFER */             /* 'defer ... end' statement (excludes DEFER_OLD) */
+/* #define GRIT_POWER_DEFER_OLD */         /* defer(fn) base function (excludes DEFER) */
+/* #define GRIT_POWER_NAMESPACE_SEL */     /* 'a::b' selects a field like 'a.b' (a label after an expression on the same line needs a ';') */
+
+/* Runtime */
+/* #define GRIT_POWER_READONLY */          /* read-only tables: table.freeze and friends */
+/* #define GRIT_POWER_BLOB */              /* mutable byte strings: string.blob */
+/* #define GRIT_POWER_BUDGET */            /* instruction budget callback (lua_setbudget) */
+/* #define GRIT_POWER_GCPACE */            /* host-driven incremental GC pacing (lua_gcpace) */
+/* #define GRIT_POWER_ALLOWANCE */         /* memory allowance checked before big allocations */
+/* #define GRIT_POWER_CHECKHOOK */         /* library loops charge the hook/budget per step */
+/* #define GRIT_POWER_COHOOK */            /* coroutine enter/exit hook events */
+/* #define GRIT_POWER_UHASH */             /* joaat hashes are unsigned 32-bit values */
+/* #define GRIT_POWER_UNDUMPHOOK */        /* pUndumpHook may veto binary chunks */
+/* #define GRIT_POWER_GAMELUA */           /* GameLua host API extensions */
+
+/* Libraries */
+/* #define GRIT_POWER_LIBS */              /* json and msgpack libraries (libs/) */
+/* #define GRIT_POWER_STRBUF */            /* string.buffer string builder */
+/* #define GRIT_POWER_STDEXT */            /* startswith, endswith, math.sign, math.lerp */
+/* #define GRIT_POWER_FINDSPLIT */         /* string.split and table.find */
+/* #define GRIT_POWER_EACH */              /* each() iterator */
+/* #define GRIT_POWER_WOW */               /* WoW-style helpers: strtrim, strsplit, table.wipe, ... */
+/* #define GRIT_POWER_CHRONO */            /* os.nanotime / os.microtime style clocks */
+/* #define GRIT_POWER_READLINE_HISTORY */  /* lua.c keeps a readline history file */
+
+/* Compatibility */
+/* #define GRIT_COMPAT_IPAIRS */           /* raw (metamethod-free) ipairs iteration */
+/* #define GRIT_COMPAT_GETN */             /* length hint of a resized table is its full array size */
+/* #define GRIT_COMPAT_NUMFMT */           /* floats format with "%.14g" (no round-trip retry) */
+/* #define GRIT_COMPAT_GLM */              /* gritLua GLM conventions (degrees, names) */
+
+/* Builds */
+/* #define LUA_NO_PARSER */                /* no compiler: load only accepts binary chunks */
+/* #define LUA_NO_DUMP */                  /* no lua_dump/string.dump: they fail */
+/* #define LUA_NO_BYTECODE */              /* load never accepts binary chunks */
+
+/* }================================================================== */
+
 
 /*
 ** {====================================================================
@@ -874,4 +915,3 @@ typedef lua_vec4 lua_mat4[4];
 /* }================================================================== */
 
 #endif
-

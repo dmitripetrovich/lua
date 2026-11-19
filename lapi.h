@@ -62,4 +62,7 @@
                      L->tbclist.p < L->top.p - (n), \
 			  "not enough free elements in the stack")
 
+/* index2value for the LuaGLM layer */
+LUAI_FUNC const TValue *luaA_index2value (lua_State *L, int idx);
+
 #endif

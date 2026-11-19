@@ -131,7 +131,7 @@ assert(json.getoption("indent_count") == 1)
 assert(json.encode({ 1 }, { pretty = true }) == "[\n\t1\n]")
 json.setoption("indent_char", 0)
 assert(json.encode({ 1 }, { pretty = true, indent_char = 1 }) == "[\n\t1\n]")
-assert(json.encode({ 1 }, { [1] = true, pretty = false }) == "[1]")
+assert(fails(json.encode, { 1 }, { [1] = true, pretty = false }))  -- option names are strings
 assert(json.use_lpeg == nil and json.using_lpeg == nil)
 
 
@@ -146,6 +146,11 @@ do
   assert(json.encode(json.array({ [1] = 1, [3] = 3 })) == "[1,null,3]")
   assert(json.encode(json.array({ [1e9 | 0] = 1 })) == '{"1000000000":1}')
   assert(json.isarray(json.array({})) and json.isobject(json.object({})))
+  local retyped = json.array(json.decode("{}"))
+  assert(json.isarray(retyped) and json.encode(retyped) == "[]")
+  assert(json.isobject((json.decode("{}"))) and json.encode((json.decode("{}"))) == "{}")
+  local own = setmetatable({}, {})
+  assert(json.isarray(json.array(own)) and getmetatable(own).__jsontype == "array")
 end
 
 
@@ -160,6 +165,77 @@ do
   assert(json.encode(withnull) == "[1,null,2]")
   json.setoption("null", true)
   assert((json.decode("[1,null,2]"))[2] == nil)
+end
+
+do  -- decoding is correctly rounded: any 17-digit float round-trips exactly
+  math.randomseed(1234)
+  for _ = 1, 5000 do
+    local x = math.random() * 10.0 ^ math.random(-307, 307)
+    local s = string.format("%.17g", x)
+    assert(json.decode(s) == x, s)
+  end
+  assert(json.decode("9007199254740993.0") == 9007199254740992.0)
+  assert(json.decode("1.7976931348623157e308") == 1.7976931348623157e308)
+  assert(json.decode("4.9406564584124654e-324") == 4.9406564584124654e-324)
+end
+
+do  -- integers are written two digits at a time
+  for _, v in ipairs({ 0, 1, -1, 9, 10, -10, 99, 100, 101, -100, 1000, 12345, 1234567890123, math.maxinteger, math.mininteger }) do
+    local s = json.encode(v)
+    assert(s == string.format("%d", v), s)
+    local back = json.decode(s)
+    assert(back == v and math.type(back) == "integer", s)
+  end
+  local keyed = json.decode(json.encode({ [100] = "a", [-5] = "b", [0] = "c", [math.mininteger] = "d" }))
+  assert(keyed["100"] == "a" and keyed["-5"] == "b" and keyed["0"] == "c" and keyed[string.format("%d", math.mininteger)] == "d")
+end
+
+do  -- array detection
+  assert(json.encode({ 1, 2, 3 }) == "[1,2,3]")
+  assert(json.encode({ [1] = 1, [2] = 2 }) == "[1,2]")
+  assert(json.encode({ [2] = 1 }) == "[null,1]")
+  assert(json.encode({ [20] = 1 }) == '{"20":1}')
+  assert(json.encode({ [2] = 1, [20] = 1, [12] = 1, [13] = 1, [14] = 1, [15] = 1, [16] = 1, [17] = 1, [18] = 1, [19] = 1 }):sub(1, 1) == "[")
+  assert(json.encode({ 1, x = 1 }):sub(1, 1) == "{")
+  assert(json.encode({ [0] = 1 }) == '{"0":1}')
+  assert(json.encode({ 1, n = 1 }):sub(1, 1) == "{")
+  assert(json.encode(json.array({ [1] = 1, [3] = 3 })) == "[1,null,3]")
+  assert(json.encode(json.array({ [20] = 1 })) == '{"20":1}')
+  local obj = json.encode(json.object({ 1, 2 }))
+  assert(obj:sub(1, 1) == "{" and deepeq(json.decode(obj), { ["1"] = 1, ["2"] = 2 }))
+end
+
+
+print("testing json errors and option names")
+
+do
+  local big = { string.rep("x", 100000), string.rep("y", 100000), print }
+  assert(fails(json.encode, big))
+  assert(json.encode({ 1, 2 }) == "[1,2]")
+  assert(#json.encode({ string.rep("x", 100000) }) == 100004)
+  local seen
+  local function handler (reason)
+    seen = reason
+    return "nan"
+  end
+  assert(json.encode(vec3(0/0, 1, 2), { nan = false, exception = handler }) == '{"x":"nan","y":1.0,"z":2.0}')
+  assert(seen == "error encoding number")
+  assert(json.encode(vec2(1/0, 1), { nan = false, vectorarray = true, exception = handler }) == '["nan",1.0]')
+  local ok, err = pcall(json.encode, vec3(0/0, 1, 2), { nan = false })
+  assert(not ok and err:find("NaN or infinity", 1, true))
+  ok, err = pcall(json.encode, { 0/0 }, { nan = false })
+  assert(not ok and err:find("NaN or infinity", 1, true))
+  assert(json.encode({ json.null, 1 }) == "[null,1]")
+  assert(fails(json.encode, { 1 }, { bogus = true }))
+  assert(fails(json.encode, { 1 }, { [1] = true }))
+  assert(fails(json.encode, { 1 }, { [""] = true }))
+  assert(fails(json.setoption, "bogus", true))
+  assert(fails(json.setoption, "keyorder", {}))
+  assert(fails(json.getoption, "exception"))
+  assert(fails(json.setoption, "decoder_preset", "bogus"))
+  assert(json.encode({ 1 }, { pretty = false }) == "[1]")
+  ok, err = pcall(json.array, 5)
+  assert(not ok and err:find("optional table expected", 1, true))
 end
 
 print("OK")

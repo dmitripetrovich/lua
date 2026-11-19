@@ -51,7 +51,7 @@ enum RESERVED {
   , TK_HASH
 #endif
 #if defined(GRIT_POWER_COMPOUND)
-  , TK_PLUSEQ, TK_MINUSEQ, TK_MULTEQ, TK_DIVEQ, TK_SHLEQ, TK_SHREQ, TK_BANDEQ, TK_BOREQ, TK_BXOREQ
+  , TK_PLUSEQ, TK_MINUSEQ, TK_MULTEQ, TK_DIVEQ, TK_SHLEQ, TK_SHREQ, TK_BANDEQ, TK_BOREQ, TK_POWEQ
 #endif
 #if defined(GRIT_POWER_INTERP)
   , TK_INTERPBEGIN, TK_INTERPMID, TK_INTERPEND
@@ -65,7 +65,7 @@ enum RESERVED {
 #define NUM_RESERVED	(cast_int(TK_WHILE-FIRST_RESERVED + 1))
 
 /* ORDER RESERVED */
-#define opeqexpr(t) ((t) >= TK_PLUSEQ && (t) <= TK_BXOREQ)
+#define opeqexpr(t) ((t) >= TK_PLUSEQ && (t) <= TK_POWEQ)
 
 typedef union {
   lua_Number r;
@@ -115,8 +115,10 @@ typedef struct LexState {
 
 
 LUAI_FUNC void luaX_init (lua_State *L);
+#if !defined(LUA_NO_PARSER)
 LUAI_FUNC void luaX_setinput (lua_State *L, LexState *ls, ZIO *z,
                               TString *source, int firstchar);
+#endif
 LUAI_FUNC TString *luaX_newstring (LexState *ls, const char *str, size_t l);
 LUAI_FUNC void luaX_next (LexState *ls);
 LUAI_FUNC int luaX_lookahead (LexState *ls);

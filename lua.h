@@ -9,10 +9,6 @@
 #ifndef lua_h
 #define lua_h
 
-#ifndef GAME_SD
-#define GAME_SD
-#endif
-
 #include <stdarg.h>
 #include <stddef.h>
 

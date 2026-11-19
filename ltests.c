@@ -1116,7 +1116,7 @@ static int stacklevel (lua_State *L) {
 }
 
 
-static int resetCI (lua_State *L) {
+static int tresetCI (lua_State *L) {
   CallInfo *ci = L->ci;
   while (ci->next != NULL) {
     CallInfo *tofree = ci->next;
@@ -2322,7 +2322,7 @@ static const struct luaL_Reg tests_funcs[] = {
   {"s2d", s2d},
   {"sethook", sethook},
   {"stacklevel", stacklevel},
-  {"resetCI", resetCI},
+  {"resetCI", tresetCI},
   {"reallocstack", reallocstack},
   {"sizes", get_sizes},
   {"testC", testC},

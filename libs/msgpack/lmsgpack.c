@@ -137,10 +137,18 @@ static int put (lmsgpack_Writer *w, unsigned int c, size_t size, uint64_t v) {
     return w->status;
   p[0] = (unsigned char)c;
   switch (size) {
-    case 1: p[1] = (unsigned char)v; break;
-    case 2: store16(p + 1, v); break;
-    case 4: store32(p + 1, v); break;
-    case 8: store64(p + 1, v); break;
+    case 1:
+      p[1] = (unsigned char)v;
+      break;
+    case 2:
+      store16(p + 1, v);
+      break;
+    case 4:
+      store32(p + 1, v);
+      break;
+    case 8:
+      store64(p + 1, v);
+      break;
     default: break;
   }
   w->len += 1 + size;
@@ -270,20 +278,44 @@ int lmsgpack_write_ext (lmsgpack_Writer *w, size_t n, int8_t type) {
   if (toolarge(n))
     return fail(w, LMSGPACK_ERROR_TOO_LARGE);
   switch (n) {
-    case 1: tag = 0xd4; size = 0; break;
-    case 2: tag = 0xd5; size = 0; break;
-    case 4: tag = 0xd6; size = 0; break;
-    case 8: tag = 0xd7; size = 0; break;
-    case 16: tag = 0xd8; size = 0; break;
-    default: tag = (n < 0x100) ? 0xc7 : (n < 0x10000) ? 0xc8 : 0xc9; size = (n < 0x100) ? 1 : (n < 0x10000) ? 2 : 4; break;
+    case 1:
+      tag = 0xd4;
+      size = 0;
+      break;
+    case 2:
+      tag = 0xd5;
+      size = 0;
+      break;
+    case 4:
+      tag = 0xd6;
+      size = 0;
+      break;
+    case 8:
+      tag = 0xd7;
+      size = 0;
+      break;
+    case 16:
+      tag = 0xd8;
+      size = 0;
+      break;
+    default:
+      tag = (n < 0x100) ? 0xc7 : (n < 0x10000) ? 0xc8 : 0xc9;
+      size = (n < 0x100) ? 1 : (n < 0x10000) ? 2 : 4;
+      break;
   }
   if ((p = room(w, 2 + size)) == NULL)
     return w->status;
   p[0] = (unsigned char)tag;
   switch (size) {
-    case 1: p[1] = (unsigned char)n; break;
-    case 2: store16(p + 1, n); break;
-    case 4: store32(p + 1, n); break;
+    case 1:
+      p[1] = (unsigned char)n;
+      break;
+    case 2:
+      store16(p + 1, n);
+      break;
+    case 4:
+      store32(p + 1, n);
+      break;
     default: break;
   }
   p[1 + size] = (unsigned char)type;
@@ -406,14 +438,32 @@ static int readitem (const unsigned char *s, size_t len, size_t p, size_t *end, 
     return readbody(s, avail, p, c & 0x1f, LMSGPACK_STR, o, end);
   #define need(n) if (avail < (n)) return LMSGPACK_ERROR_INCOMPLETE; *end = p + (n)
   switch (c) {
-    case 0xc0: o->type = LMSGPACK_NIL; return LMSGPACK_OK;
-    case 0xc2: case 0xc3: o->type = LMSGPACK_BOOLEAN; o->via.boolean = (c == 0xc3); return LMSGPACK_OK;
-    case 0xc4: need(1); return readbody(s, avail - 1, p + 1, s[p], LMSGPACK_BIN, o, end);
-    case 0xc5: need(2); return readbody(s, avail - 2, p + 2, load16(s + p), LMSGPACK_BIN, o, end);
-    case 0xc6: need(4); return readbody(s, avail - 4, p + 4, load32(s + p), LMSGPACK_BIN, o, end);
-    case 0xc7: need(1); return readbody(s, avail - 1, p + 1, (uint64_t)s[p] + 1, LMSGPACK_EXT, o, end);
-    case 0xc8: need(2); return readbody(s, avail - 2, p + 2, (uint64_t)load16(s + p) + 1, LMSGPACK_EXT, o, end);
-    case 0xc9: need(4); return readbody(s, avail - 4, p + 4, (uint64_t)load32(s + p) + 1, LMSGPACK_EXT, o, end);
+    case 0xc0:
+      o->type = LMSGPACK_NIL;
+      return LMSGPACK_OK;
+    case 0xc2:
+    case 0xc3:
+      o->type = LMSGPACK_BOOLEAN;
+      o->via.boolean = (c == 0xc3);
+      return LMSGPACK_OK;
+    case 0xc4:
+      need(1);
+      return readbody(s, avail - 1, p + 1, s[p], LMSGPACK_BIN, o, end);
+    case 0xc5:
+      need(2);
+      return readbody(s, avail - 2, p + 2, load16(s + p), LMSGPACK_BIN, o, end);
+    case 0xc6:
+      need(4);
+      return readbody(s, avail - 4, p + 4, load32(s + p), LMSGPACK_BIN, o, end);
+    case 0xc7:
+      need(1);
+      return readbody(s, avail - 1, p + 1, (uint64_t)s[p] + 1, LMSGPACK_EXT, o, end);
+    case 0xc8:
+      need(2);
+      return readbody(s, avail - 2, p + 2, (uint64_t)load16(s + p) + 1, LMSGPACK_EXT, o, end);
+    case 0xc9:
+      need(4);
+      return readbody(s, avail - 4, p + 4, (uint64_t)load32(s + p) + 1, LMSGPACK_EXT, o, end);
     case 0xca: {
       uint32_t i;
       float f;
@@ -421,7 +471,7 @@ static int readitem (const unsigned char *s, size_t len, size_t p, size_t *end, 
       i = load32(s + p);
       memcpy(&f, &i, sizeof(f));
       o->type = LMSGPACK_FLOAT32;
-      o->via.f64 = f;
+      o->via.f64 = (double)f;
       return LMSGPACK_OK;
     }
     case 0xcb: {
@@ -434,26 +484,72 @@ static int readitem (const unsigned char *s, size_t len, size_t p, size_t *end, 
       o->via.f64 = d;
       return LMSGPACK_OK;
     }
-    case 0xcc: need(1); o->type = LMSGPACK_POSITIVE_INTEGER; o->via.u64 = s[p]; return LMSGPACK_OK;
-    case 0xcd: need(2); o->type = LMSGPACK_POSITIVE_INTEGER; o->via.u64 = load16(s + p); return LMSGPACK_OK;
-    case 0xce: need(4); o->type = LMSGPACK_POSITIVE_INTEGER; o->via.u64 = load32(s + p); return LMSGPACK_OK;
-    case 0xcf: need(8); o->type = LMSGPACK_POSITIVE_INTEGER; o->via.u64 = load64(s + p); return LMSGPACK_OK;
-    case 0xd0: need(1); setint(o, tosigned(s[p], 8)); return LMSGPACK_OK;
-    case 0xd1: need(2); setint(o, tosigned(load16(s + p), 16)); return LMSGPACK_OK;
-    case 0xd2: need(4); setint(o, tosigned(load32(s + p), 32)); return LMSGPACK_OK;
-    case 0xd3: need(8); setint(o, tosigned(load64(s + p), 64)); return LMSGPACK_OK;
+    case 0xcc:
+      need(1);
+      o->type = LMSGPACK_POSITIVE_INTEGER;
+      o->via.u64 = s[p];
+      return LMSGPACK_OK;
+    case 0xcd:
+      need(2);
+      o->type = LMSGPACK_POSITIVE_INTEGER;
+      o->via.u64 = load16(s + p);
+      return LMSGPACK_OK;
+    case 0xce:
+      need(4);
+      o->type = LMSGPACK_POSITIVE_INTEGER;
+      o->via.u64 = load32(s + p);
+      return LMSGPACK_OK;
+    case 0xcf:
+      need(8);
+      o->type = LMSGPACK_POSITIVE_INTEGER;
+      o->via.u64 = load64(s + p);
+      return LMSGPACK_OK;
+    case 0xd0:
+      need(1);
+      setint(o, tosigned(s[p], 8));
+      return LMSGPACK_OK;
+    case 0xd1:
+      need(2);
+      setint(o, tosigned(load16(s + p), 16));
+      return LMSGPACK_OK;
+    case 0xd2:
+      need(4);
+      setint(o, tosigned(load32(s + p), 32));
+      return LMSGPACK_OK;
+    case 0xd3:
+      need(8);
+      setint(o, tosigned(load64(s + p), 64));
+      return LMSGPACK_OK;
     case 0xd4: return readbody(s, avail, p, 1 + 1, LMSGPACK_EXT, o, end);
     case 0xd5: return readbody(s, avail, p, 2 + 1, LMSGPACK_EXT, o, end);
     case 0xd6: return readbody(s, avail, p, 4 + 1, LMSGPACK_EXT, o, end);
     case 0xd7: return readbody(s, avail, p, 8 + 1, LMSGPACK_EXT, o, end);
     case 0xd8: return readbody(s, avail, p, 16 + 1, LMSGPACK_EXT, o, end);
-    case 0xd9: need(1); return readbody(s, avail - 1, p + 1, s[p], LMSGPACK_STR, o, end);
-    case 0xda: need(2); return readbody(s, avail - 2, p + 2, load16(s + p), LMSGPACK_STR, o, end);
-    case 0xdb: need(4); return readbody(s, avail - 4, p + 4, load32(s + p), LMSGPACK_STR, o, end);
-    case 0xdc: need(2); setcontainer(o, LMSGPACK_ARRAY, load16(s + p)); return LMSGPACK_OK;
-    case 0xdd: need(4); setcontainer(o, LMSGPACK_ARRAY, load32(s + p)); return LMSGPACK_OK;
-    case 0xde: need(2); setcontainer(o, LMSGPACK_MAP, load16(s + p)); return LMSGPACK_OK;
-    case 0xdf: need(4); setcontainer(o, LMSGPACK_MAP, load32(s + p)); return LMSGPACK_OK;
+    case 0xd9:
+      need(1);
+      return readbody(s, avail - 1, p + 1, s[p], LMSGPACK_STR, o, end);
+    case 0xda:
+      need(2);
+      return readbody(s, avail - 2, p + 2, load16(s + p), LMSGPACK_STR, o, end);
+    case 0xdb:
+      need(4);
+      return readbody(s, avail - 4, p + 4, load32(s + p), LMSGPACK_STR, o, end);
+    case 0xdc:
+      need(2);
+      setcontainer(o, LMSGPACK_ARRAY, load16(s + p));
+      return LMSGPACK_OK;
+    case 0xdd:
+      need(4);
+      setcontainer(o, LMSGPACK_ARRAY, load32(s + p));
+      return LMSGPACK_OK;
+    case 0xde:
+      need(2);
+      setcontainer(o, LMSGPACK_MAP, load16(s + p));
+      return LMSGPACK_OK;
+    case 0xdf:
+      need(4);
+      setcontainer(o, LMSGPACK_MAP, load32(s + p));
+      return LMSGPACK_OK;
     default: return LMSGPACK_ERROR_INVALID;
   }
   #undef need
@@ -472,8 +568,8 @@ static const unsigned char fixedsize[0x20] = {
   2, 3, 5, 9, 3, 4, 6, 10, 18, 0, 0, 0, 0, 0, 0, 0
 };
 
-static int scan (const unsigned char *s, size_t len, size_t *off, uint64_t *items) {
-  uint64_t remain[LMSGPACK_MAX_DEPTH];
+static int scan (const unsigned char *s, size_t len, size_t *off, uint64_t *items, int maxdepth) {
+  uint64_t remain[LMSGPACK_DEPTH_LIMIT];
   int top = 0;
   size_t p = *off;
   *items = 0;
@@ -483,7 +579,7 @@ static int scan (const unsigned char *s, size_t len, size_t *off, uint64_t *item
     int status;
     if (p < len) {
       unsigned int c = s[p];
-      size_t size = (c <= 0x7f || c >= 0xe0) ? 1 : (c >= 0xc0) ? fixedsize[c - 0xc0] : 0;
+      size_t size = (c <= 0x7f || c >= 0xe0) ? 1 : (c >= 0xc0) ? fixedsize[c - 0xc0] : (c >= 0xa0) ? 1 + (size_t)(c & 0x1f) : 0;
       if (size > 0 && len - p >= size) {
         p += size;
         goto value;
@@ -499,7 +595,7 @@ static int scan (const unsigned char *s, size_t len, size_t *off, uint64_t *item
     if (o.type == LMSGPACK_ARRAY || o.type == LMSGPACK_MAP) {
       uint64_t n = (o.type == LMSGPACK_MAP) ? 2 * (uint64_t)o.via.map.size : o.via.array.size;
       if (n > 0) {
-        if (top >= LMSGPACK_MAX_DEPTH)
+        if (top >= maxdepth)
           return LMSGPACK_ERROR_DEPTH;
         *items += n;
         remain[top++] = n;
@@ -516,9 +612,17 @@ static int scan (const unsigned char *s, size_t len, size_t *off, uint64_t *item
   }
 }
 
-int lmsgpack_check (const char *data, size_t len, size_t *off) {
+int lmsgpack_checkdepth (const char *data, size_t len, size_t *off, int maxdepth) {
   uint64_t items;
-  return scan((const unsigned char *)data, len, off, &items);
+  if (maxdepth < 1)
+    maxdepth = 1;
+  else if (maxdepth > LMSGPACK_DEPTH_LIMIT)
+    maxdepth = LMSGPACK_DEPTH_LIMIT;
+  return scan((const unsigned char *)data, len, off, &items, maxdepth);
+}
+
+int lmsgpack_check (const char *data, size_t len, size_t *off) {
+  return lmsgpack_checkdepth(data, len, off, LMSGPACK_MAX_DEPTH);
 }
 
 void lmsgpack_document_init (lmsgpack_Document *d, lmsgpack_Alloc alloc, void *allocud) {
@@ -563,7 +667,7 @@ int lmsgpack_decode (lmsgpack_Document *d, const char *data, size_t len, size_t 
   lmsgpack_Value *next;
   int status;
   lmsgpack_document_free(d);
-  if ((status = scan(s, len, &end, &items)) != LMSGPACK_OK) {
+  if ((status = scan(s, len, &end, &items, LMSGPACK_MAX_DEPTH)) != LMSGPACK_OK) {
     if (status == LMSGPACK_ERROR_INCOMPLETE)
       *offset = end;
     return status;

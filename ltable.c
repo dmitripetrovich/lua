@@ -1458,6 +1458,7 @@ lua_Unsigned luaH_clonetable (lua_State *L, const Table *from, Table *to) {
   to->node = newt.node;
   to->lsizenode = newt.lsizenode;
   to->flags = cast_byte((to->flags & NOTBITDUMMY) | (newt.flags & BITDUMMY));
+  invalidateTMcache(to);  /* 'to' may be a metatable with cached absent metamethods */
   if (isblack(obj2gco(to)))
     luaC_barrierback_(L, obj2gco(to));
   return cast(lua_Unsigned, asize) + allocsizenode(to);

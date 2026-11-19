@@ -67,83 +67,6 @@ typedef struct lua_longjmp {
 
 
 /*
-** {======================================================
-** C++ Exception Model
-** =======================================================
-*/
-#if defined(__cplusplus) && defined(LUA_CPP_EXCEPTIONS) && \
-    !defined(LUA_USE_LONGJMP)
-
-#if defined(LUA_CPP_STD_EXCEPTIONS)
-  #include <exception>
-#endif
-
-#if !defined(LUA_NOEXCEPT)
-  #if __cplusplus >= 201103L
-    #define LUA_NOEXCEPT noexcept
-  #else
-    #define LUA_NOEXCEPT
-  #endif
-#endif
-
-class LuaException {
-private:
-  lua_State *const L;
-  lua_longjmp *const errorJmp;
-  mutable bool anchored;
-
-  LuaException &operator=(const LuaException &other) = delete;  /* prevent */
-
-public:
-  LuaException(lua_State *L_, lua_longjmp *errorJmp_)
-    : L(L_), errorJmp(errorJmp_), anchored(false) {
-  }
-
-  LuaException(const LuaException &other)
-    : L(other.L), errorJmp(other.errorJmp), anchored(other.anchored) {
-    other.anchor();
-  }
-
-  /*
-  ** Ensure the error message is anchored on the Lua stack well after the
-  ** lifetime of the exception.
-  **
-  ** @NOTE: This function should only be called by luaD_rawrunprotected.
-  */
-  void anchor() const {
-    anchored = true;
-  }
-
-  lua_longjmp *target() const {
-    return errorJmp;
-  }
-
-  /*
-  ** If the exception was caught and disposed-of before luaD_rawrunprotected has
-  ** processed it, revert the error state and pop the error message.
-  **
-  ** @TODO: Potentially restore status to its previous state
-  */
-  ~LuaException() {
-    if (!anchored) {
-      errorJmp->status = 0;
-      lua_pop(L, 1);
-    }
-  }
-
-  const char *what() const LUA_NOEXCEPT {
-    if (lua_gettop(L) > 0 && lua_isstring(L, -1))
-      return lua_tostring(L, -1);
-
-    return "unknown Lua error";
-  }
-};
-
-#endif
-/* }====================================================== */
-
-
-/*
 ** LUAI_THROW/LUAI_TRY define how Lua does exception handling. By
 ** default, Lua handles errors with exceptions when compiling as
 ** C++ code, with _longjmp/_setjmp when available (POSIX), and with
@@ -153,68 +76,6 @@ public:
 
 #if defined(__cplusplus) && !defined(LUA_USE_LONGJMP)	/* { */
 
-/*
-** C++ exceptions: Ideally, LUAI_TRY should only handle "lua_longjmp" exceptions
-** and all other caught exceptions (ellipses catch) are programming errors that
-** should lead to panics.
-**
-@@ LUA_CPP_EXCEPTIONS: If enabled, LUAI_THROW throws a checked exception instead
-** of a lua_longjmp + ellipses-catch. This allows more flexibility when dealing
-** with libraries compiled with C++ and properly maintaining the Lua stack.
-@@ LUA_CPP_STD_EXCEPTIONS: std::exceptions are also maintained by the runtime.
-*/
-#if defined(LUA_CPP_EXCEPTIONS)
-#define LUAI_THROW(L,c)		throw(LuaException((L), (c)))
-
-static void LUAI_TRY (lua_State *L, lua_longjmp *c, Pfunc f, void *ud) {
-  try {
-    f(L, ud);  /* call function protected */
-  }
-  /*
-  ** lua_error has been invoked w/ an error message placed on the stack. Anchor
-  ** the exception to ensure it does not pop the error message off the stack.
-  */
-  catch (LuaException &lua_e) {
-    if (lua_e.target() != c)  /* not the correct level? */
-      throw;  /* rethrow to upper level */
-    lua_e.anchor();
-  }
-  /*
-  ** Original implementation uses throw(lua_longjmp) + ellipses capture. For
-  ** completeness handle catching longjmp even through it should never be thrown
-  */
-  catch (lua_longjmp *c1) {
-    if (c1 != c)  /* not the correct level? */
-      throw;  /* rethrow to upper level */
-  }
-  /*
-  ** Handle STL exceptions as a stop-gap. Ideally, libraries should be handling
-  ** their own exceptions.
-  */
-#if defined(LUA_CPP_STD_EXCEPTIONS)
-  catch (const std::exception &stl_e) {
-    try {
-      lua_pushstring(L, stl_e.what());  // may LUAI_THROW
-      lua_error(L);
-    }
-    catch (LuaException &_lua_e) {
-      if (_lua_e.target() != c)  /* not the correct level? */
-        throw;  /* rethrow to upper level */
-      _lua_e.anchor();
-    }
-  }
-#endif
-  /*
-  ** Some library/submodule has thrown an unchecked exception that has made its
-  ** way back to rawrunprotected. For the time being, copy LUAI_TRY and presume
-  ** the Lua stack is now in an invalid state. The commented out solution forces
-  ** an explicit panic.
-  */
-  catch (...) {  /* non-Lua exception */
-    c->status = -1;  /* create some error code */
-  }
-}
-#else
 /* C++ exceptions */
 #define LUAI_THROW(L,c)		throw(c)
 
@@ -227,10 +88,9 @@ static void LUAI_TRY (lua_State *L, lua_longjmp *c, Pfunc f, void *ud) {
       throw;  /* rethrow to upper level */
   }
   catch (...) {  /* non-Lua exception */
-    c->status = -1;  /* create some error code */
+    c->status = cast(TStatus, -1);  /* create some error code */
   }
 }
-#endif
 
 
 #elif defined(LUA_USE_POSIX)				/* }{ */
@@ -1367,7 +1227,7 @@ static void f_parser (lua_State *L, void *ud) {
       fixed = 1;
     else
       checkmode(L, mode, "binary");
-    cl = luaU_undump(L, p->z, anchor, p->name, fixed);
+    cl = luaU_undump(L, p->z, &p->buff, anchor, p->name, fixed);
 #endif
   }
   else {

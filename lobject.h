@@ -576,6 +576,7 @@ typedef struct Import {
   short k[3];
   lu_byte up;
   lu_byte n;
+  lu_byte skip;  /* leaf is a plain value: not cached, never resolved again */
 } Import;
 #endif
 

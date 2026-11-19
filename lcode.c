@@ -830,6 +830,7 @@ static void dischargeimport (FuncState *fs, expdesc *e) {
   while (oldsize < f->sizeimports) {
     f->imports[oldsize].env = NULL;
     f->imports[oldsize].epoch = 0;
+    f->imports[oldsize].skip = 0;
     setnilvalue(&f->imports[oldsize].value);
     oldsize++;
   }
@@ -1151,10 +1152,6 @@ static void codeABRK (FuncState *fs, OpCode o, int A, int B,
 ** Generate code to store result of expression 'ex' into variable 'var'.
 */
 void luaK_storevar (FuncState *fs, expdesc *var, expdesc *ex) {
-#if defined(GRIT_POWER_IMPORT)
-  if (var->k == VIMPORT)
-    luaK_importvar(fs, var);
-#endif
   switch (var->k) {
     case VLOCAL: {
       freeexp(fs, ex);

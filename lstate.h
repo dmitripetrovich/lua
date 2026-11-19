@@ -164,7 +164,7 @@ struct lua_longjmp;  /* defined in ldo.c */
 #define KGC_GENMAJOR	2	/* generational in major mode */
 
 
-typedef struct GAME_SD stringtable {
+typedef struct stringtable {
   TString **hash;  /* array of buckets (linked lists of strings) */
   int nuse;  /* number of elements */
   int size;  /* number of buckets */
@@ -184,7 +184,7 @@ typedef struct GAME_SD stringtable {
 ** - field 'nres' is used only while closing tbc variables when
 ** returning from a function;
 */
-struct GAME_SD CallInfo {
+struct CallInfo {
   StkIdRel func;  /* function index in the stack */
   StkIdRel top;  /* top for this function */
   struct CallInfo *previous, *next;  /* dynamic call link */
@@ -324,7 +324,7 @@ typedef struct LX {
 /*
 ** 'global state', shared by all threads of this state
 */
-typedef struct GAME_SD global_State {
+typedef struct global_State {
   lua_Alloc frealloc;  /* function to reallocate memory */
   void *ud;         /* auxiliary data to 'frealloc' */
   l_mem GCtotalbytes;  /* number of bytes currently allocated + debt */

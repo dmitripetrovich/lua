@@ -190,7 +190,7 @@ static int luaB_rawget (lua_State *L) {
 static int luaB_rawset (lua_State *L) {
   int t = lua_rawtype(L, 1);
   if (!luaB_hasset(t))
-    luaL_typeerror(L, 1, lua_typename(L, LUA_TTABLE));
+    return luaL_typeerror(L, 1, lua_typename(L, LUA_TTABLE));
   luaL_checkany(L, 2);
   luaL_checkany(L, 3);
   luaB_checkwritable(L, 1);
@@ -291,7 +291,7 @@ static int luaB_type (lua_State *L) {
 /* the iteration functions an optimized 'for' loop recognizes (lvm.c) */
 #if defined(LUA_EXT_ITERATION)
 #define LUAB_ITERFUNC	LUAI_FUNC
-#if !defined(lvm_h)  /* else 'lvm.h' (as in 'onelua.c') declared them */
+#if !defined(lvm_h)  /* else 'lvm.h' (as in 'lbundle.c') declared them */
 LUAB_ITERFUNC int luaB_next (lua_State *L);
 LUAB_ITERFUNC int luaB_ipairsaux (lua_State *L);
 #if defined(GRIT_COMPAT_IPAIRS)
@@ -609,15 +609,39 @@ static int luaB_tostring (lua_State *L) {
 
 #if defined(GRIT_POWER_DEFER) || defined(GRIT_POWER_DEFER_OLD)
 /* func2close */
+static int deferclosek (lua_State *L, int status, lua_KContext ctx) {
+  UNUSED(L);
+  UNUSED(status);
+  UNUSED(ctx);
+  return 0;
+}
+
+
+/* __close of a deferred object: call its function with (obj, err) */
+static int deferclose (lua_State *L) {
+  lua_rawgeti(L, 1, 1);
+  lua_insert(L, 1);
+  lua_callk(L, lua_gettop(L) - 1, 0, 0, deferclosek);  /* (may yield) */
+  return 0;
+}
+
+
+static const char deferkey = 0;  /* registry key of the shared metatable */
+
 static int luaB_defer (lua_State *L) {
   luaL_checktype(L, 1, LUA_TFUNCTION);  /* check defer function */
-
-  lua_newtable(L);  /* to-be-closed dummy object */
-  lua_newtable(L);  /* metatable */
+  lua_createtable(L, 1, 0);  /* to-be-closed object, holding the function */
   lua_pushvalue(L, 1);
-  lua_setfield(L, -2, "__close");
-  lua_setmetatable(L, -2);  /* pops: metatable */
-
+  lua_rawseti(L, -2, 1);
+  if (lua_rawgetp(L, LUA_REGISTRYINDEX, &deferkey) == LUA_TNIL) {
+    lua_pop(L, 1);
+    lua_createtable(L, 0, 1);
+    lua_pushcfunction(L, deferclose);
+    lua_setfield(L, -2, "__close");
+    lua_pushvalue(L, -1);
+    lua_rawsetp(L, LUA_REGISTRYINDEX, &deferkey);
+  }
+  lua_setmetatable(L, -2);
   return 1;
 }
 #endif

@@ -202,6 +202,7 @@ static void inclinenumber (LexState *ls) {
 }
 
 
+#if !defined(LUA_NO_PARSER)
 void luaX_setinput (lua_State *L, LexState *ls, ZIO *z, TString *source,
                     int firstchar) {
   ls->t.token = 0;
@@ -231,6 +232,7 @@ void luaX_setinput (lua_State *L, LexState *ls, ZIO *z, TString *source,
 #endif
   luaZ_resizebuffer(ls->L, ls->buff, LUA_MINBUFFER);  /* initialize buffer */
 }
+#endif
 
 
 
@@ -290,6 +292,20 @@ static int str2numlit (char *s, TValue *o) {
     return 1;
   }
   return 0;
+}
+#endif
+
+
+#if defined(GRIT_POWER_NAMESPACE_SEL)
+/*
+** A '::' just read selects a field ('a::b' is 'a.b') when it follows a
+** name, ')' or ']' on the same line and a name follows it; any other
+** '::' delimits a label, so '::continue::' on its own line still works.
+** ('ls->t' still holds the previous token while the next one is read.)
+*/
+static int isnamespacesel (LexState *ls) {
+  int t = ls->t.token;
+  return (t == TK_NAME || t == ')' || t == ']') && ls->linenumber == ls->lastline && lislalpha(ls->current);
 }
 #endif
 
@@ -475,6 +491,59 @@ static int readdecesc (LexState *ls) {
 }
 
 
+/*
+** Read the escape sequence at '\\' into the buffer. With 'braces' (in
+** interpolated strings) '\\{' and '\\}' are escapes too.
+*/
+static void read_escape (LexState *ls, int braces) {
+  int c;  /* final character to be saved */
+  save_and_next(ls);  /* keep '\\' for error messages */
+  switch (ls->current) {
+    case 'a': c = '\a'; goto read_save;
+    case 'b': c = '\b'; goto read_save;
+    case 'f': c = '\f'; goto read_save;
+    case 'n': c = '\n'; goto read_save;
+    case 'r': c = '\r'; goto read_save;
+    case 't': c = '\t'; goto read_save;
+    case 'v': c = '\v'; goto read_save;
+    case 'x': c = readhexaesc(ls); goto read_save;
+    case 'u': utf8esc(ls);  goto no_save;
+    case '\n': case '\r':
+      inclinenumber(ls); c = '\n'; goto only_save;
+    case '\\': case '\"': case '\'':
+      c = ls->current; goto read_save;
+    case EOZ: goto no_save;  /* will raise an error next loop */
+    case 'z': {  /* zap following span of spaces */
+      luaZ_buffremove(ls->buff, 1);  /* remove '\\' */
+      ls_next(ls);  /* skip the 'z' */
+      while (lisspace(ls->current)) {
+        if (currIsNewline(ls)) inclinenumber(ls);
+        else ls_next(ls);
+      }
+      goto no_save;
+    }
+    default: {
+      if (braces && (ls->current == '{' || ls->current == '}')) {
+        c = ls->current;
+        goto read_save;
+      }
+      esccheck(ls, lisdigit(ls->current), "invalid escape sequence");
+      c = readdecesc(ls);  /* digital escape '\\ddd' */
+      goto only_save;
+    }
+  }
+ read_save:
+  ls_next(ls);
+  /* go through */
+ only_save:
+  luaZ_buffremove(ls->buff, 1);  /* remove '\\' */
+  save(ls, c);
+  /* go through */
+ no_save:
+  return;
+}
+
+
 static void read_string (LexState *ls, int del, SemInfo *seminfo) {
   save_and_next(ls);  /* keep delimiter (for error messages) */
   while (ls->current != del) {
@@ -486,48 +555,9 @@ static void read_string (LexState *ls, int del, SemInfo *seminfo) {
       case '\r':
         lexerror(ls, "unfinished string", TK_STRING);
         break;  /* to avoid warnings */
-      case '\\': {  /* escape sequences */
-        int c;  /* final character to be saved */
-        save_and_next(ls);  /* keep '\\' for error messages */
-        switch (ls->current) {
-          case 'a': c = '\a'; goto read_save;
-          case 'b': c = '\b'; goto read_save;
-          case 'f': c = '\f'; goto read_save;
-          case 'n': c = '\n'; goto read_save;
-          case 'r': c = '\r'; goto read_save;
-          case 't': c = '\t'; goto read_save;
-          case 'v': c = '\v'; goto read_save;
-          case 'x': c = readhexaesc(ls); goto read_save;
-          case 'u': utf8esc(ls);  goto no_save;
-          case '\n': case '\r':
-            inclinenumber(ls); c = '\n'; goto only_save;
-          case '\\': case '\"': case '\'':
-            c = ls->current; goto read_save;
-          case EOZ: goto no_save;  /* will raise an error next loop */
-          case 'z': {  /* zap following span of spaces */
-            luaZ_buffremove(ls->buff, 1);  /* remove '\\' */
-            ls_next(ls);  /* skip the 'z' */
-            while (lisspace(ls->current)) {
-              if (currIsNewline(ls)) inclinenumber(ls);
-              else ls_next(ls);
-            }
-            goto no_save;
-          }
-          default: {
-            esccheck(ls, lisdigit(ls->current), "invalid escape sequence");
-            c = readdecesc(ls);  /* digital escape '\ddd' */
-            goto only_save;
-          }
-        }
-       read_save:
-         ls_next(ls);
-         /* go through */
-       only_save:
-         luaZ_buffremove(ls->buff, 1);  /* remove '\\' */
-         save(ls, c);
-         /* go through */
-       no_save: break;
-      }
+      case '\\':  /* escape sequences */
+        read_escape(ls, 0);
+        break;
       default:
         save_and_next(ls);
     }
@@ -555,45 +585,9 @@ static int read_interp (LexState *ls, int del, SemInfo *seminfo) {
       case '\r':
         lexerror(ls, "unfinished string", TK_STRING);
         break;
-      case '\\': {
-        int c;
-        save_and_next(ls);
-        switch (ls->current) {
-          case 'a': c = '\a'; goto read_save;
-          case 'b': c = '\b'; goto read_save;
-          case 'f': c = '\f'; goto read_save;
-          case 'n': c = '\n'; goto read_save;
-          case 'r': c = '\r'; goto read_save;
-          case 't': c = '\t'; goto read_save;
-          case 'v': c = '\v'; goto read_save;
-          case 'x': c = readhexaesc(ls); goto read_save;
-          case 'u': utf8esc(ls); goto no_save;
-          case '\n': case '\r': inclinenumber(ls); c = '\n'; goto only_save;
-          case '\\': case '\"': case '\'': case '{': case '}': c = ls->current; goto read_save;
-          case EOZ: goto no_save;
-          case 'z': {
-            luaZ_buffremove(ls->buff, 1);
-            ls_next(ls);
-            while (lisspace(ls->current)) {
-              if (currIsNewline(ls)) inclinenumber(ls);
-              else ls_next(ls);
-            }
-            goto no_save;
-          }
-          default: {
-            esccheck(ls, lisdigit(ls->current), "invalid escape sequence");
-            c = readdecesc(ls);
-            goto only_save;
-          }
-        }
-       read_save:
-        ls_next(ls);
-       only_save:
-        luaZ_buffremove(ls->buff, 1);
-        save(ls, c);
-       no_save:
+      case '\\':
+        read_escape(ls, 1);
         break;
-      }
       default:
         save_and_next(ls);
     }
@@ -720,30 +714,18 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         }
       }
 #if defined(GRIT_POWER_COMPOUND)
-      case '+': {
+      case '+': case '*': case '&': case '|': case '^': {  /* 'op' or 'op=' */
+        int op = ls->current;
         ls_next(ls);
-        if (check_next1(ls, '=')) return TK_PLUSEQ;
-        else return '+';
-      }
-      case '*': {
-        ls_next(ls);
-        if (check_next1(ls, '=')) return TK_MULTEQ;
-        else return '*';
-      }
-      case '&': {
-        ls_next(ls);
-        if (check_next1(ls, '=')) return TK_BANDEQ;
-        else return '&';
-      }
-      case '|': {
-        ls_next(ls);
-        if (check_next1(ls, '=')) return TK_BOREQ;
-        else return '|';
-      }
-      case '^': {
-        ls_next(ls);
-        if (check_next1(ls, '=')) return TK_BXOREQ;
-        else return '^';
+        if (!check_next1(ls, '='))
+          return op;
+        switch (op) {
+          case '+': return TK_PLUSEQ;
+          case '*': return TK_MULTEQ;
+          case '&': return TK_BANDEQ;
+          case '|': return TK_BOREQ;
+          default: return TK_POWEQ;
+        }
       }
 #endif
       case '~': {
@@ -754,7 +736,7 @@ static int llex (LexState *ls, SemInfo *seminfo) {
       case ':': {
         ls_next(ls);
 #if defined(GRIT_POWER_NAMESPACE_SEL)
-        if (check_next1(ls, ':')) return '.';
+        if (check_next1(ls, ':')) return isnamespacesel(ls) ? '.' : cast_int(TK_DBCOLON);
 #else
         if (check_next1(ls, ':')) return TK_DBCOLON;  /* '::' */
 #endif

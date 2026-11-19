@@ -458,9 +458,14 @@ static int handle_luainit (lua_State *L) {
     #define LUA_HISTORY     "LUA_HISTORY"
   #endif
 
+  /* LUA_HISTORY_MAX is how many lines the history file keeps */
+  #if !defined(LUA_HISTORY_MAX)
+    #define LUA_HISTORY_MAX 1000
+  #endif
+
   /*
-  ** LUA_HISTORY_DEFAULT is the default path that Lua uses to look for
-  ** the command-line history.
+  ** LUA_HISTORY_DEFAULT is the file, in the home directory (or else the
+  ** current one), that Lua uses for the command-line history.
   */
   #if defined(_WIN32)
     #define LUA_HISTORY_DEFAULT "lua_history.txt"
@@ -493,7 +498,7 @@ static int handle_luainit (lua_State *L) {
 #define lua_freeline(line)	free(line)
 #if defined(GRIT_POWER_READLINE_HISTORY)
   #define lua_readlinehistory(L,f) ((void)L, (void)read_history(f))
-  #define lua_writelinehistory(L,f) ((void)L, (void)write_history(f))
+  #define lua_writelinehistory(L,f) ((void)L, (void)write_history(f), (void)history_truncate_file(f, LUA_HISTORY_MAX))
 #endif
 
 #else		/* }{ */
@@ -506,6 +511,17 @@ static l_readlineT l_readline = NULL;
 /* pointer to 'add_history' function (if any) */
 typedef void (*l_addhistT) (const char *string);
 static l_addhistT l_addhist = NULL;
+
+#if defined(GRIT_POWER_READLINE_HISTORY)
+/* pointers to 'read_history' and 'write_history' (if any) */
+typedef int (*l_histfileT) (const char *filename);
+typedef int (*l_histtruncT) (const char *filename, int lines);
+static l_histfileT l_readhist = NULL;
+static l_histfileT l_writehist = NULL;
+static l_histtruncT l_trunchist = NULL;
+#define lua_readlinehistory(L,f) ((void)L, (l_readhist != NULL) ? (void)(*l_readhist)(f) : (void)0)
+#define lua_writelinehistory(L,f) ((void)L, (l_writehist != NULL) ? (void)(*l_writehist)(f) : (void)0, (l_trunchist != NULL) ? (void)(*l_trunchist)(f, LUA_HISTORY_MAX) : (void)0)
+#endif
 
 
 static char *lua_readline (char *buff, const char *prompt) {
@@ -550,6 +566,11 @@ static void lua_initreadline (lua_State *L) {
       *name = "lua";
     l_readline = cast(l_readlineT, cast_func(dlsym(lib, "readline")));
     l_addhist = cast(l_addhistT, cast_func(dlsym(lib, "add_history")));
+#if defined(GRIT_POWER_READLINE_HISTORY)
+    l_readhist = cast(l_histfileT, cast_func(dlsym(lib, "read_history")));
+    l_writehist = cast(l_histfileT, cast_func(dlsym(lib, "write_history")));
+    l_trunchist = cast(l_histtruncT, cast_func(dlsym(lib, "history_truncate_file")));
+#endif
     if (l_readline != NULL)  /* could load readline function? */
       return;  /* everything ok */
     /* else emit a warning */
@@ -731,13 +752,24 @@ static void doREPL (lua_State *L) {
   int status;
   const char *oldprogname = progname;
 #if defined(GRIT_POWER_READLINE_HISTORY)
+  char history_buff[1024];
   const char *history_path = getenv(LUA_HISTORY);
-  if (history_path == NULL)  /* no environment variable? */
-    history_path = LUA_HISTORY_DEFAULT;  /* use default */
-  lua_readlinehistory(L, history_path);
+  if (history_path == NULL) {  /* no environment variable? */
+#if defined(_WIN32)
+    const char *home = getenv("USERPROFILE");
+#else
+    const char *home = getenv("HOME");
+#endif
+    history_path = LUA_HISTORY_DEFAULT;  /* in the current directory */
+    if (home != NULL && snprintf(history_buff, sizeof(history_buff), "%s/%s", home, LUA_HISTORY_DEFAULT) < (int)sizeof(history_buff))
+      history_path = history_buff;  /* in the home directory */
+  }
 #endif
   progname = NULL;  /* no 'progname' on errors in interactive mode */
   lua_initreadline(L);
+#if defined(GRIT_POWER_READLINE_HISTORY)
+  lua_readlinehistory(L, history_path);  /* (readline may load just above) */
+#endif
   while ((status = loadline(L)) != -1) {
     if (status == LUA_OK)
       status = docall(L, 0, LUA_MULTRET);

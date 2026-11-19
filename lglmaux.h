@@ -10,8 +10,8 @@
 #include "lua.h"
 #include "llimits.h"
 
-/* MAXNUMBER2STR for vector and matrix types. */
-#define LUAGLM_MAXNUMBER2STR	768
+/* MAXNUMBER2STR for vector and matrix types: a mat4 of 16 '%f' floats near -FLT_MAX needs ~790 bytes. */
+#define LUAGLM_MAXNUMBER2STR	1024
 
 /* Return the type string associated with the GLM value at idx. */
 LUAI_FUNC const char *luaglm_typename (lua_State *L, int idx);
@@ -109,26 +109,8 @@ LUAI_FUNC int luaglm_isinf (lua_State *L);
 LUAI_FUNC int luaglm_fma (lua_State *L);
 LUAI_FUNC int luaglm_frexp (lua_State *L);
 LUAI_FUNC int luaglm_ldexp (lua_State *L);
-#if LUAI_IS32INT
-/* LUAI_FUNC int luaglm_floatBitsToInt (lua_State *L); */
-/* LUAI_FUNC int luaglm_intBitsToFloat (lua_State *L); */
-/* LUAI_FUNC int luaglm_floatBitsToUint (lua_State *L); */
-/* LUAI_FUNC int luaglm_uintBitsToFloat (lua_State *L); */
-#endif
 
 /* 8.4. Floating-Point Pack and Unpack Functions */
-/* LUAI_FUNC int luaglm_packUnorm2x16 (lua_State *L); */
-/* LUAI_FUNC int luaglm_packSnorm2x16 (lua_State *L); */
-/* LUAI_FUNC int luaglm_packUnorm4x8 (lua_State *L); */
-/* LUAI_FUNC int luaglm_packSnorm4x8 (lua_State *L); */
-/* LUAI_FUNC int luaglm_unpackUnorm2x16 (lua_State *L); */
-/* LUAI_FUNC int luaglm_unpackSnorm2x16 (lua_State *L); */
-/* LUAI_FUNC int luaglm_unpackUnorm4x8 (lua_State *L); */
-/* LUAI_FUNC int luaglm_unpackSnorm4x8 (lua_State *L); */
-/* LUAI_FUNC int luaglm_packHalf2x16 (lua_State *L); */
-/* LUAI_FUNC int luaglm_unpackHalf2x16 (lua_State *L); */
-/* LUAI_FUNC int luaglm_packDouble2x32 (lua_State *L); */
-/* LUAI_FUNC int luaglm_unpackDouble2x32 (lua_State *L); */
 
 /* 8.5. Geometric Functions */
 LUAI_FUNC int luaglm_length (lua_State *L);
@@ -159,10 +141,6 @@ LUAI_FUNC int luaglm_all (lua_State *L);
 LUAI_FUNC int luaglm_not (lua_State *L);
 
 /* 8.8. Integer Functions */
-/* LUAI_FUNC int luaglm_uaddCarry (lua_State *L); */
-/* LUAI_FUNC int luaglm_usubBorrow (lua_State *L); */
-/* LUAI_FUNC int luaglm_umulExtended (lua_State *L); */
-/* LUAI_FUNC int luaglm_imulExtended (lua_State *L); */
 LUAI_FUNC int luaglm_bitfieldExtract (lua_State *L);
 LUAI_FUNC int luaglm_bitfieldInsert (lua_State *L);
 LUAI_FUNC int luaglm_bitfieldReverse (lua_State *L);
@@ -185,7 +163,6 @@ LUAI_FUNC int luaglm_angle (lua_State *L);
 LUAI_FUNC int luaglm_quat_axis (lua_State *L);
 LUAI_FUNC int luaglm_quat_for (lua_State *L);
 LUAI_FUNC int luaglm_slerp (lua_State *L);
-/* LUAI_FUNC int luaglm_squad (lua_State *L); */
 
 LUAI_FUNC int luaglm_translate (lua_State *L);
 LUAI_FUNC int luaglm_scale (lua_State *L);

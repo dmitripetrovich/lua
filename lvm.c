@@ -25,6 +25,7 @@
 #include "lgc.h"
 #include "lobject.h"
 #include "lglmcore.h"
+#include "lglmaux.h"
 #include "lopcodes.h"
 #include "lstate.h"
 #include "lstring.h"
@@ -50,7 +51,7 @@
 ** Prevent GCC -- or attempt to -- from optimizing the indirect jumps by sharing
 ** them between opcodes when using threaded code.
 */
-#if defined(LUA_USE_JUMPTABLE) && __has_attribute(optimize)
+#if LUA_USE_JUMPTABLE && __has_attribute(optimize)
   #define LUA_JUMPTABLE_ATTRIBUTE __attribute((optimize("no-crossjumping", "no-gcse")))
 #else
   #define LUA_JUMPTABLE_ATTRIBUTE
@@ -357,8 +358,8 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
     if (hres != HNOTATABLE) {  /* is 't' a table? */
       Table *h = hvalue(t);  /* save 't' table */
 #if defined(GRIT_POWER_IMPORT)
-      if (l_unlikely(isimported(h))) {
-        luaC_unimportkey(G(L), h, key);
+      if (l_unlikely(isimported(h)) && isimportkey(key)) {  /* (the fast path did no lookup) */
+        luaC_unimport(G(L), h);
         if (!isreadonly(h)) {
           hres = luaH_pset(h, key, val);
           if (hres == HOK) {
@@ -408,14 +409,10 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
     else {
       Table *h = hvalue(t);  /* next call can change the value at 't' */
 #if defined(GRIT_POWER_READONLY)
-      if (l_unlikely(isreadonly(h))) {
+      if (l_unlikely(isguardedkey(h, key))) {  /* as in 'luaV_fastset' */
         hres = HNOTFOUND;
-        continue;
+        continue;  /* the loop's start handles both cases */
       }
-#endif
-#if defined(GRIT_POWER_IMPORT)
-      if (l_unlikely(isimported(h)))
-        luaC_unimportkey(G(L), h, key);
 #endif
       hres = luaH_pset(h, key, val);
       if (hres == HOK) {
@@ -426,6 +423,52 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
     /* else 'return luaV_finishset(L, t, key, val, hres)' (loop) */
   }
   luaG_runerror(L, "'__newindex' chain too long; possible loop");
+}
+
+
+/*
+** Vectors and matrices are not tables, so table reads and writes reach
+** them only after the table fast path has missed. Their own fast paths
+** come first; the slow paths below call into 'luaV_finishget/set' for
+** metamethods, so the dispatch stays out of those functions.
+*/
+l_sinline int glmfastget (const TValue *t, const TValue *key, StkId res) {
+  if (ttisvector(t)) {
+    if (ttisinteger(key))
+      return lvec_fastgeti(t, ivalue(key), res);
+    if (ttisstring(key))
+      return lvec_fastgets(t, tsvalue(key), res);
+  }
+  else if (ttismatrix(t) && ttisinteger(key))
+    return lmat_fastgeti(t, ivalue(key), res);
+  return 0;
+}
+
+
+l_sinline int glmfastgeti (const TValue *t, lua_Integer n, StkId res) {
+  if (ttisvector(t))
+    return lvec_fastgeti(t, n, res);
+  if (ttismatrix(t))
+    return lmat_fastgeti(t, n, res);
+  return 0;
+}
+
+
+static void finishgetglm (lua_State *L, const TValue *t, TValue *key, StkId res, lu_byte tag) {
+  if (ttisvector(t))
+    lvec_get(L, t, key, res);
+  else if (ttismatrix(t))
+    lmat_get(L, t, key, res);
+  else
+    luaV_finishget(L, t, key, res, tag);
+}
+
+
+void luaV_finishsetglm (lua_State *L, const TValue *t, TValue *key, TValue *val, int hres) {
+  if (hres == HNOTATABLE && ttismatrix(t))
+    lmat_set(L, t, key, val);
+  else
+    luaV_finishset(L, t, key, val, hres);
 }
 
 
@@ -803,6 +846,100 @@ void luaV_concat (lua_State *L, int total) {
     L->top.p -= n - 1;  /* popped 'n' strings and pushed one */
   } while (total > 1);  /* repeat until only 1 result left */
 }
+
+
+#if defined(GRIT_POWER_INTERP)
+#if !defined(LUA_SANDBOX)
+/*
+** Address shown for a value without '__tostring' (as 'lua_topointer').
+*/
+static const void *objpointer (const TValue *o) {
+  switch (ttypetag(o)) {
+    case LUA_VLCF:
+      return cast_voidp(cast_sizet(fvalue(o)));
+    case LUA_VUSERDATA:
+      return getudatamem(uvalue(o));
+    case LUA_VLIGHTUSERDATA:
+      return pvalue(o);
+    default:
+      return iscollectable(o) ? gcvalue(o) : NULL;
+  }
+}
+#endif
+
+
+/*
+** OP_TOSTRING: convert R[A] to a string in place, as 'luaL_tolstring'
+** does, for string interpolation. Unlike 'string.format', it does not
+** depend on any global.
+*/
+void luaV_tostring (lua_State *L, StkId ra) {
+  ptrdiff_t res = savestack(L, ra);
+  const TValue *o = s2v(ra);
+  const TValue *tm = NULL;
+  Table *mt;
+  if (ttisstring(o))
+    return;
+  if (ttistable(o))
+    mt = hvalue(o)->metatable;
+  else if (ttisfulluserdata(o))
+    mt = uvalue(o)->metatable;
+  else
+    mt = G(L)->mt[ttype(o)];
+  if (mt != NULL)
+    tm = luaH_Hgetshortstr(mt, luaS_new(L, "__tostring"));
+  if (tm != NULL && !notm(tm)) {  /* call '__tostring(o)' */
+    StkId func = L->top.p;
+    setobj2s(L, func, tm);
+    setobj2s(L, func + 1, o);
+    L->top.p = func + 2;
+    luaD_call(L, func, 1);
+    ra = restorestack(L, res);
+    L->top.p--;
+    setobjs2s(L, ra, L->top.p);
+    if (ttisstring(s2v(ra)))
+      return;
+    if (!cvt2str(s2v(ra)))
+      luaG_runerror(L, "'__tostring' must return a string");
+    luaO_tostring(L, s2v(ra));
+  }
+  else if (cvt2str(o))  /* number or vector */
+    luaO_tostring(L, s2v(ra));
+  else if (ttisnil(o)) {
+    setsvalue2s(L, ra, luaS_newliteral(L, "nil"));
+  }
+  else if (ttisboolean(o)) {
+    setsvalue2s(L, ra, ttistrue(o) ? luaS_newliteral(L, "true") : luaS_newliteral(L, "false"));
+  }
+  else if (ttismatrix(o)) {
+    char buff[LUAGLM_MAXNUMBER2STR];
+    int len = lglm_tostr(o, buff, sizeof(buff));
+    setsvalue2s(L, ra, luaS_newlstr(L, buff, cast_sizet(len)));
+  }
+  else {
+    const char *kind = luaT_objtypename(L, o);
+#if defined(LUA_SANDBOX)  /* no addresses: an opaque id, as 'luaL_tolstring' */
+    char buff[64];
+    CallInfo *ci = L->ci;
+    ptrdiff_t citop = savestack(L, ci->top.p);
+    lua_Integer id;
+    luaD_checkstack(L, LUA_MINSTACK);
+    ci->top.p = L->top.p + LUA_MINSTACK;  /* room for the API calls */
+    lua_unlock(L);
+    id = lua_opaqueid(L, cast_int(restorestack(L, res) - ci->func.p));
+    lua_lock(L);
+    ci->top.p = restorestack(L, citop);
+    l_sprintf(buff, sizeof(buff), LUA_OPAQUEID_FMT, (LUAI_UACINT)id);
+    luaO_pushfstring(L, "%s: %s", kind, buff);
+#else
+    luaO_pushfstring(L, "%s: %p", kind, objpointer(o));
+#endif
+    ra = restorestack(L, res);
+    L->top.p--;
+    setobjs2s(L, ra, L->top.p);
+  }
+}
+#endif
 
 
 /*
@@ -1331,6 +1468,15 @@ static int resolveimport (lua_State *L, Proto *p, Import *im, const TValue *env,
     chain[i] = h;
     t = &v;
   }
+  /*
+  ** Cache only library-like leaves (functions, tables, userdata). A plain
+  ** value such as a counter or flag changes often, and every change would
+  ** clear all caches; such a site keeps the plain lookups instead.
+  */
+  if (!ttisfunction(&v) && !ttistable(&v) && !ttisfulluserdata(&v)) {
+    im->skip = 1;
+    return 0;
+  }
   for (i = 0; i < im->n; i++) {
     luaC_setimport(chain[i]);
     luaC_setimportkey(tsvalue(&p->k[im->k[i]]));
@@ -1622,69 +1768,36 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         TValue *upval = cl->upvals[GETARG_B(i)]->v.p;
         TValue *rc = KC(i);
         TString *key = tsvalue(rc);  /* key must be a short string */
-        if (ttisvector(upval)) {
-          if (l_unlikely(!lvec_fastgets(upval, key, ra)))
-            Protect(lvec_get(L, upval, rc, ra));
-        }
-        else {
-          lu_byte tag;
-          luaV_fastget(upval, key, s2v(ra), luaH_getshortstr, tag);
-          if (tagisempty(tag))
-            Protect(luaV_finishget(L, upval, rc, ra, tag));
-        }
+        lu_byte tag;
+        luaV_fastget(upval, key, s2v(ra), luaH_getshortstr, tag);
+        if (tagisempty(tag) && !glmfastget(upval, rc, ra))
+          Protect(finishgetglm(L, upval, rc, ra, tag));
         vmbreak;
       }
       vmcase(OP_GETTABLE) {
         StkId ra = RA(i);
         TValue *rb = vRB(i);
         TValue *rc = vRC(i);
-        if (ttisvector(rb)) {  /* fast track for integers / character indexing? */
-          if (ttisinteger(rc) && lvec_fastgeti(rb, ivalue(rc), ra)) { /* nothing */ }
-          else if (ttisstring(rc) && lvec_fastgets(rb, tsvalue(rc), ra)) { /* nothing */ }
-          else {
-            Protect(lvec_get(L, rb, rc, ra));
-          }
+        lu_byte tag;
+        if (ttisinteger(rc)) {  /* fast track for integers? */
+          luaV_fastgeti(rb, ivalue(rc), s2v(ra), tag);
         }
-        else if (ttismatrix(rb)) {  /* fast track for integers? */
-          if (ttisinteger(rc) && lmat_fastgeti(rb, ivalue(rc), ra)) { /* nothing */ }
-          else {
-            Protect(lmat_get(L, rb, rc, ra));
-          }
-        }
-        else {
-          lu_byte tag;
-          if (ttisinteger(rc)) {  /* fast track for integers? */
-            luaV_fastgeti(rb, ivalue(rc), s2v(ra), tag);
-          }
-          else
-            luaV_fastget(rb, rc, s2v(ra), luaH_get, tag);
-          if (tagisempty(tag))
-            Protect(luaV_finishget(L, rb, rc, ra, tag));
-        }
+        else
+          luaV_fastget(rb, rc, s2v(ra), luaH_get, tag);
+        if (tagisempty(tag) && !glmfastget(rb, rc, ra))
+          Protect(finishgetglm(L, rb, rc, ra, tag));
         vmbreak;
       }
       vmcase(OP_GETI) {
         StkId ra = RA(i);
         TValue *rb = vRB(i);
         int c = GETARG_C(i);
-        if (ttisvector(rb) || ttismatrix(rb)) {  /* fast track for integers? */
-          if (l_unlikely(!(ttisvector(rb) ? lvec_fastgeti(rb, c, ra) : lmat_fastgeti(rb, c, ra)))) {
-            TValue key;
-            setivalue(&key, c);
-            if (ttisvector(rb))
-              Protect(lvec_get(L, rb, &key, ra));
-            else
-              Protect(lmat_get(L, rb, &key, ra));
-          }
-        }
-        else {
-          lu_byte tag;
-          luaV_fastgeti(rb, c, s2v(ra), tag);
-          if (tagisempty(tag)) {
-            TValue key;
-            setivalue(&key, c);
-            Protect(luaV_finishget(L, rb, &key, ra, tag));
-          }
+        lu_byte tag;
+        luaV_fastgeti(rb, c, s2v(ra), tag);
+        if (tagisempty(tag) && !glmfastgeti(rb, c, ra)) {
+          TValue key;
+          setivalue(&key, c);
+          Protect(finishgetglm(L, rb, &key, ra, tag));
         }
         vmbreak;
       }
@@ -1693,16 +1806,10 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         TValue *rb = vRB(i);
         TValue *rc = KC(i);
         TString *key = tsvalue(rc);  /* key must be a short string */
-        if (ttisvector(rb)) {
-          if (l_unlikely(!lvec_fastgets(rb, key, ra)))
-            Protect(lvec_get(L, rb, rc, ra));
-        }
-        else {
-          lu_byte tag;
-          luaV_fastget(rb, key, s2v(ra), luaH_getshortstr, tag);
-          if (tagisempty(tag))
-            Protect(luaV_finishget(L, rb, rc, ra, tag));
-        }
+        lu_byte tag;
+        luaV_fastget(rb, key, s2v(ra), luaH_getshortstr, tag);
+        if (tagisempty(tag) && !glmfastget(rb, rc, ra))
+          Protect(finishgetglm(L, rb, rc, ra, tag));
         vmbreak;
       }
       vmcase(OP_SETTABUP) {
@@ -1711,7 +1818,7 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         TValue *rb = KB(i);
         TValue *rc = RKC(i);
         TString *key = tsvalue(rb);  /* key must be a short string */
-        luaV_fastset(upval, key, rc, hres, luaH_psetshortstr);
+        luaV_fastsetstr(upval, key, rc, hres, luaH_psetshortstr);
         if (hres == HOK)
           luaV_finishfastset(L, upval, rc);
         else
@@ -1723,20 +1830,16 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         int hres;
         TValue *rb = vRB(i);  /* key (table is in 'ra') */
         TValue *rc = RKC(i);  /* value */
-        if (ttismatrix(s2v(ra)))
-          Protect(lmat_set(L, s2v(ra), rb, rc));
-        else {
-          if (ttisinteger(rb)) {  /* fast track for integers? */
-            luaV_fastseti(s2v(ra), ivalue(rb), rc, hres);
-          }
-          else {
-            luaV_fastset(s2v(ra), rb, rc, hres, luaH_pset);
-          }
-          if (hres == HOK)
-            luaV_finishfastset(L, s2v(ra), rc);
-          else
-            Protect(luaV_finishset(L, s2v(ra), rb, rc, hres));
+        if (ttisinteger(rb)) {  /* fast track for integers? */
+          luaV_fastseti(s2v(ra), ivalue(rb), rc, hres);
         }
+        else {
+          luaV_fastset(s2v(ra), rb, rc, hres, luaH_pset);
+        }
+        if (hres == HOK)
+          luaV_finishfastset(L, s2v(ra), rc);
+        else
+          Protect(luaV_finishsetglm(L, s2v(ra), rb, rc, hres));
         vmbreak;
       }
       vmcase(OP_SETI) {
@@ -1744,17 +1847,13 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         int hres;
         int b = GETARG_B(i);
         TValue *rc = RKC(i);
-        if (ttismatrix(s2v(ra)))
-          Protect(lmat_seti(L, s2v(ra), b, rc));
+        luaV_fastseti(s2v(ra), b, rc, hres);
+        if (hres == HOK)
+          luaV_finishfastset(L, s2v(ra), rc);
         else {
-          luaV_fastseti(s2v(ra), b, rc, hres);
-          if (hres == HOK)
-            luaV_finishfastset(L, s2v(ra), rc);
-          else {
-            TValue key;
-            setivalue(&key, b);
-            Protect(luaV_finishset(L, s2v(ra), &key, rc, hres));
-          }
+          TValue key;
+          setivalue(&key, b);
+          Protect(luaV_finishsetglm(L, s2v(ra), &key, rc, hres));
         }
         vmbreak;
       }
@@ -1764,7 +1863,7 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         TValue *rb = KB(i);
         TValue *rc = RKC(i);
         TString *key = tsvalue(rb);  /* key must be a short string */
-        luaV_fastset(s2v(ra), key, rc, hres, luaH_psetshortstr);
+        luaV_fastsetstr(s2v(ra), key, rc, hres, luaH_psetshortstr);
         if (hres == HOK)
           luaV_finishfastset(L, s2v(ra), rc);
         else
@@ -1799,15 +1898,9 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         TValue *rc = KC(i);
         TString *key = tsvalue(rc);  /* key must be a short string */
         setobj2s(L, ra + 1, rb);
-        if (ttisvector(rb)) {
-          if (l_unlikely(!lvec_fastgets(rb, key, ra)))
-            Protect(lvec_get(L, rb, rc, ra));
-        }
-        else {
-          luaV_fastget(rb, key, s2v(ra), luaH_getshortstr, tag);
-          if (tagisempty(tag))
-            Protect(luaV_finishget(L, rb, rc, ra, tag));
-        }
+        luaV_fastget(rb, key, s2v(ra), luaH_getshortstr, tag);
+        if (tagisempty(tag) && !glmfastget(rb, rc, ra))
+          Protect(finishgetglm(L, rb, rc, ra, tag));
         vmbreak;
       }
       vmcase(OP_ADDI) {
@@ -2013,6 +2106,16 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
         checkGC(L, L->top.p); /* 'luaV_concat' ensures correct top */
         vmbreak;
       }
+#if defined(GRIT_POWER_INTERP)
+      vmcase(OP_TOSTRING) {
+        StkId ra = RA(i);
+        if (!ttisstring(s2v(ra))) {
+          Protect(luaV_tostring(L, ra));
+          checkGC(L, ra + 1);
+        }
+        vmbreak;
+      }
+#endif
       vmcase(OP_CLOSE) {
         StkId ra = RA(i);
         lua_assert(!GETARG_B(i));  /* 'close must be alive */
@@ -2438,7 +2541,7 @@ LUA_JUMPTABLE_ATTRIBUTE void luaV_execute (lua_State *L, CallInfo *ci) {
           setobj2s(L, ra, &im->value);
           pc += im->n;
         }
-        else if (resolveimport(L, cl->p, im, env, ra))
+        else if (!im->skip && resolveimport(L, cl->p, im, env, ra))
           pc += im->n;
         vmbreak;
       }

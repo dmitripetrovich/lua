@@ -129,10 +129,18 @@ LUALIB_API int (luaL_getsubtable) (lua_State *L, int idx, const char *fname);
 LUALIB_API void (luaL_traceback) (lua_State *L, lua_State *L1,
                                   const char *msg, int level);
 
+/*
+** luaL_hooksteps charges 'n' steps of a long loop to the hook/budget once
+** every LUAL_HOOKSTEPS of them; '*steps' (a size_t) accumulates them.
+*/
 #if defined(GRIT_POWER_CHECKHOOK) || defined(GRIT_POWER_BUDGET)
 LUALIB_API void (luaL_checkhook) (lua_State *L, lua_Unsigned steps);
+#define luaL_checkhook(L,steps)	(luaL_checkhook)(L, (lua_Unsigned)(steps))
+#define LUAL_HOOKSTEPS	1024
+#define luaL_hooksteps(L,steps,n)	((*(steps) += (n)) >= LUAL_HOOKSTEPS ? (luaL_checkhook(L, *(steps)), *(steps) = 0, (void)0) : (void)0)
 #else
 #define luaL_checkhook(L,steps)	((void)(L), (void)(steps))
+#define luaL_hooksteps(L,steps,n)	((void)(L), (void)(steps), (void)(n))
 #endif
 
 LUALIB_API void (luaL_requiref) (lua_State *L, const char *modname,

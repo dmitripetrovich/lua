@@ -77,7 +77,6 @@ LUAI_FUNC int lmat_rawget (const TValue *obj, TValue *key, StkId res);
 LUAI_FUNC void lmat_rawset (lua_State *L, const TValue *obj, TValue *key, TValue *val);
 LUAI_FUNC void lmat_get (lua_State *L, const TValue *obj, TValue *key, StkId res);
 LUAI_FUNC void lmat_set (lua_State *L, const TValue *obj, TValue *key, TValue *val);
-LUAI_FUNC void lmat_seti (lua_State *L, const TValue *obj, lua_Integer key, TValue *val);
 LUAI_FUNC void lmat_len (const TValue *obj, StkId res);
 LUAI_FUNC int lmat_next (const TValue *obj, StkId key);
 

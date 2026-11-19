@@ -339,6 +339,7 @@ static void loadImports (LoadState *S, Proto *f) {
   for (i = 0; i < n; i++) {
     f->imports[i].env = NULL;
     f->imports[i].epoch = 0;
+    f->imports[i].skip = 0;
     setnilvalue(&f->imports[i].value);
   }
   for (i = 0; i < n; i++) {
@@ -429,10 +430,72 @@ static void checkHeader (LoadState *S) {
 /*
 ** Load precompiled chunk.
 */
-LClosure *luaU_undump (lua_State *L, ZIO *Z, Table *anchor, const char *name,
-                       int fixed) {
+#if defined(GRIT_POWER_UNDUMPHOOK)
+typedef struct HookChunk {
+  const char *s;
+  size_t size;
+} HookChunk;
+
+
+static const char *hookreader (lua_State *L, void *ud, size_t *size) {
+  HookChunk *c = cast(HookChunk *, ud);
+  UNUSED(L);
+  if (c->size == 0)
+    return NULL;
+  *size = c->size;
+  c->size = 0;
+  return c->s;
+}
+
+
+/*
+** Read the whole chunk into 'buff' (signature byte included) so that the
+** hook sees every byte, then load from that copy through 'mz'.
+*/
+static void checkundumphook (LoadState *S, Mbuffer *buff, ZIO *mz, HookChunk *c) {
+  lua_State *L = S->L;
+  ZIO *Z = S->Z;
+  size_t len = 1;
+  luaZ_resizebuffer(L, buff, LUAI_MAXSHORTLEN);
+  luaZ_buffer(buff)[0] = LUA_SIGNATURE[0];  /* (already read) */
+  for (;;) {
+    if (Z->n == 0) {
+      if (luaZ_fill(Z) == EOZ)
+        break;
+      Z->n++;  /* give back the character 'luaZ_fill' took */
+      Z->p--;
+    }
+    if (Z->n > luaZ_sizebuffer(buff) - len) {
+      if (Z->n > MAX_SIZE / 2 - len)
+        error(S, "chunk too large");
+      luaZ_resizebuffer(L, buff, (len + Z->n) * 2);
+    }
+    memcpy(luaZ_buffer(buff) + len, Z->p, Z->n);
+    len += Z->n;
+    Z->p += Z->n;
+    Z->n = 0;
+  }
+  if (!pUndumpHook(luaZ_buffer(buff), len))
+    error(S, "forbidden");
+  c->s = luaZ_buffer(buff) + 1;
+  c->size = len - 1;
+  luaZ_init(L, mz, hookreader, c);
+  S->Z = mz;
+  S->fixed = 0;  /* the copy dies after loading: strings must not point into it */
+}
+#endif
+
+
+LClosure *luaU_undump (lua_State *L, ZIO *Z, Mbuffer *buff, Table *anchor,
+                       const char *name, int fixed) {
   LoadState S;
   LClosure *cl;
+#if defined(GRIT_POWER_UNDUMPHOOK)
+  ZIO mz;
+  HookChunk chunk;
+#else
+  UNUSED(buff);
+#endif
   if (*name == '@' || *name == '=')
     name = name + 1;
   else if (*name == LUA_SIGNATURE[0])
@@ -443,8 +506,8 @@ LClosure *luaU_undump (lua_State *L, ZIO *Z, Table *anchor, const char *name,
   S.fixed = cast_byte(fixed);
   S.offset = 1;  /* fist byte was already read */
 #if defined(GRIT_POWER_UNDUMPHOOK)
-  if (pUndumpHook && !pUndumpHook(Z->p, Z->n))
-    error(&S, "forbidden");
+  if (pUndumpHook != NULL)
+    checkundumphook(&S, buff, &mz, &chunk);
 #endif
   checkHeader(&S);
   S.h = anchor;
